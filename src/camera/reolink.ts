@@ -120,16 +120,33 @@ function num(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
 
+/**
+ * Build a query string the way a URL bar would, not the way a form would.
+ *
+ * `URLSearchParams` serialises as application/x-www-form-urlencoded, which
+ * escapes characters that are perfectly legal in a query — `!` becomes `%21`.
+ * A server that percent-decodes its parameters cannot tell the difference; this
+ * camera evidently does not, so a password of `F4cptbz5!` was being sent as
+ * `F4cptbz5%21` and rejected. Which is worse than it sounds: the camera counts
+ * failed logins and locks the account.
+ *
+ * `encodeURIComponent` leaves `!`, `'`, `(`, `)`, `*`, `-`, `.`, `_` and `~`
+ * alone — exactly the set a shell would pass through to curl, which is the
+ * request that was proved to work. Anything genuinely reserved is still
+ * escaped, because it has to be.
+ */
+function query(params: Record<string, string>): string {
+  return Object.entries(params)
+    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+    .join('&');
+}
+
 function apiUrl(config: CameraConfig, creds: CameraCredentials, params: Record<string, string> = {}): string {
   const base = normaliseCameraUrl(config.url);
-  const u = new URL(`${base}/cgi-bin/api.cgi`);
   // Credentials go in the query string rather than a token, because obtaining a
   // token means reading a Login reply — which is exactly what we may not be
   // able to do. Every command accepts user/password directly.
-  u.searchParams.set('user', creds.user);
-  u.searchParams.set('password', creds.password);
-  for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
-  return u.toString();
+  return `${base}/cgi-bin/api.cgi?${query({ user: creds.user, password: creds.password, ...params })}`;
 }
 
 /** A still image, as a URL an <img> can load from any origin. */

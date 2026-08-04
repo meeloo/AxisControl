@@ -87,6 +87,8 @@ export class CameraPanel extends PanelElement {
   private shownSeq = -1;
   /** Consecutive frame failures; reset by any frame that arrives. */
   private frameErrors = 0;
+  /** Set when polling has been given up on, with the reason. Null while running. */
+  private stalled: string | null = null;
 
   // --- Live video ---------------------------------------------------------
   private video: VideoSession | null = null;
@@ -191,6 +193,8 @@ export class CameraPanel extends PanelElement {
       this.live = true;
       this.showSetup = false;
       this.showPassword = false;
+      this.stalled = null;
+      this.frameErrors = 0;
       void this.startStream();
     } catch (err) {
       this.error = (err as Error).message;
@@ -417,11 +421,24 @@ export class CameraPanel extends PanelElement {
     };
     img.onerror = () => {
       // A dropped frame is not a failure — cameras hiccup, and retrying is
-      // right. But retrying silently forever is how a black rectangle comes
-      // to mean both "night" and "the camera died half an hour ago", so once
-      // it is clearly not a hiccup, say so.
+      // right. But retrying forever is worse than useless here, because an
+      // <img> cannot tell "the camera is busy" from "your password is wrong",
+      // and a wrong password retried several times a second is how a Reolink
+      // locks the account: rspCode -506, and then nothing works for minutes,
+      // including from anywhere else.
+      //
+      // So a few retries for a hiccup, and then stop and wait to be told to
+      // try again.
       this.frameErrors++;
-      if (this.frameErrors === FRAME_ERROR_LIMIT) this.requestUpdate();
+      if (this.frameErrors >= FRAME_ERROR_LIMIT) {
+        this.stopStream();
+        this.stalled =
+          'No frames from the camera. Polling has stopped — a camera that is refusing ' +
+          'this user and password counts the attempts and locks the account, so retrying ' +
+          'on its own would make it worse. Check the settings, then press Retry.';
+        this.requestUpdate();
+        return;
+      }
       this.reschedule(img, index, started, true);
     };
     img.src = this.frameUrl();
@@ -482,7 +499,7 @@ export class CameraPanel extends PanelElement {
   protected override updated(): void {
     // The <img> pair only exists once a camera is live, so the stream cannot be
     // started before the first render that includes them.
-    if (this.live && !this.streaming && !this.usingVideo && !this.startingStream && !this.config.stream) {
+    if (this.live && !this.stalled && !this.streaming && !this.usingVideo && !this.startingStream && !this.config.stream) {
       void this.startStream();
     }
   }
@@ -1340,8 +1357,23 @@ export class CameraPanel extends PanelElement {
                 <img class="cam-frame showing" alt="Camera" draggable="false" />
                 <img class="cam-frame" alt="" draggable="false" />
                 <img class="cam-frame" alt="" draggable="false" />
-                ${this.frameErrors >= FRAME_ERROR_LIMIT
-                  ? html`<span class="cam-stale">No frames from the camera</span>`
+                ${this.stalled
+                  ? html`
+                      <div class="cam-stalled">
+                        <span>${this.stalled}</span>
+                        <button
+                          class="tiny"
+                          @click=${() => {
+                            this.stalled = null;
+                            this.frameErrors = 0;
+                            this.requestUpdate();
+                            void this.startStream();
+                          }}
+                        >
+                          Retry
+                        </button>
+                      </div>
+                    `
                   : nothing}
               `
             : html`<span class="hint">${this.busy ? 'Looking for the camera…' : 'Not connected'}</span>`}

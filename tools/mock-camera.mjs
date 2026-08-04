@@ -78,7 +78,7 @@ try {
 }
 
 const USER = 'admin';
-const PASSWORD = 'cnc';
+let PASSWORD = process.env.MOCK_PASSWORD ?? 'cnc';
 
 /** Mutable camera state, so a command can be seen to have had an effect. */
 const state = {
@@ -106,6 +106,8 @@ const state = {
 };
 
 let frame = 0;
+/** Snapshot requests served or refused, so a client's retrying can be counted. */
+let snapCount = 0;
 
 function cors(res) {
   if (!CORS) return;
@@ -121,8 +123,37 @@ function sendJson(res, body) {
   res.end(text);
 }
 
+/**
+ * Authenticate against the *raw* query, not the decoded one.
+ *
+ * This is the camera's behaviour and it matters: `URLSearchParams` escapes `!`
+ * as `%21`, which a decoding server would accept and this one does not. A mock
+ * that decodes accepts both spellings, hides the difference, and the bug ships
+ * — as it did, and then locked the account.
+ */
+function rawParam(url, name) {
+  const match = new RegExp(`[?&]${name}=([^&]*)`).exec(url.search);
+  return match ? match[1] : null;
+}
+
+/**
+ * Failed logins are counted, and too many lock the account for a while, which
+ * is exactly what a client that retries a bad password forever discovers.
+ */
+const auth = { failures: 0, lockedUntil: 0 };
+const LOCK_AFTER = 5;
+const LOCK_MS = 60_000;
+
 function authOk(url) {
-  return url.searchParams.get('user') === USER && url.searchParams.get('password') === PASSWORD;
+  if (Date.now() < auth.lockedUntil) return false;
+  const ok = rawParam(url, 'user') === USER && rawParam(url, 'password') === PASSWORD;
+  if (ok) {
+    auth.failures = 0;
+  } else if (++auth.failures >= LOCK_AFTER) {
+    auth.lockedUntil = Date.now() + LOCK_MS;
+    console.log('  [mock] account locked after repeated bad credentials');
+  }
+  return ok;
 }
 
 /**
@@ -347,8 +378,19 @@ const server = createServer(async (req, res) => {
     return res.end();
   }
 
+  if (url.searchParams.get('cmd') === 'Snap') snapCount++;
+
   // A debug hook for the test harness: what has the camera actually been told?
   if (url.pathname === '/_state') {
+    state.authFailures = auth.failures;
+    state.snaps = snapCount;
+    // Change the password out from under a running client, which is what
+    // happens in the field when someone edits the credentials on a live panel.
+    if (url.searchParams.has('password')) {
+      PASSWORD = url.searchParams.get('password');
+      auth.failures = 0;
+      auth.lockedUntil = 0;
+    }
     if (url.searchParams.has('reset')) {
       state.log = [];
       state.commands = [];
@@ -432,4 +474,5 @@ const server = createServer(async (req, res) => {
 server.listen(PORT, () => {
   console.log(`mock camera on http://localhost:${PORT} (${CORS ? 'CORS enabled → readable' : 'no CORS → blind'})`);
   console.log(`  user "${USER}" password "${PASSWORD}"`);
+  console.log('  credentials are compared raw — %21 is not ! here, exactly as the real one');
 });

@@ -82,13 +82,20 @@ async function loadPlayer(): Promise<MpegtsModule> {
 export function flvUrl(config: CameraConfig, creds: CameraCredentials): string {
   const base = normaliseCameraUrl(config.url);
   const stream = `channel${config.channel}_${config.quality === 'sub' ? 'sub' : 'main'}.bcs`;
-  const u = new URL(`${base}/flv`);
-  u.searchParams.set('port', '1935');
-  u.searchParams.set('app', 'bcs');
-  u.searchParams.set('stream', stream);
-  u.searchParams.set('user', creds.user);
-  u.searchParams.set('password', creds.password);
-  return u.toString();
+  // Hand-built for the same reason as the API URL: URLSearchParams escapes
+  // characters the camera does not decode, and a password containing `!`
+  // arrives wrong — as failed logins, which this camera counts.
+  const params: Record<string, string> = {
+    port: '1935',
+    app: 'bcs',
+    stream,
+    user: creds.user,
+    password: creds.password,
+  };
+  const q = Object.entries(params)
+    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+    .join('&');
+  return `${base}/flv?${q}`;
 }
 
 export interface VideoSession {
