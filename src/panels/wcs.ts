@@ -18,7 +18,8 @@ import { html, nothing, type TemplateResult } from 'lit';
 import { PanelElement, registerPanel } from '../ui/panel.js';
 import { actions, capabilities, connected, machine } from '../core/store.js';
 import { fixed } from '../core/util.js';
-import { empty } from '../ui/widgets.js';
+import { empty, numberField } from '../ui/widgets.js';
+import { fromAxis } from '../ui/capture.js';
 import { loadWcsNames, saveWcsNames, wcsCode, type WcsNames } from '../wcs/names.js';
 
 export class WcsPanel extends PanelElement {
@@ -213,32 +214,8 @@ export class WcsPanel extends PanelElement {
               <em>° ccw</em>
             </span>
           </label>
-          <label class="param">
-            <span class="param-label">Pivot X</span>
-            <span class="param-input">
-              <input
-                type="number"
-                step="any"
-                .value=${String(this.rotCentreX)}
-                @change=${(e: Event) =>
-                  (this.rotCentreX = Number((e.target as HTMLInputElement).value))}
-              />
-              <em>mm</em>
-            </span>
-          </label>
-          <label class="param">
-            <span class="param-label">Pivot Y</span>
-            <span class="param-input">
-              <input
-                type="number"
-                step="any"
-                .value=${String(this.rotCentreY)}
-                @change=${(e: Event) =>
-                  (this.rotCentreY = Number((e.target as HTMLInputElement).value))}
-              />
-              <em>mm</em>
-            </span>
-          </label>
+          ${numberField('Pivot X', this.rotCentreX, (v) => ((this.rotCentreX = v), this.requestUpdate()), { suffix: 'mm', capture: fromAxis('X', 'work') })}
+          ${numberField('Pivot Y', this.rotCentreY, (v) => ((this.rotCentreY = v), this.requestUpdate()), { suffix: 'mm', capture: fromAxis('Y', 'work') })}
         </div>
         <div class="wcs-foot">
           <button

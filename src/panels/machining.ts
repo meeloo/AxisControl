@@ -8,6 +8,7 @@ import { html, nothing, type TemplateResult } from 'lit';
 import { PanelElement, registerPanel } from '../ui/panel.js';
 import { connected, machine } from '../core/store.js';
 import { checkField, numberField, selectField } from '../ui/widgets.js';
+import { fromAxis, fromDepthBelow, fromRadiusAround } from '../ui/capture.js';
 import { preview, saveAndRun } from '../ui/program.js';
 import {
   circle,
@@ -180,20 +181,20 @@ export class MachiningPanel extends PanelElement {
   private renderParams(): TemplateResult {
     const tool = html`
       ${numberField('Tool ⌀', this.toolDiameter, (v) => ((this.toolDiameter = v), this.requestUpdate()), { suffix: 'mm', step: 0.1 })}
-      ${numberField('Z top', this.zTop, (v) => ((this.zTop = v), this.requestUpdate()), { suffix: 'mm', title: 'Top of the material in work coordinates — 0 after probing.' })}
-      ${numberField('Depth', this.depth, (v) => ((this.depth = v), this.requestUpdate()), { suffix: 'mm' })}
+      ${numberField('Z top', this.zTop, (v) => ((this.zTop = v), this.requestUpdate()), { suffix: 'mm', title: 'Top of the material in work coordinates — 0 after probing.', capture: fromAxis('Z', 'work') })}
+      ${numberField('Depth', this.depth, (v) => ((this.depth = v), this.requestUpdate()), { suffix: 'mm', title: 'How far below Z top to cut. The crosshair takes it from where the tool is standing now, so you can jog down to depth instead of working it out.', capture: fromDepthBelow(() => this.zTop) })}
       ${numberField('Per pass', this.depthPerPass, (v) => ((this.depthPerPass = v), this.requestUpdate()), { suffix: 'mm' })}
       ${numberField('Feed', this.feedRate, (v) => ((this.feedRate = v), this.requestUpdate()), { suffix: 'mm/min' })}
       ${numberField('Plunge', this.plungeFeed, (v) => ((this.plungeFeed = v), this.requestUpdate()), { suffix: 'mm/min' })}
       ${numberField('RPM', this.rpm, (v) => ((this.rpm = v), this.requestUpdate()))}
-      ${numberField('Safe Z', this.safeZ, (v) => ((this.safeZ = v), this.requestUpdate()), { suffix: 'mm' })}
+      ${numberField('Safe Z', this.safeZ, (v) => ((this.safeZ = v), this.requestUpdate()), { suffix: 'mm', capture: fromAxis('Z', 'work') })}
     `;
 
     const rect = html`
-      ${numberField('X0', this.x0, (v) => ((this.x0 = v), this.requestUpdate()), { suffix: 'mm' })}
-      ${numberField('Y0', this.y0, (v) => ((this.y0 = v), this.requestUpdate()), { suffix: 'mm' })}
-      ${numberField('X1', this.x1, (v) => ((this.x1 = v), this.requestUpdate()), { suffix: 'mm' })}
-      ${numberField('Y1', this.y1, (v) => ((this.y1 = v), this.requestUpdate()), { suffix: 'mm' })}
+      ${numberField('X0', this.x0, (v) => ((this.x0 = v), this.requestUpdate()), { suffix: 'mm', capture: fromAxis('X', 'work') })}
+      ${numberField('Y0', this.y0, (v) => ((this.y0 = v), this.requestUpdate()), { suffix: 'mm', capture: fromAxis('Y', 'work') })}
+      ${numberField('X1', this.x1, (v) => ((this.x1 = v), this.requestUpdate()), { suffix: 'mm', capture: fromAxis('X', 'work') })}
+      ${numberField('Y1', this.y1, (v) => ((this.y1 = v), this.requestUpdate()), { suffix: 'mm', capture: fromAxis('Y', 'work') })}
     `;
 
     const tabsForm = html`
@@ -243,9 +244,9 @@ export class MachiningPanel extends PanelElement {
         `;
       case 'circle':
         return html`
-          ${numberField('Centre X', this.cx, (v) => ((this.cx = v), this.requestUpdate()), { suffix: 'mm' })}
-          ${numberField('Centre Y', this.cy, (v) => ((this.cy = v), this.requestUpdate()), { suffix: 'mm' })}
-          ${numberField('Diameter', this.diameter, (v) => ((this.diameter = v), this.requestUpdate()), { suffix: 'mm' })}
+          ${numberField('Centre X', this.cx, (v) => ((this.cx = v), this.requestUpdate()), { suffix: 'mm', capture: fromAxis('X', 'work') })}
+          ${numberField('Centre Y', this.cy, (v) => ((this.cy = v), this.requestUpdate()), { suffix: 'mm', capture: fromAxis('Y', 'work') })}
+          ${numberField('Diameter', this.diameter, (v) => ((this.diameter = v), this.requestUpdate()), { suffix: 'mm', title: 'The crosshair measures out from the centre above, so you can jog to the edge and take the diameter from there.', capture: fromRadiusAround(() => ({ x: this.cx, y: this.cy })) })}
           ${checkField('Clear the pocket', this.pocket, (v) => ((this.pocket = v), this.requestUpdate()))}
           ${this.pocket
             ? numberField('Stepover', this.stepover * 100, (v) => ((this.stepover = v / 100), this.requestUpdate()), { suffix: '%', min: 5, max: 100 })
@@ -265,8 +266,8 @@ export class MachiningPanel extends PanelElement {
             { value: 'line', label: 'Line' },
             { value: 'bolt', label: 'Bolt circle' },
           ], (v) => ((this.drillPatternId = v), this.requestUpdate()))}
-          ${numberField(this.drillPatternId === 'bolt' ? 'Centre X' : 'X0', this.x0, (v) => ((this.x0 = v), this.requestUpdate()), { suffix: 'mm' })}
-          ${numberField(this.drillPatternId === 'bolt' ? 'Centre Y' : 'Y0', this.y0, (v) => ((this.y0 = v), this.requestUpdate()), { suffix: 'mm' })}
+          ${numberField(this.drillPatternId === 'bolt' ? 'Centre X' : 'X0', this.x0, (v) => ((this.x0 = v), this.requestUpdate()), { suffix: 'mm', capture: fromAxis('X', 'work') })}
+          ${numberField(this.drillPatternId === 'bolt' ? 'Centre Y' : 'Y0', this.y0, (v) => ((this.y0 = v), this.requestUpdate()), { suffix: 'mm', capture: fromAxis('Y', 'work') })}
           ${this.drillPatternId === 'grid'
             ? html`
                 ${numberField('Columns', this.countX, (v) => ((this.countX = v), this.requestUpdate()), { min: 1, step: 1 })}
@@ -277,19 +278,19 @@ export class MachiningPanel extends PanelElement {
             : nothing}
           ${this.drillPatternId === 'line'
             ? html`
-                ${numberField('X1', this.x1, (v) => ((this.x1 = v), this.requestUpdate()), { suffix: 'mm' })}
-                ${numberField('Y1', this.y1, (v) => ((this.y1 = v), this.requestUpdate()), { suffix: 'mm' })}
+                ${numberField('X1', this.x1, (v) => ((this.x1 = v), this.requestUpdate()), { suffix: 'mm', capture: fromAxis('X', 'work') })}
+                ${numberField('Y1', this.y1, (v) => ((this.y1 = v), this.requestUpdate()), { suffix: 'mm', capture: fromAxis('Y', 'work') })}
                 ${numberField('Holes', this.holeCount, (v) => ((this.holeCount = v), this.requestUpdate()), { min: 1, step: 1, title: 'Including both ends.' })}
               `
             : nothing}
           ${this.drillPatternId === 'bolt'
             ? html`
-                ${numberField('Circle ⌀', this.boltDiameter, (v) => ((this.boltDiameter = v), this.requestUpdate()), { suffix: 'mm' })}
+                ${numberField('Circle ⌀', this.boltDiameter, (v) => ((this.boltDiameter = v), this.requestUpdate()), { suffix: 'mm', title: 'Diameter of the bolt circle. The crosshair measures out from the centre above — jog to one hole and take it.', capture: fromRadiusAround(() => ({ x: this.x0, y: this.y0 })) })}
                 ${numberField('Holes', this.holeCount, (v) => ((this.holeCount = v), this.requestUpdate()), { min: 1, step: 1 })}
                 ${numberField('First at', this.startAngle, (v) => ((this.startAngle = v), this.requestUpdate()), { suffix: '\u00b0', title: 'Angle of the first hole, measured anticlockwise from +X.' })}
               `
             : nothing}
-          ${numberField('Retract', this.retract, (v) => ((this.retract = v), this.requestUpdate()), { suffix: 'mm', title: 'Height each peck pulls back to. Must clear the stock top to actually clear the flutes.' })}
+          ${numberField('Retract', this.retract, (v) => ((this.retract = v), this.requestUpdate()), { suffix: 'mm', title: 'Height each peck pulls back to. Must clear the stock top to actually clear the flutes.', capture: fromAxis('Z', 'work') })}
           ${numberField('Dwell', this.dwellAtBottom, (v) => ((this.dwellAtBottom = v), this.requestUpdate()), { suffix: 's', min: 0, title: 'Pause at full depth on the last peck, for a clean hole bottom.' })}
           ${tool}
           <div class="param-note">

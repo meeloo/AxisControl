@@ -36,6 +36,7 @@ import {
   saveSetting,
 } from '../core/store.js';
 import { checkField, numberField, selectField, textField } from '../ui/widgets.js';
+import { fromAxis } from '../ui/capture.js';
 import { formatBytes } from '../core/util.js';
 import {
   defaultAtcConfig,
@@ -96,12 +97,6 @@ export class AtcPanel extends PanelElement {
     this.edited = true;
     saveSetting('atcConfig', this.config);
     this.requestUpdate();
-  }
-
-  /** Machine coordinate of an axis right now, or null if it has none. */
-  private at(letter: string): number | null {
-    const a = machine.peek().axes.find((ax) => ax.letter === letter);
-    return a ? Math.round(a.machine * 1000) / 1000 : null;
   }
 
   // --- Reading the machine ------------------------------------------------
@@ -316,13 +311,8 @@ export class AtcPanel extends PanelElement {
               ],
               (v) => this.patch({ direction: Number(v) < 0 ? -1 : 1 }),
             )}
-            ${numberField('Pocket 1 X', c.originX, (v) => this.patch({ originX: v }), { suffix: 'mm', step: 0.1, title: 'Machine coordinate of the centre of the first pocket.' })}
-            ${numberField('Pocket 1 Y', c.originY, (v) => this.patch({ originY: v }), { suffix: 'mm', step: 0.1 })}
-            ${this.captureButton('Take pocket 1 XY from the current position', () => {
-              const x = this.at('X');
-              const y = this.at('Y');
-              if (x != null && y != null) this.patch({ originX: x, originY: y });
-            })}
+            ${numberField('Pocket 1 X', c.originX, (v) => this.patch({ originX: v }), { suffix: 'mm', step: 0.1, title: 'Machine coordinate of the centre of the first pocket.', capture: fromAxis('X', 'machine') })}
+            ${numberField('Pocket 1 Y', c.originY, (v) => this.patch({ originY: v }), { suffix: 'mm', step: 0.1, capture: fromAxis('Y', 'machine') })}
           `,
         )}
 
@@ -334,21 +324,17 @@ export class AtcPanel extends PanelElement {
               this.patch({ retractZ: v ? null : (zMax ?? 0) }),
             )}
             ${c.retractZ !== null
-              ? numberField('Retract Z', c.retractZ, (v) => this.patch({ retractZ: v }), { suffix: 'mm', step: 0.1, title: 'Height every move between pockets is made at. It has to clear the tools standing in them.' })
+              ? numberField('Retract Z', c.retractZ, (v) => this.patch({ retractZ: v }), { suffix: 'mm', step: 0.1, title: 'Height every move between pockets is made at. It has to clear the tools standing in them.', capture: fromAxis('Z', 'machine') })
               : html`<div class="param-note">
                   Every move between pockets happens at this height${zMax !== undefined ? html` — currently <code>Z${zMax}</code>` : nothing}.
                 </div>`}
-            ${numberField('Pickup start Z', c.pickupStartZ, (v) => this.patch({ pickupStartZ: v }), { suffix: 'mm', step: 0.1, title: 'Just above the nut, before the spindle starts turning.' })}
-            ${numberField('Pickup end Z', c.pickupEndZ, (v) => this.patch({ pickupEndZ: v }), { suffix: 'mm', step: 0.1, title: 'Fully threaded on. Lower than the start.' })}
+            ${numberField('Pickup start Z', c.pickupStartZ, (v) => this.patch({ pickupStartZ: v }), { suffix: 'mm', step: 0.1, title: 'Just above the nut, before the spindle starts turning.', capture: fromAxis('Z', 'machine') })}
+            ${numberField('Pickup end Z', c.pickupEndZ, (v) => this.patch({ pickupEndZ: v }), { suffix: 'mm', step: 0.1, title: 'Fully threaded on. Lower than the start.', capture: fromAxis('Z', 'machine') })}
             ${numberField('Re-engage lift', c.pickupReengage, (v) => this.patch({ pickupReengage: v }), { suffix: 'mm', step: 0.5, title: 'Lift and come back down once, to seat the threads. Skipping it cross-threads.' })}
             ${numberField('Pickup feed', c.pickupFeed, (v) => this.patch({ pickupFeed: v }), { suffix: 'mm/min', step: 10 })}
-            ${numberField('Drop start Z', c.dropStartZ, (v) => this.patch({ dropStartZ: v }), { suffix: 'mm', step: 0.1 })}
-            ${numberField('Drop end Z', c.dropEndZ, (v) => this.patch({ dropEndZ: v }), { suffix: 'mm', step: 0.1 })}
+            ${numberField('Drop start Z', c.dropStartZ, (v) => this.patch({ dropStartZ: v }), { suffix: 'mm', step: 0.1, capture: fromAxis('Z', 'machine') })}
+            ${numberField('Drop end Z', c.dropEndZ, (v) => this.patch({ dropEndZ: v }), { suffix: 'mm', step: 0.1, capture: fromAxis('Z', 'machine') })}
             ${numberField('Drop feed', c.dropFeed, (v) => this.patch({ dropFeed: v }), { suffix: 'mm/min', step: 10 })}
-            ${this.captureButton('Take pickup start Z from the current position', () => {
-              const z = this.at('Z');
-              if (z != null) this.patch({ pickupStartZ: z });
-            })}
           `,
         )}
 
@@ -374,15 +360,10 @@ export class AtcPanel extends PanelElement {
                   ${c.probeSlot !== null
                     ? html`${numberField('Setter pocket', c.probeSlot, (v) => this.patch({ probeSlot: Math.round(v) }), { min: 1, max: c.count, step: 1, title: 'Its XY is then derived from the pocket geometry rather than typed in twice.' })}`
                     : html`
-                        ${numberField('Setter X', c.probeX, (v) => this.patch({ probeX: v }), { suffix: 'mm', step: 0.1 })}
-                        ${numberField('Setter Y', c.probeY, (v) => this.patch({ probeY: v }), { suffix: 'mm', step: 0.1 })}
-                        ${this.captureButton('Take setter XY from the current position', () => {
-                          const x = this.at('X');
-                          const y = this.at('Y');
-                          if (x != null && y != null) this.patch({ probeX: x, probeY: y });
-                        })}
+                        ${numberField('Setter X', c.probeX, (v) => this.patch({ probeX: v }), { suffix: 'mm', step: 0.1, capture: fromAxis('X', 'machine') })}
+                        ${numberField('Setter Y', c.probeY, (v) => this.patch({ probeY: v }), { suffix: 'mm', step: 0.1, capture: fromAxis('Y', 'machine') })}
                       `}
-                  ${numberField('Trigger Z', c.probeZ, (v) => this.patch({ probeZ: v }), { suffix: 'mm', step: 0.01, title: 'Machine Z at which the setter triggers. Every tool offset is measured against this one number.' })}
+                  ${numberField('Trigger Z', c.probeZ, (v) => this.patch({ probeZ: v }), { suffix: 'mm', step: 0.01, title: 'Machine Z at which the setter triggers. Every tool offset is measured against this one number.', capture: fromAxis('Z', 'machine') })}
                   ${numberField('Probe input', c.probeIndex, (v) => this.patch({ probeIndex: Math.max(0, Math.round(v)) }), { min: 0, step: 1, title: 'The K number from the setter’s M558. On a machine with a workpiece probe as well, this is what keeps them apart.' })}
                   <div class="param-note">
                     The setter is a <em>tool length</em> probe and nothing else. Workpiece and
@@ -407,16 +388,6 @@ export class AtcPanel extends PanelElement {
               : nothing}
           `,
         )}
-      </div>
-    `;
-  }
-
-  private captureButton(label: string, onClick: () => void): TemplateResult {
-    const homed = machine.peek().axes.some((a) => a.homed);
-    return html`
-      <div class="param-note atc-capture">
-        <button class="tiny" ?disabled=${!connected.get() || !homed} @click=${onClick}>${label}</button>
-        ${homed ? nothing : html`<span> — home the machine first, or its position means nothing.</span>`}
       </div>
     `;
   }

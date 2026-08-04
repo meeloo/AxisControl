@@ -652,6 +652,20 @@ function handleGcode(gcode) {
       for (const a of axes) a.homed = true;
       pushReply('Homing complete');
       bumpSeq('move');
+    } else if (/^M(18|84)\b/.test(upper.trim())) {
+      // Releasing the motors loses the reference. The firmware clears the homed
+      // flags and keeps reporting a position, which is the trap: the numbers
+      // look perfectly normal and mean nothing until the next G28. Anything
+      // that reads a position has to notice.
+      //
+      // `M84 S<seconds>` only sets the idle timeout and moves nothing, so a
+      // command with no axis letters and an S is left alone.
+      const letters = (upper.trim().replace(/^M(18|84)/, '').match(/[XYZUVWABC]/g) ?? []);
+      if (letters.length || !/\bS\d/.test(upper)) {
+        for (const a of axes) if (!letters.length || letters.includes(a.letter)) a.homed = false;
+        pushReply('Steppers disabled');
+        bumpSeq('move');
+      }
     } else if (/^M3\b/.test(upper) || /^M4\b/.test(upper)) {
       const s = /S(\d+)/.exec(upper);
       spindle.active = s ? Number(s[1]) : 12000;

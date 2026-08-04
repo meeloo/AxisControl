@@ -3,6 +3,7 @@
 
 import { html, nothing, type TemplateResult } from 'lit';
 import type { MachineStatus } from '../machine/types.js';
+import { captureButton, type Capture } from './capture.js';
 
 export function statusLabel(status: MachineStatus): string {
   switch (status) {
@@ -92,12 +93,26 @@ export function field(label: string, control: TemplateResult): TemplateResult {
   return html`<label class="field"><span>${label}</span>${control}</label>`;
 }
 
-/** Numeric parameter input. `onChange` fires on change, not on every keystroke. */
+/**
+ * Numeric parameter input. `onChange` fires on change, not on every keystroke.
+ *
+ * `capture` adds the crosshair button that fills the field from where the
+ * machine is standing. It lives here rather than at the call sites so that
+ * every position field in the app gets the same control, in the same place,
+ * with the same guards — see ui/capture.ts.
+ */
 export function numberField(
   label: string,
   value: number,
   onChange: (v: number) => void,
-  opts: { step?: number; min?: number; max?: number; suffix?: string; title?: string } = {},
+  opts: {
+    step?: number;
+    min?: number;
+    max?: number;
+    suffix?: string;
+    title?: string;
+    capture?: Capture;
+  } = {},
 ): TemplateResult {
   return html`
     <label class="param" title=${opts.title ?? ''}>
@@ -115,6 +130,7 @@ export function numberField(
           }}
         />
         ${opts.suffix ? html`<em>${opts.suffix}</em>` : nothing}
+        ${opts.capture ? captureButton(opts.capture, onChange) : nothing}
       </span>
     </label>
   `;

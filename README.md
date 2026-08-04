@@ -45,6 +45,12 @@ Twenty-one panels, arranged onto pages you lay out yourself:
   stills where it does not, with pan/tilt and lighting for Reolink
 - **Job, Console, Files, Macros, Object model, Diagnostics, Preflight**
 
+Every field that holds a position has a crosshair beside it that fills it in
+from where the machine is standing — in machine or work coordinates, whichever
+that field actually means, and refused with a reason when the axis it needs is
+not homed. Depths and diameters take it too: jog down to depth, or out to the
+wall, and press the button.
+
 Dependencies, all permissive: Lit for templating, dockview for the layout,
 clipper-lib for polygon offsetting, and mpegts.js for camera video — the last
 loaded only when video is actually attempted. About 225 KB gzipped for the app,

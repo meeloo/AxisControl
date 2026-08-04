@@ -15,6 +15,7 @@ import { html, nothing, type TemplateResult } from 'lit';
 import { PanelElement, registerPanel } from '../ui/panel.js';
 import { connected, machine } from '../core/store.js';
 import { checkField, numberField, selectField } from '../ui/widgets.js';
+import { fromAxis, fromDepthBelow } from '../ui/capture.js';
 import { preview, saveAndRun } from '../ui/program.js';
 import { importSvg } from '../import/svg.js';
 import { importDxf } from '../import/dxf.js';
@@ -251,8 +252,8 @@ export class ImportPanel extends PanelElement {
           { value: 'centre', label: 'Centred on origin' },
           { value: 'as-drawn', label: 'As drawn' },
         ], (v) => ((this.anchor = v), this.requestUpdate()))}
-        ${numberField('Origin X', this.originX, (v) => ((this.originX = v), this.requestUpdate()), { suffix: 'mm' })}
-        ${numberField('Origin Y', this.originY, (v) => ((this.originY = v), this.requestUpdate()), { suffix: 'mm' })}
+        ${numberField('Origin X', this.originX, (v) => ((this.originX = v), this.requestUpdate()), { suffix: 'mm', capture: fromAxis('X', 'work') })}
+        ${numberField('Origin Y', this.originY, (v) => ((this.originY = v), this.requestUpdate()), { suffix: 'mm', capture: fromAxis('Y', 'work') })}
         ${numberField('Curve tolerance', this.curveTolerance, (v) => ((this.curveTolerance = v), this.requestUpdate()), { suffix: 'mm', step: 0.005, title: 'How far a flattened curve may stray from the true one.' })}
         ${numberField('Join gap', this.joinTolerance, (v) => ((this.joinTolerance = v), this.requestUpdate()), { suffix: 'mm', step: 0.01, title: 'Segment ends this close are treated as joined. A DXF rectangle is four separate lines and needs this to become one loop.' })}
       </div>
@@ -272,14 +273,14 @@ export class ImportPanel extends PanelElement {
         ${this.side === 'on'
           ? nothing
           : numberField('Leave stock', this.allowance, (v) => ((this.allowance = v), this.requestUpdate()), { suffix: 'mm', step: 0.05, title: 'Extra material left on the wall for a finishing pass.' })}
-        ${numberField('Z top', this.zTop, (v) => ((this.zTop = v), this.requestUpdate()), { suffix: 'mm' })}
-        ${numberField('Depth', this.depth, (v) => ((this.depth = v), this.requestUpdate()), { suffix: 'mm' })}
+        ${numberField('Z top', this.zTop, (v) => ((this.zTop = v), this.requestUpdate()), { suffix: 'mm', capture: fromAxis('Z', 'work') })}
+        ${numberField('Depth', this.depth, (v) => ((this.depth = v), this.requestUpdate()), { suffix: 'mm', title: 'How far below Z top to cut. The crosshair takes it from where the tool is standing now.', capture: fromDepthBelow(() => this.zTop) })}
         ${numberField('Per pass', this.depthPerPass, (v) => ((this.depthPerPass = v), this.requestUpdate()), { suffix: 'mm' })}
         ${numberField('Ramp', this.rampLength, (v) => ((this.rampLength = v), this.requestUpdate()), { suffix: 'mm', min: 0, title: 'Descend over this much travel along the path instead of plunging.' })}
         ${numberField('Feed', this.feedRate, (v) => ((this.feedRate = v), this.requestUpdate()), { suffix: 'mm/min' })}
         ${numberField('Plunge', this.plungeFeed, (v) => ((this.plungeFeed = v), this.requestUpdate()), { suffix: 'mm/min' })}
         ${numberField('RPM', this.rpm, (v) => ((this.rpm = v), this.requestUpdate()))}
-        ${numberField('Safe Z', this.safeZ, (v) => ((this.safeZ = v), this.requestUpdate()), { suffix: 'mm' })}
+        ${numberField('Safe Z', this.safeZ, (v) => ((this.safeZ = v), this.requestUpdate()), { suffix: 'mm', capture: fromAxis('Z', 'work') })}
         ${numberField('Tabs', this.tabCount, (v) => ((this.tabCount = Math.max(0, Math.round(v))), this.requestUpdate()), { suffix: 'off at 0', min: 0, step: 1 })}
         ${this.tabCount > 0
           ? html`

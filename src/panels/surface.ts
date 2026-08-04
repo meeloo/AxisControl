@@ -20,6 +20,7 @@ import { PanelElement, registerPanel } from '../ui/panel.js';
 import { actions, activeDriver, appendLog, capabilities, connected, machine, run } from '../core/store.js';
 import { formatDuration } from '../core/util.js';
 import { numberField } from '../ui/widgets.js';
+import { fromAxis } from '../ui/capture.js';
 import { theme } from '../core/theme.js';
 import { diverging } from '../core/oklab.js';
 import { loadProbeMap } from '../probing/types.js';
@@ -328,10 +329,10 @@ export class SurfacePanel extends PanelElement {
           : nothing}
 
         <div class="param-grid">
-          ${numberField('X0', this.area.x0, (v) => this.set('x0', v), { suffix: 'mm' })}
-          ${numberField('X1', this.area.x1, (v) => this.set('x1', v), { suffix: 'mm' })}
-          ${numberField('Y0', this.area.y0, (v) => this.set('y0', v), { suffix: 'mm' })}
-          ${numberField('Y1', this.area.y1, (v) => this.set('y1', v), { suffix: 'mm' })}
+          ${numberField('X0', this.area.x0, (v) => this.set('x0', v), { suffix: 'mm', capture: fromAxis('X', 'work') })}
+          ${numberField('X1', this.area.x1, (v) => this.set('x1', v), { suffix: 'mm', capture: fromAxis('X', 'work') })}
+          ${numberField('Y0', this.area.y0, (v) => this.set('y0', v), { suffix: 'mm', capture: fromAxis('Y', 'work') })}
+          ${numberField('Y1', this.area.y1, (v) => this.set('y1', v), { suffix: 'mm', capture: fromAxis('Y', 'work') })}
           ${numberField('Pitch X', this.area.spacingX, (v) => this.set('spacingX', v), { suffix: 'mm', min: 1 })}
           ${numberField('Pitch Y', this.area.spacingY, (v) => this.set('spacingY', v), { suffix: 'mm', min: 1 })}
           <div class="param-note">
