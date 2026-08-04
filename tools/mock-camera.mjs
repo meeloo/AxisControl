@@ -129,11 +129,23 @@ function snapshot() {
 </svg>`;
 }
 
+/**
+ * Content type of the POST being handled.
+ *
+ * Recorded because it turned out to matter: the real camera obeys a command
+ * sent as application/x-www-form-urlencoded and ignores the same command sent
+ * as text/plain, which from a page that cannot read replies is indistinguishable
+ * from a control that does not work. The mock accepts either — it is not the
+ * camera — but it remembers which was used, so the app can be held to sending
+ * the shape that is known to work.
+ */
+let contentType = '';
+
 function handleCommand(entry) {
   const cmd = entry?.cmd;
   const param = entry?.param ?? {};
   state.commands.push(cmd);
-  state.log.push({ cmd, op: param.op ?? null, at: Date.now() });
+  state.log.push({ cmd, op: param.op ?? null, at: Date.now(), contentType });
   if (state.log.length > 200) state.log.shift();
 
   switch (cmd) {
@@ -315,6 +327,7 @@ const server = createServer(async (req, res) => {
   }
 
   if (req.method === 'POST') {
+    contentType = String(req.headers['content-type'] ?? '');
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
     let body;

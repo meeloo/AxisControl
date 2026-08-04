@@ -154,23 +154,23 @@ export class ReolinkClient {
 
   /** Send commands. Returns the replies, or null when they cannot be read. */
   async send(commands: Command[]): Promise<Reply[] | null> {
-    // `?cmd=` as well as the body. reolink_aio puts the command in both, and
-    // some firmware routes on the query rather than parsing the body first —
-    // on a camera whose replies cannot be read, a command silently ignored for
-    // that reason is indistinguishable from one that worked. Harmless where it
-    // is redundant, so it is always sent when there is a single command to
-    // name.
-    const url = apiUrl(
-      this.config,
-      this.creds,
-      commands.length === 1 ? { cmd: commands[0].cmd } : {},
-    );
+    const url = apiUrl(this.config, this.creds);
     const init: RequestInit = {
       method: 'POST',
-      // text/plain keeps the request CORS-simple, so no preflight is issued —
-      // a preflight would be answered with nothing useful and the command would
-      // never leave the browser. The camera parses the body as JSON regardless.
-      headers: { 'Content-Type': 'text/plain' },
+      // Two constraints meet here.
+      //
+      // It has to be a CORS-simple content type, or the browser issues a
+      // preflight — which this camera answers with nothing useful, so the
+      // command never leaves the browser at all. That rules out
+      // application/json, whatever the API documentation says.
+      //
+      // Of the three simple ones it has to be the one the camera actually
+      // accepts, and text/plain is not it: the same command that works from
+      // curl — which defaults to form-urlencoded — was ignored from the
+      // browser. The body is JSON either way and the camera parses it happily;
+      // it is the header it dispatches on. This is the shape proven against the
+      // real device, so it is the shape to keep.
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: JSON.stringify(commands),
       cache: 'no-store',
       credentials: 'omit',
