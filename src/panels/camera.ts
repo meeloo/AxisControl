@@ -652,6 +652,11 @@ export class CameraPanel extends PanelElement {
 
   /** A step in, by a quarter of the travel where that is knowable. */
   private async zoomIn(): Promise<void> {
+    // Read the lens first. The cached position is from the last time anything
+    // asked, and the Reolink app may have moved it since — stepping from a
+    // stale number either overshoots or, if the stale number was the maximum,
+    // does nothing at all while the lens sits wide open.
+    if (this.zoom) await this.refreshZoom();
     if (this.zoom) {
       const step = Math.max(1, Math.round((this.zoom.max - this.zoom.min) * 0.25));
       const target = Math.min(this.zoom.max, this.zoom.pos + step);

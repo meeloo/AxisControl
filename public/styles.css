@@ -104,6 +104,40 @@ html, body {
   padding-bottom: env(safe-area-inset-bottom, 0px); }
 cnc-dashboard { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 
+/* ---------- Selection ----------
+   This is a machine control, not a document. Dragging across it, or
+   double-clicking anything — which is now a gesture, on the camera picture —
+   used to leave a blue smear across labels and button faces, and on the tablet
+   a long press offered to look up the word "Retract".
+
+   So selection is off by default and turned back on for the things anyone
+   would actually want to copy: console output, the object model, file
+   contents, addresses, and every field you can type into. -webkit- prefixes
+   because the tablet this has to run on is iOS 12, where the unprefixed
+   property does not exist.
+
+   -webkit-touch-callout stops the long-press menu that iOS puts over an image,
+   which would otherwise sit on top of the camera view the moment you held a
+   finger on it to aim. */
+#app {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+input, textarea, select,
+.console-out, .om-row, .editor-text, .diag-value, .diag-detail,
+pre, code, .selectable {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
+/* A picture is dragged out of the page by default, which on the camera view
+   means an aim-click that starts a drag ends up as a ghost image following the
+   pointer instead. */
+img, canvas, video { -webkit-user-drag: none; }
+
 button, input, select, textarea { font-family: inherit; font-size: inherit; color: inherit; }
 
 button {
