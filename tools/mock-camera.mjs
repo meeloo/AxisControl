@@ -67,7 +67,12 @@ const state = {
   moving: 'Stop',
   ir: 'Auto',
   whiteLed: { state: 0, mode: 1, bright: 100 },
+  /** "On" or "KeepOff" — the camera's own words. */
+  powerLed: 'On',
   isp: { channel: 0, dayNight: 'Auto', exposure: 'Auto', antiFlicker: 'Off', backLight: 'Off' },
+  // `hue` is here and has no slider: it is the field that proves a write kept
+  // the rest of the block instead of letting the camera default it.
+  image: { channel: 0, bright: 128, contrast: 128, saturation: 100, sharpen: 64, hue: 128 },
   commands: [],
   /**
    * Every command with the moment it arrived.
@@ -220,6 +225,36 @@ function handleCommand(entry) {
       return { cmd, code: 0, value: { rspCode: 200 } };
     }
 
+    case 'GetImage':
+      // The ranges come back only when asked with action 1 — which is exactly
+      // what a real E1 Outdoor Pro does, and why anything that needs them has
+      // to ask that way.
+      return {
+        cmd,
+        code: 0,
+        value: { Image: { ...state.image } },
+        ...(entry?.action === 1
+          ? {
+              range: {
+                Image: {
+                  bright: { min: 0, max: 255 },
+                  contrast: { min: 0, max: 255 },
+                  saturation: { min: 0, max: 255 },
+                  sharpen: { min: 0, max: 255 },
+                  hue: { min: 0, max: 255 },
+                },
+              },
+            }
+          : {}),
+      };
+
+    case 'SetImage':
+      // Replaces the whole block, like the real one. Sending a single field
+      // therefore loses the others — which is the bug this reproduces rather
+      // than hides.
+      state.image = { ...(param.Image ?? {}) };
+      return { cmd, code: 0, value: { rspCode: 200 } };
+
     case 'GetIrLights':
       return { cmd, code: 0, value: { IrLights: { channel: 0, state: state.ir } } };
     case 'SetIrLights':
@@ -241,8 +276,9 @@ function handleCommand(entry) {
       return { cmd, code: 0, value: { rspCode: 200 } };
 
     case 'GetPowerLed':
-      return { cmd, code: 0, value: { PowerLed: { channel: 0, state: 'On' } } };
+      return { cmd, code: 0, value: { PowerLed: { channel: 0, state: state.powerLed } } };
     case 'SetPowerLed':
+      state.powerLed = param.PowerLed?.state ?? state.powerLed;
       return { cmd, code: 0, value: { rspCode: 200 } };
 
     default:

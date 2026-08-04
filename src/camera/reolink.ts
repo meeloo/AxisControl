@@ -31,7 +31,10 @@ import {
   normaliseCameraUrl,
   type CameraConfig,
   type CameraCredentials,
+  IMAGE_FIELDS,
   type CameraControls,
+  type ImageField,
+  type ImageSettings,
   type ZoomState,
 } from './types.js';
 
@@ -223,6 +226,7 @@ export class ReolinkClient {
       ['spotlight', 'GetWhiteLed'],
       ['dayNight', 'GetIsp'],
       ['statusLed', 'GetPowerLed'],
+      ['image', 'GetImage'],
       ['presets', 'GetPtzPreset'],
     ];
     const replies = await this.send(
@@ -239,6 +243,7 @@ export class ReolinkClient {
       spotlight: false,
       dayNight: false,
       statusLed: false,
+      image: false,
     };
     if (!replies) return controls;
 
@@ -386,18 +391,79 @@ export class ReolinkClient {
     ]);
   }
 
+  /**
+   * Brightness, contrast, saturation and sharpness, with the limits the camera
+   * states for each.
+   *
+   * `action: 1` because that is the request that comes back with a `range`
+   * block — action 0 returns the values alone, which is not enough to build a
+   * slider that means anything. Verified against an E1 Outdoor Pro, where
+   * action 0 omits the ranges entirely.
+   */
+  async readImage(): Promise<ImageSettings | null> {
+    const replies = await this.send([
+      { cmd: 'GetImage', action: 1, param: { channel: this.config.channel } },
+    ]);
+    const reply = replies?.find((r) => r.cmd === 'GetImage' && r.code === 0);
+    const block = dig(reply?.value, 'Image');
+    if (!reply || typeof block !== 'object' || block === null) return null;
+
+    const values = {} as Record<ImageField, number>;
+    const ranges = {} as Record<ImageField, { min: number; max: number }>;
+    for (const field of IMAGE_FIELDS) {
+      const value = num((block as Record<string, unknown>)[field]);
+      if (value === null) continue;
+      values[field] = value;
+      const min = num(dig(reply.range, 'Image', field, 'min'));
+      const max = num(dig(reply.range, 'Image', field, 'max'));
+      ranges[field] = min !== null && max !== null && max > min ? { min, max } : { min: 0, max: 255 };
+    }
+    if (!Object.keys(values).length) return null;
+    return { block: block as Record<string, unknown>, values, ranges };
+  }
+
+  /**
+   * Change one picture setting.
+   *
+   * Read-modify-write for the same reason as day/night: SetImage replaces the
+   * whole block, so sending it one field lets the camera default the rest —
+   * turning a nudge to the brightness into a quiet reset of everything else.
+   * That means it needs readable replies, and says so rather than half-working.
+   */
+  async setImage(field: ImageField, value: number): Promise<void> {
+    if (!this.readable) {
+      throw new Error(
+        'Picture settings need to read the camera’s current values first, which this browser ' +
+          'cannot do from a different origin — SetImage replaces every setting at once.',
+      );
+    }
+    const current = await this.readImage();
+    if (!current) throw new Error('could not read the camera’s picture settings');
+    await this.send([
+      {
+        cmd: 'SetImage',
+        action: 0,
+        param: {
+          Image: { ...current.block, channel: this.config.channel, [field]: Math.round(value) },
+        },
+      },
+    ]);
+  }
+
   /** Current settings, for showing real state rather than guesses. */
   async readState(): Promise<{
     ir: boolean | null;
     spotlightMode: number | null;
     spotlightBright: number | null;
     dayNight: string | null;
+    statusLed: boolean | null;
   }> {
     const channel = this.config.channel;
     const replies = await this.send([
       { cmd: 'GetIrLights', action: 0, param: { channel } },
       { cmd: 'GetWhiteLed', action: 0, param: { channel } },
       { cmd: 'GetIsp', action: 0, param: { channel } },
+      { cmd: 'GetPowerLed', action: 0, param: { channel } },
     ]);
     const pick = (cmd: string, key: string) =>
       replies?.find((r) => r.cmd === cmd && r.code === 0)?.value?.[key] as
@@ -407,11 +473,14 @@ export class ReolinkClient {
     const ir = pick('GetIrLights', 'IrLights');
     const led = pick('GetWhiteLed', 'WhiteLed');
     const isp = pick('GetIsp', 'Isp');
+    const power = pick('GetPowerLed', 'PowerLed');
     return {
       ir: ir ? ir.state === 'Auto' : null,
       spotlightMode: led && led.mode != null ? Number(led.mode) : null,
       spotlightBright: led && led.bright != null ? Number(led.bright) : null,
       dayNight: isp && isp.dayNight != null ? String(isp.dayNight) : null,
+      // "KeepOff" is the camera's word for off; anything else is some flavour of on.
+      statusLed: power && power.state != null ? String(power.state) === 'On' : null,
     };
   }
 }

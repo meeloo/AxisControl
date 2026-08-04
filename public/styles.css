@@ -1121,6 +1121,16 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .cam-mode .cam-sub { font-style: normal; font-family: var(--mono); font-size: 11px;
   color: var(--text-faint); width: 30px; text-align: right; }
 
+/* Picture settings: a column of sliders, each labelled and read out, because
+   "sharpen 128" means nothing without knowing what the camera allows. */
+.cam-image { display: flex; flex-direction: column; gap: 4px; padding: 6px 0 2px; }
+.cam-image-row { display: flex; align-items: center; gap: 8px; font-size: 11px;
+  color: var(--text-dim); }
+.cam-image-row span { width: 66px; flex: none; text-transform: capitalize; }
+.cam-image-row input { flex: 1; min-width: 0; }
+.cam-image-row .cam-sub { font-style: normal; font-family: var(--mono); font-size: 11px;
+  color: var(--text-faint); width: 30px; text-align: right; }
+
 .cam-presets { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .cam-modes { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; }
 .cam-mode { display: flex; align-items: center; gap: 6px; font-size: 11px;

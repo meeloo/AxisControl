@@ -124,8 +124,11 @@ export async function detectCamera(
         presets: true,
         irLights: true,
         spotlight: true,
-        // The only one that genuinely cannot work without reading first.
+        // The two that genuinely cannot work without reading first: both
+        // replace their whole settings block, so writing one field blind would
+        // reset the others to whatever the camera defaults to.
         dayNight: false,
+        image: false,
         statusLed: true,
       },
       note:

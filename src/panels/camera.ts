@@ -23,7 +23,9 @@ import {
   defaultCredentials,
   type CameraConfig,
   type CameraCredentials,
+  IMAGE_FIELDS,
   type CameraProbe,
+  type ImageSettings,
   type ZoomState,
 } from '../camera/types.js';
 
@@ -96,6 +98,9 @@ export class CameraPanel extends PanelElement {
   private spotMode: number | null = null;
   private spotBright = 100;
   private dayNight: string | null = null;
+  private statusLed: boolean | null = null;
+  private image: ImageSettings | null = null;
+  private showImage = false;
 
   private speed = 16;
 
@@ -201,6 +206,8 @@ export class CameraPanel extends PanelElement {
       this.spotMode = state.spotlightMode;
       if (state.spotlightBright != null) this.spotBright = state.spotlightBright;
       this.dayNight = state.dayNight;
+      this.statusLed = state.statusLed;
+      if (this.controls.image) this.image = await this.client.readImage();
       if (this.controls.presets) this.presets = await this.client.presets();
       if (this.controls.zoom) {
         this.zoom = await this.client.zoomState();
@@ -966,10 +973,58 @@ export class CameraPanel extends PanelElement {
     `;
   }
 
+  /**
+   * Brightness and friends.
+   *
+   * Behind a toggle rather than always on screen: they are set once for a
+   * workshop and then left alone, and four more sliders above the pad would
+   * push the picture off a narrow panel. Each one writes on release rather
+   * than while dragging — every write is a read-modify-write of the whole
+   * block, so a drag would be dozens of round trips.
+   */
+  private renderImage(): TemplateResult | typeof nothing {
+    const image = this.image;
+    if (!image) return nothing;
+    return html`
+      <div class="cam-image">
+        ${IMAGE_FIELDS.filter((field) => image.values[field] !== undefined).map((field) => {
+          const range = image.ranges[field];
+          return html`
+            <label class="cam-image-row" title="${field} — the camera allows ${range.min} to ${range.max}">
+              <span>${field}</span>
+              <input
+                type="range"
+                min=${range.min}
+                max=${range.max}
+                .value=${String(image.values[field])}
+                @input=${(e: Event) => {
+                  const value = Number((e.target as HTMLInputElement).value);
+                  this.image = { ...image, values: { ...image.values, [field]: value } };
+                  this.requestUpdate();
+                }}
+                @change=${(e: Event) => {
+                  const value = Number((e.target as HTMLInputElement).value);
+                  void this.command(field, async () => {
+                    await this.client!.setImage(field, value);
+                    // Read back: the camera clamps, and a slider showing a
+                    // value the camera did not take is a slider that lies.
+                    const fresh = await this.client!.readImage();
+                    if (fresh) this.image = fresh;
+                  });
+                }}
+              />
+              <em class="cam-sub">${image.values[field]}</em>
+            </label>
+          `;
+        })}
+      </div>
+    `;
+  }
+
   private renderControls(): TemplateResult | typeof nothing {
     const c = this.controls;
     if (!this.client) return nothing;
-    const anyMode = c.irLights || c.spotlight || c.dayNight;
+    const anyMode = c.irLights || c.spotlight || c.dayNight || c.statusLed;
 
     return html`
       <div class="cam-controls">
@@ -1059,6 +1114,25 @@ export class CameraPanel extends PanelElement {
                       </label>
                     `
                   : nothing}
+                ${c.statusLed
+                  ? html`
+                      <label
+                        class="check"
+                        title="The lamp on the camera body. Worth turning off on a camera watching a machine at night — it reflects off everything nearby."
+                      >
+                        <input
+                          type="checkbox"
+                          .checked=${this.statusLed ?? true}
+                          @change=${(e: Event) => {
+                            const on = (e.target as HTMLInputElement).checked;
+                            this.statusLed = on;
+                            void this.command('status LED', () => this.client!.setStatusLed(on));
+                          }}
+                        />
+                        LED
+                      </label>
+                    `
+                  : nothing}
                 ${c.spotlight
                   ? html`
                       <label class="cam-mode">
@@ -1118,7 +1192,19 @@ export class CameraPanel extends PanelElement {
                       </label>
                     `
                   : nothing}
+                ${this.image
+                  ? html`
+                      <button
+                        class="tiny"
+                        title="Brightness, contrast, saturation and sharpness"
+                        @click=${() => ((this.showImage = !this.showImage), this.requestUpdate())}
+                      >
+                        ${this.showImage ? 'Picture ▾' : 'Picture…'}
+                      </button>
+                    `
+                  : nothing}
               </div>
+              ${this.showImage ? this.renderImage() : nothing}
             `
           : nothing}
       </div>

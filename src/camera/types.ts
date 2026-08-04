@@ -103,6 +103,8 @@ export interface CameraControls {
   /** Needs the current ISP block read back before it can be written. */
   dayNight: boolean;
   statusLed: boolean;
+  /** Brightness and friends. Read-modify-write, like dayNight. */
+  image: boolean;
 }
 
 export const NO_CONTROLS: CameraControls = {
@@ -113,6 +115,7 @@ export const NO_CONTROLS: CameraControls = {
   spotlight: false,
   dayNight: false,
   statusLed: false,
+  image: false,
 };
 
 /**
@@ -125,6 +128,18 @@ export interface ZoomState {
   pos: number;
   min: number;
   max: number;
+}
+
+/** The picture adjustments, in the camera's own units. */
+export const IMAGE_FIELDS = ['bright', 'contrast', 'saturation', 'sharpen'] as const;
+export type ImageField = (typeof IMAGE_FIELDS)[number];
+
+export interface ImageSettings {
+  /** Everything GetImage returned, kept whole so a write can hand it all back. */
+  block: Record<string, unknown>;
+  values: Record<ImageField, number>;
+  /** What the camera says each one may be, when it says. */
+  ranges: Record<ImageField, { min: number; max: number }>;
 }
 
 export interface CameraProbe {
