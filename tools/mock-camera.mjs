@@ -15,6 +15,12 @@
 // Frames are SVG rather than JPEG. An <img> renders them identically, they are
 // a few hundred bytes, and having the frame number and clock drawn into the
 // picture makes it obvious at a glance whether the panel is actually polling.
+//
+// MOCK_NO_ZOOM_POS=1 makes GetZoomFocus/StartZoomFocus unsupported, which is
+// the other kind of camera: one that can be told to zoom in and out but cannot
+// say where its lens is. The panel has to fall back to the buttons alone
+// there, and that fallback is only ever exercised if the mock can be that
+// camera on request.
 
 import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
@@ -25,6 +31,13 @@ const CORS = process.argv.includes('--cors');
 
 /** Milliseconds to sit on a snapshot before answering, to imitate a LAN camera. */
 const LATENCY = Number(process.env.MOCK_LATENCY ?? 0);
+
+/** Pretend to be a camera with no absolute zoom. */
+const NO_ZOOM_POS = process.env.MOCK_NO_ZOOM_POS === '1';
+
+/** What the lens can do, in the camera's own units — Reolink reports a range. */
+const ZOOM_MIN = 0;
+const ZOOM_MAX = 32;
 
 /**
  * A real H.264 FLV, served the way the camera serves one.
@@ -50,7 +63,7 @@ const PASSWORD = 'cnc';
 const state = {
   pan: 0,
   tilt: 0,
-  zoom: 0,
+  zoom: 0, // ZOOM_MIN..ZOOM_MAX
   moving: 'Stop',
   ir: 'Auto',
   whiteLed: { state: 0, mode: 1, bright: 100 },
@@ -94,7 +107,7 @@ function snapshot() {
   // confirmed from the picture alone.
   const cx = 320 + state.pan * 4;
   const cy = 180 + state.tilt * 4;
-  const r = 40 + state.zoom * 6;
+  const r = 40 + state.zoom * 2;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
   <rect width="640" height="360" fill="#101418"/>
   <g stroke="#2a3340" stroke-width="1">
@@ -140,8 +153,8 @@ function handleCommand(entry) {
       else if (op === 'RightUp') (state.pan += step), (state.tilt -= step);
       else if (op === 'LeftDown') (state.pan -= step), (state.tilt += step);
       else if (op === 'RightDown') (state.pan += step), (state.tilt += step);
-      else if (op === 'ZoomInc') state.zoom = Math.min(10, state.zoom + 1);
-      else if (op === 'ZoomDec') state.zoom = Math.max(0, state.zoom - 1);
+      else if (op === 'ZoomInc') state.zoom = Math.min(ZOOM_MAX, state.zoom + 4);
+      else if (op === 'ZoomDec') state.zoom = Math.max(ZOOM_MIN, state.zoom - 4);
       else if (op === 'ToPos') (state.pan = (param.id ?? 0) * 10), (state.tilt = 0);
       state.moving = op;
       return { cmd, code: 0, value: { rspCode: 200 } };
@@ -159,6 +172,31 @@ function handleCommand(entry) {
           ],
         },
       };
+
+    case 'GetZoomFocus':
+      if (NO_ZOOM_POS) break;
+      // action 1 asks for the limits as well as the value, and the limits are
+      // the whole point: a slider cannot span a travel nobody has stated.
+      return {
+        cmd,
+        code: 0,
+        value: { ZoomFocus: { channel: 0, zoom: { pos: state.zoom }, focus: { pos: 12 } } },
+        range: {
+          ZoomFocus: {
+            zoom: { pos: { min: ZOOM_MIN, max: ZOOM_MAX } },
+            focus: { pos: { min: 0, max: 64 } },
+          },
+        },
+      };
+
+    case 'StartZoomFocus': {
+      if (NO_ZOOM_POS) break;
+      const zf = param.ZoomFocus ?? {};
+      if (zf.op === 'ZoomPos' && typeof zf.pos === 'number') {
+        state.zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round(zf.pos)));
+      }
+      return { cmd, code: 0, value: { rspCode: 200 } };
+    }
 
     case 'GetIrLights':
       return { cmd, code: 0, value: { IrLights: { channel: 0, state: state.ir } } };
@@ -186,9 +224,11 @@ function handleCommand(entry) {
       return { cmd, code: 0, value: { rspCode: 200 } };
 
     default:
-      // What a real camera does with a command this model lacks.
-      return { cmd, code: 1, error: { detail: 'not support', rspCode: -9 } };
+      break;
   }
+  // What a real camera does with a command this model lacks — also where the
+  // two zoom commands land when MOCK_NO_ZOOM_POS is set.
+  return { cmd, code: 1, error: { detail: 'not support', rspCode: -9 } };
 }
 
 const server = createServer(async (req, res) => {

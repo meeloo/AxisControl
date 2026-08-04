@@ -13,6 +13,9 @@
 //   SetIrLights  {"cmd":"SetIrLights","action":0,"param":{"IrLights":{"channel":0,"state":"Auto"}}}
 //   SetWhiteLed  {"cmd":"SetWhiteLed","param":{"WhiteLed":{"channel":0,"state":1,"bright":100,"mode":1}}}
 //   SetPowerLed  {"cmd":"SetPowerLed","action":0,"param":{"PowerLed":{"channel":0,"state":"On"}}}
+//   GetZoomFocus {"cmd":"GetZoomFocus","action":1,"param":{"channel":0}}
+//   StartZoomFocus {"cmd":"StartZoomFocus","action":0,
+//                   "param":{"ZoomFocus":{"channel":0,"op":"ZoomPos","pos":17}}}
 //   SetIsp       {"cmd":"SetIsp","action":0,"param":{"Isp":{...everything GetIsp returned..., "dayNight":"Auto"}}}
 //
 // Note the shape of that last one: SetIsp does not take one field, it takes the
@@ -29,6 +32,7 @@ import {
   type CameraConfig,
   type CameraCredentials,
   type CameraControls,
+  type ZoomState,
 } from './types.js';
 
 export type PtzOp =
@@ -69,7 +73,29 @@ interface Reply {
   cmd: string;
   code: number;
   value?: Record<string, unknown>;
+  /**
+   * Limits, when the command was sent with action 1.
+   *
+   * This is the whole reason absolute zoom is possible: the camera states its
+   * own zoom travel, so a slider can span exactly what the lens can do rather
+   * than a number picked here and hoped for.
+   */
+  range?: Record<string, unknown>;
   error?: { detail?: string; rspCode?: number };
+}
+
+/** Dig `a.b.c` out of a reply without trusting any level to exist. */
+function dig(root: unknown, ...path: string[]): unknown {
+  let at: unknown = root;
+  for (const key of path) {
+    if (typeof at !== 'object' || at === null) return undefined;
+    at = (at as Record<string, unknown>)[key];
+  }
+  return at;
+}
+
+function num(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
 
 function apiUrl(config: CameraConfig, creds: CameraCredentials, params: Record<string, string> = {}): string {
@@ -229,6 +255,44 @@ export class ReolinkClient {
   async goToPreset(id: number): Promise<void> {
     await this.send([
       { cmd: 'PtzCtrl', action: 0, param: { channel: this.config.channel, op: 'ToPos', id, speed: 32 } },
+    ]);
+  }
+
+  // --- Absolute zoom ------------------------------------------------------
+  //
+  // Separate from ptz() on purpose. ZoomInc/ZoomDec are a motor being told to
+  // run and then stop, which is all a camera needs to expose and all that works
+  // when replies cannot be read. A position is a different thing: it can be
+  // asked for, it can be shown, and it can be set — but only on a camera that
+  // has GetZoomFocus, and only from an origin allowed to read the answer.
+
+  /**
+   * Where the lens is now and how far it travels, or null if that is not
+   * knowable — no such command, no readable replies, or a camera that reports a
+   * position without saying what the limits are. Null means "keep the buttons,
+   * skip the slider" rather than "guess a range".
+   */
+  async zoomState(): Promise<ZoomState | null> {
+    const replies = await this.send([
+      { cmd: 'GetZoomFocus', action: 1, param: { channel: this.config.channel } },
+    ]);
+    const reply = replies?.find((r) => r.cmd === 'GetZoomFocus' && r.code === 0);
+    if (!reply) return null;
+
+    const pos = num(dig(reply.value, 'ZoomFocus', 'zoom', 'pos'));
+    const min = num(dig(reply.range, 'ZoomFocus', 'zoom', 'pos', 'min'));
+    const max = num(dig(reply.range, 'ZoomFocus', 'zoom', 'pos', 'max'));
+    if (pos === null || min === null || max === null || max <= min) return null;
+    return { pos: Math.min(max, Math.max(min, pos)), min, max };
+  }
+
+  async setZoom(pos: number): Promise<void> {
+    await this.send([
+      {
+        cmd: 'StartZoomFocus',
+        action: 0,
+        param: { ZoomFocus: { channel: this.config.channel, op: 'ZoomPos', pos: Math.round(pos) } },
+      },
     ]);
   }
 

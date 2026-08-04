@@ -1039,9 +1039,18 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .cam-motion-side { display: flex; flex-direction: column; gap: 8px; flex: 1; min-width: 0; }
 .cam-speed { display: flex; align-items: center; gap: 8px; font-size: 11px;
   color: var(--text-dim); }
+/* Same label width as the zoom row below, so the two tracks line up. */
+.cam-speed span, .cam-zoom-slider span { width: 36px; flex: none; }
 .cam-speed input { flex: 1; min-width: 0; }
 .cam-zoom { display: flex; gap: 4px; }
 .cam-zoom button { min-height: 30px; padding: 2px 12px; }
+/* Same row shape as the speed slider above it, so the two read as a pair
+   rather than as two unrelated controls that happen to be sliders. */
+.cam-zoom-slider { display: flex; align-items: center; gap: 8px; font-size: 11px;
+  color: var(--text-dim); }
+.cam-zoom-slider input { flex: 1; min-width: 0; }
+.cam-zoom-slider em { font-style: normal; font-family: var(--mono); font-size: 11px;
+  color: var(--text-faint); width: 34px; text-align: right; }
 
 .cam-presets { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .cam-modes { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; }

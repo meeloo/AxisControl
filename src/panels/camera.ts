@@ -24,6 +24,7 @@ import {
   type CameraConfig,
   type CameraCredentials,
   type CameraProbe,
+  type ZoomState,
 } from '../camera/types.js';
 
 /** Pad layout, matching the jog rose's compass sense: north is up-screen. */
@@ -98,6 +99,16 @@ export class CameraPanel extends PanelElement {
 
   private speed = 16;
 
+  /**
+   * Absolute zoom, when the camera has it. Null keeps the ＋/－ buttons alone,
+   * which is the right answer for a camera that can only be told to zoom and
+   * not asked where it is.
+   */
+  private zoom: ZoomState | null = null;
+  /** Slider position while dragging, before the camera has confirmed it. */
+  private zoomWanted: number | null = null;
+  private zoomSending = false;
+
   override connectedCallback(): void {
     super.connectedCallback();
     // Nothing is contacted until the operator asks, or until a camera that has
@@ -167,6 +178,7 @@ export class CameraPanel extends PanelElement {
       if (state.spotlightBright != null) this.spotBright = state.spotlightBright;
       this.dayNight = state.dayNight;
       if (this.controls.presets) this.presets = await this.client.presets();
+      if (this.controls.zoom) this.zoom = await this.client.zoomState();
     } catch {
       // Readable a moment ago, not now. The picture is the important part.
     }
@@ -459,6 +471,54 @@ export class CameraPanel extends PanelElement {
     void this.command('stop', async () => {
       await this.client!.stop();
     });
+    // The buttons and the slider drive the same lens, so the slider has to
+    // follow them. Read it back after the motor has had a moment to stop,
+    // otherwise the answer is where it was rather than where it ended up.
+    if (this.zoom) window.setTimeout(() => void this.refreshZoom(), 400);
+  }
+
+  private async refreshZoom(): Promise<void> {
+    if (!this.client?.readable || !this.controls.zoom) return;
+    try {
+      const state = await this.client.zoomState();
+      if (state) {
+        this.zoom = state;
+        this.zoomWanted = null;
+        this.requestUpdate();
+      }
+    } catch {
+      // The picture matters more than the readout.
+    }
+  }
+
+  /**
+   * Zoom while the slider is being dragged.
+   *
+   * Coalesced rather than throttled on a timer: one request is in flight at a
+   * time and the newest wanted position is sent when it lands. A slider can
+   * produce sixty events a second, and a camera answering each of them a beat
+   * late turns a drag into a queue that keeps moving after you let go.
+   */
+  private async pushZoom(): Promise<void> {
+    if (this.zoomSending || !this.client || this.zoomWanted === null) return;
+    this.zoomSending = true;
+    try {
+      while (this.zoomWanted !== null && this.zoomWanted !== this.zoom?.pos) {
+        const target: number = this.zoomWanted;
+        await this.command('zoom', async () => {
+          await this.client!.setZoom(target);
+        });
+        if (this.zoom) this.zoom = { ...this.zoom, pos: target };
+        if (this.zoomWanted === target) this.zoomWanted = null;
+      }
+    } finally {
+      this.zoomSending = false;
+      this.requestUpdate();
+      // Confirm rather than assume. The knob has been showing where it was
+      // asked to go; a camera that clamped the request, or refused it, is only
+      // visible by reading the lens back once the drag has settled.
+      window.setTimeout(() => void this.refreshZoom(), 600);
+    }
   }
 
   // --- Render -------------------------------------------------------------
@@ -642,6 +702,43 @@ export class CameraPanel extends PanelElement {
     `;
   }
 
+  /**
+   * Absolute zoom, shown only when the camera reports one.
+   *
+   * A slider whose knob does not correspond to anything is worse than no
+   * slider: it invites you to set a position and then sits wherever you left
+   * it while the lens is somewhere else. So this appears only when the camera
+   * answered GetZoomFocus with both a position and its limits — otherwise the
+   * ＋/－ buttons stand alone, which is honest about a camera that can only be
+   * nudged.
+   */
+  private renderZoomSlider(): TemplateResult | typeof nothing {
+    const zoom = this.zoom;
+    if (!zoom) return nothing;
+    const at = this.zoomWanted ?? zoom.pos;
+    const span = zoom.max - zoom.min;
+    const percent = Math.round(((at - zoom.min) / span) * 100);
+
+    return html`
+      <label class="cam-zoom-slider" title="Zoom to a position. The camera reports ${zoom.min}…${zoom.max}.">
+        <span>Zoom</span>
+        <input
+          type="range"
+          min=${zoom.min}
+          max=${zoom.max}
+          step="1"
+          .value=${String(at)}
+          @input=${(e: Event) => {
+            this.zoomWanted = Number((e.target as HTMLInputElement).value);
+            this.requestUpdate();
+            void this.pushZoom();
+          }}
+        />
+        <em>${percent}%</em>
+      </label>
+    `;
+  }
+
   private renderControls(): TemplateResult | typeof nothing {
     const c = this.controls;
     if (!this.client) return nothing;
@@ -684,6 +781,7 @@ export class CameraPanel extends PanelElement {
                             －
                           </button>
                         </div>
+                        ${this.renderZoomSlider()}
                       `
                     : nothing}
                 </div>

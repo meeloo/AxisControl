@@ -101,6 +101,18 @@ export const NO_CONTROLS: CameraControls = {
   statusLed: false,
 };
 
+/**
+ * The lens's position and travel, in the camera's own units.
+ *
+ * Not a percentage: the numbers come from the camera and go back to it
+ * unchanged, so nothing here has to know whether 32 means 3x or 16x.
+ */
+export interface ZoomState {
+  pos: number;
+  min: number;
+  max: number;
+}
+
 export interface CameraProbe {
   kind: CameraKind;
   /** Only knowable when replies are readable. */
