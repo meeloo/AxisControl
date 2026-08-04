@@ -64,6 +64,32 @@ npm run build      # dist/, with .gz siblings for the controller
 npm run typecheck
 ```
 
+## If the camera's replies cannot be read
+
+A Reolink answers every request but sends no `Access-Control-Allow-Origin`, and
+without that header a browser will not hand the reply to a page served from
+anywhere else. It is not a camera setting — the firmware is built for Reolink's
+own app and for NVRs, neither of which is a browser — so the panel says
+**blind** and works from what it can do without an answer.
+
+That is most of it. Commands need no reply: pan, tilt, presets, zoom by the
+buttons, click-to-aim, IR and the spotlight. What needs an answer does not work:
+the model, the live state of those controls, preset names, day/night (which has
+to read the whole image block before writing it back), the zoom slider, and live
+video — which unlike the snapshots is an ordinary fetch.
+
+Forwarding the same requests through something that does add the header gets all
+of it back:
+
+```
+npm run camera-proxy -- http://192.168.1.40      # listens on :8100
+```
+
+Then point the camera panel at `http://<that-host>:8100` instead of the camera.
+Run it somewhere that is always on — a Pi, a NAS, whatever serves the app — not
+a laptop that sleeps. It adds no authentication of its own, so put it only where
+you would be willing to expose the camera itself.
+
 ## Developing without the machine
 
 ```

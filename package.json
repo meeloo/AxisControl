@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "A CNC-first web front end for RepRapFirmware controllers",
   "license": "Apache-2.0",
-  "author": "Sébastien Métrot",
+  "author": "S\u00e9bastien M\u00e9trot",
   "repository": {
     "type": "git",
     "url": "https://github.com/meeloo/AxisControl.git"
@@ -16,7 +16,8 @@
   "scripts": {
     "dev": "node build.mjs --watch --serve",
     "build": "node build.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "camera-proxy": "node tools/camera-proxy.mjs"
   },
   "dependencies": {
     "clipper-lib": "^6.4.2",
