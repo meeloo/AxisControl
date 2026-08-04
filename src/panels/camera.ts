@@ -123,7 +123,7 @@ export class CameraPanel extends PanelElement {
    * Why there is no zoom slider, so the panel can say rather than just omit it.
    * A control that is silently absent reads as a broken app.
    */
-  private zoomWhy: 'unknown' | 'ok' | 'blind' | 'unsupported' = 'unknown';
+  private zoomWhy: 'unknown' | 'ok' | 'blind' | 'unsupported' | 'refused' = 'unknown';
 
   /** Where the last aim-click landed, for the marker. Element coordinates. */
   private aim: { x: number; y: number } | null = null;
@@ -218,7 +218,11 @@ export class CameraPanel extends PanelElement {
       this.statusLed = state.statusLed;
       if (this.controls.image) this.image = await this.client.readImage();
       if (this.controls.presets) this.presets = await this.client.presets();
-      if (this.controls.zoom) {
+      // Not once the camera has refused to be sent to a position: reading the
+      // lens would succeed and put the slider straight back, which is how a
+      // control that has just been withdrawn returns a moment later and fails
+      // again on the next touch.
+      if (this.controls.zoom && this.zoomWhy !== 'refused') {
         this.zoom = await this.client.zoomState();
         this.zoomWhy = this.zoom ? 'ok' : 'unsupported';
       }
@@ -722,7 +726,7 @@ export class CameraPanel extends PanelElement {
   }
 
   private async refreshZoom(): Promise<void> {
-    if (!this.client?.readable || !this.controls.zoom) return;
+    if (!this.client?.readable || !this.controls.zoom || this.zoomWhy === 'refused') return;
     try {
       const state = await this.client.zoomState();
       if (state) {
@@ -753,15 +757,35 @@ export class CameraPanel extends PanelElement {
           try {
             await this.client!.setZoom(target);
           } catch (err) {
-            // A lens still travelling refuses the next position — the same
-            // "ability error" a camera gives a user who is not allowed at all,
-            // which is why it cannot simply be reported and dropped. One is
-            // permanent and one passes in about a second, and the only way to
-            // tell them apart is to wait and ask again. So: wait, ask again,
-            // and complain only if it says no twice.
-            if (!/rspCode -26/.test((err as Error).message)) throw err;
-            await new Promise((resolve) => window.setTimeout(resolve, 1400));
-            await this.client!.setZoom(target);
+            const message = (err as Error).message;
+            // Only a refusal tells us anything about the camera. A network
+            // failure is about the network and must not condemn the control.
+            if (!/the camera refused/.test(message)) throw err;
+
+            // A lens still travelling refuses the next position with the same
+            // "ability error" the camera gives an account that is not allowed
+            // at all. One passes in about a second and one never does, and
+            // nothing in the reply says which — so wait and ask once more.
+            // Any other refusal is already final and there is nothing to wait
+            // for.
+            if (/rspCode -26/.test(message)) {
+              await new Promise((resolve) => window.setTimeout(resolve, 1400));
+              try {
+                await this.client!.setZoom(target);
+                return;
+              } catch {
+                // Falls through to withdrawing the slider.
+              }
+            }
+
+            // The camera reports a position it will not be sent to, or will not
+            // accept it from this account. Either way the slider is a promise
+            // the camera does not keep, so take it away and say so rather than
+            // leave a control that fails every time it is touched.
+            this.zoom = null;
+            this.zoomWanted = null;
+            this.zoomWhy = 'refused';
+            throw err;
           }
         });
         if (this.zoom) this.zoom = { ...this.zoom, pos: target };
@@ -1019,6 +1043,12 @@ export class CameraPanel extends PanelElement {
           follow. The buttons step it.
         </div>`;
       }
+      if (this.zoomWhy === 'refused') {
+        return html`<div class="cam-zoom-note">
+          This camera reports where its lens is but will not be sent to a position — it refused
+          twice, which is not a lens that was merely busy. The ＋ and − buttons still work.
+        </div>`;
+      }
       if (this.zoomWhy === 'blind') {
         return html`<div class="cam-zoom-note">
           No slider: this page cannot read the camera's replies, so where the lens is standing is
@@ -1105,6 +1135,21 @@ export class CameraPanel extends PanelElement {
             </label>
           `;
         })}
+      </div>
+    `;
+  }
+
+  private renderError(): TemplateResult {
+    return html`
+      <div class="warn-banner cam-error">
+        <span>${this.error}</span>
+        <button
+          class="tiny"
+          title="Dismiss"
+          @click=${() => ((this.error = null), (this.errorFor = null), this.requestUpdate())}
+        >
+          ✕
+        </button>
       </div>
     `;
   }
@@ -1345,18 +1390,13 @@ export class CameraPanel extends PanelElement {
           </button>
         </div>
 
-        ${this.error
-          ? html`<div class="warn-banner cam-error">
-              <span>${this.error}</span>
-              <button
-                class="tiny"
-                title="Dismiss"
-                @click=${() => ((this.error = null), (this.errorFor = null), this.requestUpdate())}
-              >
-                ✕
-              </button>
-            </div>`
-          : nothing}
+        <!-- While there is a picture the message floats over it; only when
+             there is nothing to float over does it take space in the column.
+             A banner that pushes the video down resizes it, and a video that
+             changes size the instant you touch a control reads as the control
+             having done something. It cost an afternoon of chasing a zoom that
+             had never moved. -->
+        ${this.error && !(this.live && !this.showSetup) ? this.renderError() : nothing}
         ${probe?.note && !this.showSetup ? html`<div class="cam-hint">${probe.note}</div>` : nothing}
         ${this.videoNote && !this.showSetup
           ? html`<div class="cam-hint">
@@ -1406,6 +1446,9 @@ export class CameraPanel extends PanelElement {
                 class="cam-aim ${this.aiming ? 'moving' : ''}"
                 style="left:${this.aim.x}px; top:${this.aim.y}px"
               ></span>`
+            : nothing}
+          ${this.error && this.live && !this.showSetup
+            ? html`<div class="cam-error-over">${this.renderError()}</div>`
             : nothing}
         </div>
 

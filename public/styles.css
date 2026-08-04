@@ -1130,6 +1130,10 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
   align-items: flex-start; padding: 10px 12px; border-radius: var(--radius);
   background: var(--tint-warn); color: var(--warn); font-size: 12px; line-height: 1.5; }
 
+/* Over the picture, not above it — see the note in the panel. */
+.cam-error-over { position: absolute; left: 8px; right: 8px; top: 8px; }
+.cam-error-over .cam-error { box-shadow: 0 2px 10px var(--shadow); }
+
 .cam-error { display: flex; align-items: flex-start; gap: 8px; }
 .cam-error span { flex: 1; min-width: 0; }
 .cam-error button { flex: none; }
