@@ -194,6 +194,34 @@ export class ReolinkClient {
   }
 
   /**
+   * Send commands and insist they were accepted.
+   *
+   * `send` hands back whatever the camera said and lets the caller judge it,
+   * which is right for a probe. For a *write* there is nothing to judge: a
+   * refused command comes back as a non-zero code with a reason attached, and
+   * dropping that on the floor is precisely how a control that does nothing
+   * ends up looking identical to a control that works. The camera's own words
+   * are more use than anything that could be invented here, so they are what
+   * gets raised.
+   *
+   * On a camera whose replies cannot be read there is nothing to check and the
+   * command has still been delivered, so blind mode is unchanged.
+   */
+  private async sendChecked(commands: Command[]): Promise<void> {
+    const replies = await this.send(commands);
+    if (!replies) return;
+    for (const command of commands) {
+      const reply = replies.find((r) => r.cmd === command.cmd);
+      if (!reply) throw new Error(`${command.cmd}: the camera did not answer`);
+      if (reply.code !== 0) {
+        const detail = reply.error?.detail ?? `code ${reply.code}`;
+        const rsp = reply.error?.rspCode != null ? ` (rspCode ${reply.error.rspCode})` : '';
+        throw new Error(`the camera refused ${command.cmd}: ${detail}${rsp}`);
+      }
+    }
+  }
+
+  /**
    * Ask the camera what it is, and find out whether it answers at all.
    *
    * Only ever called with `readable` true — the caller flips it back to false
@@ -256,19 +284,19 @@ export class ReolinkClient {
   // --- Motion -------------------------------------------------------------
 
   async ptz(op: PtzOp, speed: number): Promise<void> {
-    await this.send([
+    await this.sendChecked([
       { cmd: 'PtzCtrl', action: 0, param: { channel: this.config.channel, op, speed } },
     ]);
   }
 
   async stop(): Promise<void> {
-    await this.send([
+    await this.sendChecked([
       { cmd: 'PtzCtrl', action: 0, param: { channel: this.config.channel, op: 'Stop' } },
     ]);
   }
 
   async goToPreset(id: number): Promise<void> {
-    await this.send([
+    await this.sendChecked([
       { cmd: 'PtzCtrl', action: 0, param: { channel: this.config.channel, op: 'ToPos', id, speed: 32 } },
     ]);
   }
@@ -302,7 +330,7 @@ export class ReolinkClient {
   }
 
   async setZoom(pos: number): Promise<void> {
-    await this.send([
+    await this.sendChecked([
       {
         cmd: 'StartZoomFocus',
         action: 0,
@@ -328,7 +356,7 @@ export class ReolinkClient {
   // --- Light and image ----------------------------------------------------
 
   async setIrLights(on: boolean): Promise<void> {
-    await this.send([
+    await this.sendChecked([
       {
         cmd: 'SetIrLights',
         action: 0,
@@ -340,7 +368,7 @@ export class ReolinkClient {
   }
 
   async setSpotlight(mode: number, brightness: number): Promise<void> {
-    await this.send([
+    await this.sendChecked([
       {
         cmd: 'SetWhiteLed',
         param: {
@@ -356,7 +384,7 @@ export class ReolinkClient {
   }
 
   async setStatusLed(on: boolean): Promise<void> {
-    await this.send([
+    await this.sendChecked([
       {
         cmd: 'SetPowerLed',
         action: 0,
@@ -386,7 +414,7 @@ export class ReolinkClient {
     const isp = replies?.find((r) => r.cmd === 'GetIsp' && r.code === 0)?.value?.Isp;
     if (!isp || typeof isp !== 'object') throw new Error('could not read the camera’s image settings');
 
-    await this.send([
+    await this.sendChecked([
       { cmd: 'SetIsp', action: 0, param: { Isp: { ...(isp as object), dayNight: value } } },
     ]);
   }
@@ -439,7 +467,7 @@ export class ReolinkClient {
     }
     const current = await this.readImage();
     if (!current) throw new Error('could not read the camera’s picture settings');
-    await this.send([
+    await this.sendChecked([
       {
         cmd: 'SetImage',
         action: 0,

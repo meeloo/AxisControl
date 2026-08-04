@@ -35,6 +35,15 @@ const LATENCY = Number(process.env.MOCK_LATENCY ?? 0);
 /** Pretend to be a camera with no absolute zoom. */
 const NO_ZOOM_POS = process.env.MOCK_NO_ZOOM_POS === '1';
 
+/**
+ * Commands to refuse, comma separated: MOCK_REFUSE=SetWhiteLed,SetIrLights
+ *
+ * Real cameras refuse things — a command this model does not implement, a
+ * setting it will not take in the current mode — and they say so in the reply.
+ * A mock that accepts everything cannot show whether the app notices.
+ */
+const REFUSE = new Set((process.env.MOCK_REFUSE ?? '').split(',').filter(Boolean));
+
 /** What the lens can do, in the camera's own units — Reolink reports a range. */
 const ZOOM_MIN = 0;
 const ZOOM_MAX = 32;
@@ -152,6 +161,10 @@ function handleCommand(entry) {
   state.commands.push(cmd);
   state.log.push({ cmd, op: param.op ?? null, at: Date.now(), contentType });
   if (state.log.length > 200) state.log.shift();
+
+  if (REFUSE.has(cmd)) {
+    return { cmd, code: 1, error: { detail: 'not support', rspCode: -9 } };
+  }
 
   switch (cmd) {
     case 'GetDevInfo':

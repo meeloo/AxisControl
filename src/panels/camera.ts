@@ -491,6 +491,10 @@ export class CameraPanel extends PanelElement {
       this.error = null;
     } catch (err) {
       this.error = `${what}: ${(err as Error).message}`;
+      // The switch or slider has already moved to where it was put. If the
+      // camera refused, that reading is now a lie — so where the camera can be
+      // asked, ask it, and let the control snap back to the truth.
+      if (this.client?.readable) void this.refreshState();
     }
     this.requestUpdate();
   }
