@@ -25,7 +25,7 @@ tool and network setup are all still DWC's job, and DWC stays installed at `/`.
 
 ## What is in it
 
-Twenty panels, arranged onto pages you lay out yourself:
+Twenty-one panels, arranged onto pages you lay out yourself:
 
 - **Position** — work and machine coordinates, WCS selection (G54–G59.3), zeroing
 - **Motion** — a jog rose of concentric rings, eight directions each, with
@@ -38,13 +38,16 @@ Twenty panels, arranged onto pages you lay out yourself:
   which are three different jobs and never conflated
 - **Machining, Surfacing, Import** — conversational operations, spoilboard
   flattening, and SVG/DXF import with tool-radius offsetting
+- **Tool changer** — set up a RapidChange ATC and install its macros: pocket
+  geometry checked against the machine's own travel, every file shown before it
+  is written, and nothing run for you
 - **Camera** — live H.264 over HTTP-FLV where the camera allows it, pipelined
   stills where it does not, with pan/tilt and lighting for Reolink
 - **Job, Console, Files, Macros, Object model, Diagnostics, Preflight**
 
 Dependencies, all permissive: Lit for templating, dockview for the layout,
 clipper-lib for polygon offsetting, and mpegts.js for camera video — the last
-loaded only when video is actually attempted. About 187 KB gzipped for the app,
+loaded only when video is actually attempted. About 225 KB gzipped for the app,
 plus 62 KB for the video demuxer if it is ever needed.
 
 ```

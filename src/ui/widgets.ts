@@ -120,6 +120,28 @@ export function numberField(
   `;
 }
 
+/** Free-text parameter input — pin names, labels. Fires on change, not per key. */
+export function textField(
+  label: string,
+  value: string,
+  onChange: (v: string) => void,
+  opts: { placeholder?: string; title?: string } = {},
+): TemplateResult {
+  return html`
+    <label class="param" title=${opts.title ?? ''}>
+      <span class="param-label">${label}</span>
+      <span class="param-input">
+        <input
+          type="text"
+          .value=${value}
+          placeholder=${opts.placeholder ?? ''}
+          @change=${(e: Event) => onChange((e.target as HTMLInputElement).value)}
+        />
+      </span>
+    </label>
+  `;
+}
+
 export function selectField<T extends string>(
   label: string,
   value: T,

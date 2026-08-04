@@ -1039,3 +1039,62 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
    work on the old tablet too, even though video there falls back to stills. */
 .cam-video { position: absolute; top: 0; right: 0; bottom: 0; left: 0;
   width: 100%; height: 100%; object-fit: contain; background: #000; }
+
+/* ---------- Tool changer ---------- */
+
+.atc-panel { min-height: 0; }
+/* One scroller for the whole tab rather than per-group: nested scrollers on a
+   touch screen are a coin toss about which one moves. */
+.atc-scroll { flex: 1; min-height: 0; overflow: auto; }
+
+.atc-group { border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+.atc-group:last-child { border-bottom: 0; }
+.atc-group h4 { margin: 0; padding: 10px 12px 0; font-size: 12px;
+  text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); }
+.atc-group-note { padding: 4px 12px 0; font-size: 11px; color: var(--text-faint);
+  line-height: 1.5; }
+/* Wider columns and a suffix that sizes to its text: these rows carry both a
+   long label and a unit, and at the panel's real width the fixed-width unit
+   from .param-input ran straight into the next column. */
+.atc-group .param-grid { padding-top: 8px; overflow: visible;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.atc-group .param-input input { width: 84px; }
+.atc-group .param-input em { width: auto; }
+.atc-capture { display: block; }
+.atc-capture button { margin-right: 6px; }
+
+.atc-badge { font-size: 11px; padding: 2px 7px; border-radius: 999px;
+  background: var(--tint-warn); color: var(--warn); white-space: nowrap; }
+.atc-badge.bad { background: var(--tint-bad); color: var(--bad); }
+
+.atc-issues { padding: 8px 12px 0; display: flex; flex-direction: column; gap: 4px; }
+.atc-issue { font-size: 11px; line-height: 1.5; padding: 5px 9px; border-radius: var(--radius);
+  background: var(--tint-warn); color: var(--warn); }
+.atc-issue.bad { background: var(--tint-bad); color: var(--bad); }
+
+.atc-slots { width: 100%; border-collapse: collapse; font-family: var(--mono);
+  font-size: 12px; }
+.atc-slots th { text-align: right; padding: 4px 12px; font-family: var(--sans);
+  font-size: 11px; font-weight: 500; color: var(--text-faint); }
+.atc-slots th:first-child, .atc-slots td:first-child { text-align: left; }
+.atc-slots td { padding: 3px 12px; text-align: right; color: var(--text); }
+.atc-slots tr:nth-child(even) td { background: var(--bg-raised); }
+.atc-slots tr.bad td { color: var(--bad); }
+.atc-slots td em { font-style: normal; font-family: var(--sans); font-size: 10px;
+  color: var(--accent); }
+
+.atc-files { list-style: none; margin: 0; padding: 6px 8px; }
+.atc-file-row { display: flex; align-items: baseline; gap: 8px; padding: 4px 6px;
+  cursor: pointer; border-radius: var(--radius); }
+.atc-file-row:hover { background: var(--bg-raised); }
+.atc-file-name { font-family: var(--mono); font-size: 12px; color: var(--text);
+  width: 150px; flex: none; }
+.atc-file-purpose { font-size: 11px; color: var(--text-faint); flex: 1; min-width: 0; }
+.atc-file-flag { font-size: 10px; color: var(--warn); flex: none; }
+.atc-file-body { margin: 2px 6px 8px; padding: 8px 10px; background: var(--bg-raised);
+  border-radius: var(--radius); font-family: var(--mono); font-size: 11px;
+  line-height: 1.45; color: var(--text-dim); overflow-x: auto; white-space: pre; }
+
+.atc-summary { flex: 1; font-size: 11px; color: var(--text-faint); }
+.atc-group-note button.link { background: none; border: 0; padding: 0; min-height: 0;
+  font: inherit; color: var(--accent); text-decoration: underline; cursor: pointer; }

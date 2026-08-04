@@ -29,11 +29,15 @@ const seqs = {
 };
 
 // babystep is what the dry-run Z lift rides on.
+// Travel is the real machine's, from config-axes-limits.g. It matters that Z
+// runs 0..135 rather than the more common -180..0: the ATC's heights are
+// positive numbers in that frame, and a mock with the sign the other way round
+// makes every one of them look impossible.
 const axes = [
-  { speed: 6000, letter: 'X', babystep: 0, machinePosition: 260, userPosition: 260, workplaceOffsets: [0,0,0,0,0,0,0,0,0], homed: true, min: 0, max: 523, visible: true },
-  { speed: 6000, letter: 'Y', babystep: 0, machinePosition: 600, userPosition: 600, workplaceOffsets: [0,0,0,0,0,0,0,0,0], homed: true, min: 0, max: 1262, visible: true },
-  { speed: 2000, letter: 'Z', babystep: 0, machinePosition: -20, userPosition: -20, workplaceOffsets: [0,0,0,0,0,0,0,0,0], homed: true, min: -180, max: 0, visible: true },
-  { speed: 8000, letter: 'U', babystep: 0, machinePosition: 30, userPosition: 30, workplaceOffsets: [0,0,0,0,0,0,0,0,0], homed: true, min: 0, max: 60, visible: true },
+  { speed: 6000, letter: 'X', babystep: 0, machinePosition: 260, userPosition: 260, workplaceOffsets: [0,0,0,0,0,0,0,0,0], homed: true, min: 0, max: 524, visible: true },
+  { speed: 6000, letter: 'Y', babystep: 0, machinePosition: 600, userPosition: 600, workplaceOffsets: [0,0,0,0,0,0,0,0,0], homed: true, min: 0, max: 1290, visible: true },
+  { speed: 2000, letter: 'Z', babystep: 0, machinePosition: 115, userPosition: 115, workplaceOffsets: [0,0,0,0,0,0,0,0,0], homed: true, min: 0, max: 135, visible: true },
+  { speed: 8000, letter: 'U', babystep: 0, machinePosition: 30, userPosition: 30, workplaceOffsets: [0,0,0,0,0,0,0,0,0], homed: true, min: 0, max: 70, visible: true },
 ];
 
 /** Probing grid set by M557, and the compensation G29 turns on. */
@@ -74,7 +78,7 @@ const globals = {
   atcProbeZ: 41.3,
   atcToolHasBeenDetected: false,
   dustShoeEngaged: true,
-  dustShoePrevZ: -20,
+  dustShoePrevZ: 115,
   dustShoeEngagedU: 30,
 };
 
@@ -101,6 +105,19 @@ const FILES = {
     { type: 'f', name: 'dustShoeConfig.g', size: 340, date: '2026-07-02T18:41:00' },
     { type: 'f', name: 'config-axes.g', size: 900, date: '2026-06-20T09:00:00' },
     { type: 'f', name: 'homeall.g', size: 420, date: '2026-06-20T09:00:00' },
+    // The ATC macros this machine already has, so an installer is replacing
+    // files rather than writing into an empty directory.
+    { type: 'f', name: 'atcPickup.g', size: 700, date: '2026-07-02T18:40:00' },
+    { type: 'f', name: 'atcDrop.g', size: 640, date: '2026-07-02T18:40:00' },
+    { type: 'f', name: 'atcProbeZ.g', size: 520, date: '2026-07-02T18:40:00' },
+    { type: 'f', name: 'atcTestToolPresent.g', size: 380, date: '2026-07-02T18:40:00' },
+    { type: 'f', name: 'atcOpenDustCover.g', size: 90, date: '2026-07-02T18:40:00' },
+    { type: 'f', name: 'atcCloseDustCover.g', size: 90, date: '2026-07-02T18:40:00' },
+    ...Array.from({ length: 10 }, (_, i) => [
+      { type: 'f', name: `tfree${i}.g`, size: 120, date: '2026-07-02T18:40:00' },
+      { type: 'f', name: `tpre${i}.g`, size: 90, date: '2026-07-02T18:40:00' },
+      { type: 'f', name: `tpost${i}.g`, size: 150, date: '2026-07-02T18:40:00' },
+    ]).flat(),
   ],
   '/macros': [
     { type: 'd', name: 'Setup', size: 0, date: '2026-06-01T09:00:00' },
@@ -148,9 +165,85 @@ const FILES = {
   ],
 };
 
+/** Split "/sys/atcConfig.g" into its directory and name. */
+function splitPath(full) {
+  const cut = full.lastIndexOf('/');
+  return { dir: cut <= 0 ? '/' : full.slice(0, cut), name: full.slice(cut + 1) };
+}
+
+function addToListing(full, size) {
+  const { dir, name } = splitPath(full);
+  const list = (FILES[dir] ??= []);
+  const date = new Date().toISOString().slice(0, 19);
+  const existing = list.find((e) => e.name === name && e.type === 'f');
+  if (existing) {
+    existing.size = size;
+    existing.date = date;
+  } else {
+    list.push({ type: 'f', name, size, date });
+  }
+}
+
+function removeFromListing(full) {
+  const { dir, name } = splitPath(full);
+  const list = FILES[dir];
+  if (!list) return;
+  const at = list.findIndex((e) => e.name === name);
+  if (at >= 0) list.splice(at, 1);
+}
+
 const FILE_CONTENT = {
-  '/sys/config.g': `; Configuration file for Duet\nglobal systemSettingsVersion={1.2}\nM98 P"config-network.g"\nM98 P"config-axes.g"\nM453 ; CNC mode\nM501\n`,
-  '/sys/atcConfig.g': `; RapidChange globals\nglobal atcEnabled = true\nglobal atcCount = 8\nglobal atcOffset = 45\nglobal atcOriginX = 107.5\nglobal atcOriginY = 1260\n`,
+  // Includes the atcConfig.g call, because this machine has a working ATC.
+  // Anything that checks whether the tool changer is actually loaded has to
+  // see the normal case here, not a permanent warning.
+  '/sys/config.g': `; Configuration file for Duet\nglobal systemSettingsVersion={1.2}\nM98 P"config-network.g"\nM98 P"config-axes.g"\nM98 P"config-axes-limits.g"\nM98 P"atcConfig.g"\nM98 P"dustShoeConfig.g"\nM453 ; CNC mode\nM501\n`,
+  // The real file, near enough verbatim — comments after values, a trailing
+  // `;` comment on the same line as a number, an expression where a literal
+  // would be easier, and a commented-out atcProbeSlot. Anything that reads it
+  // has to cope with all four.
+  '/sys/atcConfig.g': [
+    '; Define ATC dust cover output:',
+    'M950 P6 C"io6.out" Q2000 ;M42 P6 S0',
+    '',
+    '; Define ATC tool detection input:',
+    'M950 J6 C"^io7.in"',
+    '',
+    ';RapidChange globals:',
+    'global atcEnabled = true',
+    'global atcProbingEnabled = true',
+    '',
+    'global atcDirection = 1 ; -1 or 1 depending on the direction from tool 0 to tool N',
+    'global atcAlignment = 0 ; 0 = along X, 1 = along Y',
+    'global atcOffset = 45 ; ER11 ATCs have 38 mm offsets',
+    'global atcCount = 8',
+    'global atcSpindlePause = 2',
+    '',
+    'global atcDropStartZ = 27.5',
+    'global atcDropEndZ = 10',
+    'global atcDropFeed = 1800',
+    'global atcToolHasBeenDetected = false',
+    'global atcRPM = 250',
+    'global atcDropRPM = {global.atcRPM}',
+    'global atcPickupStartZ = 27.5',
+    'global atcPickupEndZ = 10',
+    'global atcPickupReengage = 20',
+    'global atcPickupRPM = {global.atcRPM}',
+    'global atcPickupFeed = 1700',
+    '',
+    ';global atcProbeSlot = 8 ; uncomment if the probe lives in a pocket',
+    'global atcProbeX = 3',
+    'global atcProbeY = 1260',
+    'global atcProbeZ = 41.3',
+    '',
+    'global atcRetractZ = move.axes[2].max',
+    'global atcOriginX = 107.5; {move.axes[0].min + 24}',
+    'global atcOriginY = 1260 ; {move.axes[1].min + 24}',
+    '',
+    'global atcAlignmentX = {1 - global.atcAlignment}',
+    'global atcAlignmentY = {global.atcAlignment}',
+    'global atcOffsetX = {global.atcOffset * global.atcDirection * global.atcAlignmentX}',
+    'global atcOffsetY = {global.atcOffset * global.atcDirection * global.atcAlignmentY}',
+  ].join('\n') + '\n',
   '/sys/dustShoeConfig.g': `global dustShoeEngaged    = false\nglobal dustShoePrevZ      = move.axes[2].machinePosition\nglobal dustShoeEngagedU   = 30\n`,
   '/gcodes/spoilboard_surface.nc': generateSurfacingProgram(),
   '/gcodes/bracket_roughing.nc': generateBracketProgram(),
@@ -286,7 +379,7 @@ setInterval(() => {
     }
     axes[0].machinePosition = 260 + Math.sin(t * 0.7) * 180;
     axes[1].machinePosition = 600 + Math.cos(t * 0.4) * 200;
-    axes[2].machinePosition = -20 + Math.sin(t * 2) * 3;
+    axes[2].machinePosition = 115 + Math.sin(t * 2) * 3;
   }
   for (const a of axes) {
     a.userPosition = a.machinePosition - a.workplaceOffsets[workplaceNumber];
@@ -502,12 +595,24 @@ const server = createServer(async (req, res) => {
       const name = url.searchParams.get('name') ?? '';
       const chunks = [];
       for await (const c of req) chunks.push(c);
-      FILE_CONTENT[name] = Buffer.concat(chunks).toString('utf8');
+      const body = Buffer.concat(chunks).toString('utf8');
+      FILE_CONTENT[name] = body;
+      // ...and it appears in the directory. Storing the content without
+      // listing it is the mock being kinder than the firmware in the one
+      // direction that matters: anything that writes files and then checks
+      // they arrived would see them all missing, forever.
+      addToListing(name, Buffer.byteLength(body));
       pushReply(`Uploaded ${name}`);
       return sendJson(res, { err: 0 });
     }
 
-    case '/rr_delete':
+    case '/rr_delete': {
+      const name = url.searchParams.get('name') ?? '';
+      delete FILE_CONTENT[name];
+      removeFromListing(name);
+      return sendJson(res, { err: 0 });
+    }
+
     case '/rr_mkdir':
     case '/rr_move':
       return sendJson(res, { err: 0 });
