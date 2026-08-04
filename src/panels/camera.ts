@@ -75,6 +75,8 @@ export class CameraPanel extends PanelElement {
   private errorFor: string | null = null;
   private busy = false;
   private showSetup = false;
+  /** Reveal the stored camera password, for when it has to be checked. */
+  private showPassword = false;
   private live = false;
 
   /** Buffers cycle; whichever decodes a newer frame becomes the visible one. */
@@ -188,6 +190,7 @@ export class CameraPanel extends PanelElement {
       }
       this.live = true;
       this.showSetup = false;
+      this.showPassword = false;
       void this.startStream();
     } catch (err) {
       this.error = (err as Error).message;
@@ -836,10 +839,27 @@ export class CameraPanel extends PanelElement {
                 <span class="param-label">Password</span>
                 <span class="param-input">
                   <input
-                    type="password"
+                    type=${this.showPassword ? 'text' : 'password'}
+                    autocomplete="off"
+                    spellcheck="false"
                     .value=${this.creds.password}
                     @change=${(e: Event) => (this.creds = { ...this.creds, password: (e.target as HTMLInputElement).value })}
                   />
+                  <!-- A camera password is typed once and then needed again the
+                       day something stops working. Being able to see what is
+                       actually stored beats retyping it blind. -->
+                  <button
+                    type="button"
+                    class="tiny"
+                    title=${this.showPassword ? 'Hide the password' : 'Show the password'}
+                    @click=${(e: Event) => {
+                      e.preventDefault();
+                      this.showPassword = !this.showPassword;
+                      this.requestUpdate();
+                    }}
+                  >
+                    ${this.showPassword ? 'Hide' : 'Show'}
+                  </button>
                 </span>
               </label>
               <label class="param">
@@ -904,7 +924,10 @@ export class CameraPanel extends PanelElement {
             ${this.busy ? 'Looking…' : 'Connect'}
           </button>
           ${this.live
-            ? html`<button class="ghost" @click=${() => ((this.showSetup = false), this.requestUpdate())}>
+            ? html`<button
+                class="ghost"
+                @click=${() => ((this.showSetup = false), (this.showPassword = false), this.requestUpdate())}
+              >
                 Cancel
               </button>`
             : nothing}

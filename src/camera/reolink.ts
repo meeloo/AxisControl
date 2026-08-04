@@ -383,15 +383,43 @@ export class ReolinkClient {
     ]);
   }
 
+  /**
+   * The lamp on the camera body.
+   *
+   * "Off" or "KeepOff" depending on the model, and getting it wrong is not a
+   * no-op — an E1 Outdoor Pro answers "set config failed", rspCode -13, having
+   * changed nothing. Its own `GetPowerLed` states the truth in a range block:
+   * `state: ["On", "Off"]`. Other Reolinks say "KeepOff" there.
+   *
+   * So: use what the camera said it accepts, and where that is unknown — a
+   * blind camera states nothing — try the likelier spelling and let a refusal
+   * pick the other. Two requests once, rather than a switch that silently does
+   * nothing on half the range of models.
+   */
   async setStatusLed(on: boolean): Promise<void> {
-    await this.sendChecked([
-      {
-        cmd: 'SetPowerLed',
-        action: 0,
-        param: { PowerLed: { channel: this.config.channel, state: on ? 'On' : 'KeepOff' } },
-      },
-    ]);
+    const offStates = this.powerLedOffStates ?? ['Off', 'KeepOff'];
+    const candidates = on ? ['On'] : offStates;
+
+    let last: unknown = null;
+    for (const state of candidates) {
+      try {
+        await this.sendChecked([
+          {
+            cmd: 'SetPowerLed',
+            action: 0,
+            param: { PowerLed: { channel: this.config.channel, state } },
+          },
+        ]);
+        return;
+      } catch (err) {
+        last = err;
+      }
+    }
+    throw last instanceof Error ? last : new Error('the camera would not set the status LED');
   }
+
+  /** Off-states this camera says it accepts, learned from GetPowerLed's range. */
+  private powerLedOffStates: string[] | null = null;
 
   /**
    * Day/night mode.
@@ -491,7 +519,9 @@ export class ReolinkClient {
       { cmd: 'GetIrLights', action: 0, param: { channel } },
       { cmd: 'GetWhiteLed', action: 0, param: { channel } },
       { cmd: 'GetIsp', action: 0, param: { channel } },
-      { cmd: 'GetPowerLed', action: 0, param: { channel } },
+      // action 1 for this one: the allowed states come back in the range block,
+      // and which word means "off" differs between models.
+      { cmd: 'GetPowerLed', action: 1, param: { channel } },
     ]);
     const pick = (cmd: string, key: string) =>
       replies?.find((r) => r.cmd === cmd && r.code === 0)?.value?.[key] as
@@ -502,6 +532,15 @@ export class ReolinkClient {
     const led = pick('GetWhiteLed', 'WhiteLed');
     const isp = pick('GetIsp', 'Isp');
     const power = pick('GetPowerLed', 'PowerLed');
+    const states = dig(
+      replies?.find((r) => r.cmd === 'GetPowerLed' && r.code === 0)?.range,
+      'PowerLed',
+      'state',
+    );
+    if (Array.isArray(states)) {
+      const off = states.filter((v): v is string => typeof v === 'string' && v !== 'On');
+      if (off.length) this.powerLedOffStates = off;
+    }
     return {
       ir: ir ? ir.state === 'Auto' : null,
       spotlightMode: led && led.mode != null ? Number(led.mode) : null,

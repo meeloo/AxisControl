@@ -32,6 +32,15 @@ const CORS = process.argv.includes('--cors');
 /** Milliseconds to sit on a snapshot before answering, to imitate a LAN camera. */
 const LATENCY = Number(process.env.MOCK_LATENCY ?? 0);
 
+/**
+ * What this model calls its status-LED states.
+ *
+ * MOCK_POWER_LED=On,KeepOff to be the other kind of Reolink — which is the
+ * point: a client that hardcodes one spelling works on one of them and fails
+ * silently on the other.
+ */
+const POWER_LED_STATES = (process.env.MOCK_POWER_LED ?? 'On,Off').split(',');
+
 /** Pretend to be a camera with no absolute zoom. */
 const NO_ZOOM_POS = process.env.MOCK_NO_ZOOM_POS === '1';
 
@@ -289,10 +298,25 @@ function handleCommand(entry) {
       return { cmd, code: 0, value: { rspCode: 200 } };
 
     case 'GetPowerLed':
-      return { cmd, code: 0, value: { PowerLed: { channel: 0, state: state.powerLed } } };
-    case 'SetPowerLed':
-      state.powerLed = param.PowerLed?.state ?? state.powerLed;
+      // The allowed words are in the range block — and this camera's off is
+      // "Off", not the "KeepOff" other Reolinks use. That difference is not
+      // cosmetic: sending the wrong one is refused, having changed nothing.
+      return {
+        cmd,
+        code: 0,
+        value: { PowerLed: { channel: 0, state: state.powerLed } },
+        ...(entry?.action === 1 ? { range: { PowerLed: { state: POWER_LED_STATES } } } : {}),
+      };
+
+    case 'SetPowerLed': {
+      const wanted = param.PowerLed?.state;
+      if (!POWER_LED_STATES.includes(wanted)) {
+        // Verbatim from an E1 Outdoor Pro asked for "KeepOff".
+        return { cmd, code: 1, error: { detail: 'set config failed', rspCode: -13 } };
+      }
+      state.powerLed = wanted;
       return { cmd, code: 0, value: { rspCode: 200 } };
+    }
 
     default:
       break;
