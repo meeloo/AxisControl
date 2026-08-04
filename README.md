@@ -2,6 +2,10 @@
 
 A CNC-first web front end for RepRapFirmware controllers.
 
+![The Control page: work and machine coordinates, the jog rose, and the tool changer](docs/screenshots/control.webp)
+
+![The Job page: toolpath viewer with the preflight checks that run before a job starts](docs/screenshots/job.webp)
+
 DWC is an excellent 3D-printer interface, and that is the problem: on a router
 its information architecture is shaped around a machine that does a different
 job. Axis Control is arranged around the things a CNC operator actually reaches
