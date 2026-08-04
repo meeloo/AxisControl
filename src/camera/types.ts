@@ -58,6 +58,20 @@ export interface CameraConfig {
    * stream — none of which can be asked in advance.
    */
   mode: 'auto' | 'video' | 'snapshot';
+  /**
+   * Milliseconds to pan a whole frame width, at the fixed speed used for
+   * click-to-centre.
+   *
+   * A PTZ camera of this kind cannot be told to go to an angle — it can only be
+   * told to start moving and then to stop. So aiming at a point in the picture
+   * means running the motor for a while, and how long depends on the camera's
+   * gearing and its field of view. This is that constant, and it is the one
+   * number here that cannot be discovered: it has to be tried.
+   *
+   * The default deliberately undershoots. An aim that falls short converges
+   * when you click again; one that overshoots oscillates and never settles.
+   */
+  sweepMs: number;
 }
 
 /** Kept out of the settings shared with the machine. */
@@ -71,7 +85,7 @@ export function defaultCameraConfig(): CameraConfig {
   // same LAN can actually hold, and 2 is a slideshow.
   return {
     kind: 'auto', url: '', channel: 0, imageUrl: '', stream: false,
-    fps: 10, quality: 'sub', mode: 'auto',
+    fps: 10, quality: 'sub', mode: 'auto', sweepMs: 900,
   };
 }
 

@@ -108,6 +108,28 @@ export class CameraPanel extends PanelElement {
   /** Slider position while dragging, before the camera has confirmed it. */
   private zoomWanted: number | null = null;
   private zoomSending = false;
+  /**
+   * Why there is no zoom slider, so the panel can say rather than just omit it.
+   * A control that is silently absent reads as a broken app.
+   */
+  private zoomWhy: 'unknown' | 'ok' | 'blind' | 'unsupported' = 'unknown';
+
+  /** Where the last aim-click landed, for the marker. Element coordinates. */
+  private aim: { x: number; y: number } | null = null;
+  private aimTimer: number | null = null;
+  private lastClickAt = 0;
+  /** True while anything queued below is still running, for the marker. */
+  private aiming = false;
+  private pending = 0;
+  /**
+   * Aim actions run one after another.
+   *
+   * A double-click is a pan and then a zoom, and they are different subsystems
+   * reached through the same PtzCtrl: sending the zoom while the pan is still
+   * running means the pan's Stop can land on the zoom instead, which reads as
+   * "double-click sometimes doesn't zoom".
+   */
+  private queue: Promise<unknown> = Promise.resolve();
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -151,6 +173,8 @@ export class CameraPanel extends PanelElement {
         const client = new ReolinkClient(this.config, this.creds);
         client.readable = probe.readable;
         this.client = client;
+        this.zoom = null;
+        this.zoomWhy = probe.readable ? 'unknown' : 'blind';
         if (probe.readable) await this.refreshState();
       } else {
         this.client = null;
@@ -178,7 +202,10 @@ export class CameraPanel extends PanelElement {
       if (state.spotlightBright != null) this.spotBright = state.spotlightBright;
       this.dayNight = state.dayNight;
       if (this.controls.presets) this.presets = await this.client.presets();
-      if (this.controls.zoom) this.zoom = await this.client.zoomState();
+      if (this.controls.zoom) {
+        this.zoom = await this.client.zoomState();
+        this.zoomWhy = this.zoom ? 'ok' : 'unsupported';
+      }
     } catch {
       // Readable a moment ago, not now. The picture is the important part.
     }
@@ -477,6 +504,167 @@ export class CameraPanel extends PanelElement {
     if (this.zoom) window.setTimeout(() => void this.refreshZoom(), 400);
   }
 
+  // --- Aiming by clicking the picture -------------------------------------
+  //
+  // A camera of this kind cannot be told to look at an angle. It can be told to
+  // start moving and to stop, so aiming at a point means running the motor for
+  // a while — and how long depends on the gearing and the field of view, which
+  // no command reports. `sweepMs` is that constant, and clicking is the only
+  // way to calibrate it.
+  //
+  // Which is why the aim deliberately falls short: at 80% of the computed
+  // travel, repeated clicks converge on the target even when the constant is
+  // some way out. Aiming for exactly 100% turns any overestimate into an
+  // oscillation that never settles, and the operator into someone tapping back
+  // and forth across the thing they wanted to look at.
+
+  /** Fixed, so `sweepMs` means something. The Speed slider is for the pad. */
+  private static readonly AIM_SPEED = 32;
+  private static readonly AIM_FRACTION = 0.8;
+  /** Below this the camera has barely started before it is told to stop. */
+  private static readonly MIN_NUDGE_MS = 50;
+
+  /**
+   * Where a click landed, as a fraction of the picture from its centre:
+   * (0, 0) is the middle, (±1, ±1) the corners.
+   *
+   * Measured against the picture rather than the element, because both the
+   * stills and the video are `object-fit: contain` — on a panel that is not the
+   * camera's aspect ratio there are bars, and a click measured against the box
+   * aims at the wrong place by however wide they are.
+   */
+  private aimPoint(e: MouseEvent): { nx: number; ny: number; x: number; y: number } | null {
+    const view = this.querySelector<HTMLElement>('.cam-view');
+    if (!view) return null;
+    const rect = view.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+
+    const media: HTMLVideoElement | HTMLImageElement | null = this.usingVideo
+      ? this.querySelector<HTMLVideoElement>('.cam-video')
+      : (this.imgs().find((i) => i.classList.contains('showing')) ?? null);
+    const nw = media instanceof HTMLVideoElement ? media.videoWidth : (media?.naturalWidth ?? 0);
+    const nh = media instanceof HTMLVideoElement ? media.videoHeight : (media?.naturalHeight ?? 0);
+
+    let w = rect.width;
+    let h = rect.height;
+    if (nw > 0 && nh > 0) {
+      const scale = Math.min(rect.width / nw, rect.height / nh);
+      w = nw * scale;
+      h = nh * scale;
+    }
+    const left = rect.left + (rect.width - w) / 2;
+    const top = rect.top + (rect.height - h) / 2;
+
+    const nx = ((e.clientX - left) / w) * 2 - 1;
+    const ny = ((e.clientY - top) / h) * 2 - 1;
+    if (nx < -1 || nx > 1 || ny < -1 || ny > 1) return null; // the letterbox
+    return { nx, ny, x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
+
+  /** Can this camera be aimed at all? */
+  private get aimable(): boolean {
+    return this.live && !!this.client && this.controls.pan;
+  }
+
+  private onViewClick(e: MouseEvent): void {
+    if (!this.aimable) return;
+    const now = e.timeStamp;
+    // The second click of a double-click is the same click, so it must not aim
+    // again — two moves for one target is double the travel and a guaranteed
+    // overshoot. dblclick handles the pair.
+    const double = now - this.lastClickAt < 500;
+    this.lastClickAt = now;
+    if (double) return;
+
+    const at = this.aimPoint(e);
+    if (at) this.aimAt(at, false);
+  }
+
+  private onViewDoubleClick(e: MouseEvent): void {
+    if (!this.aimable) return;
+    const at = this.aimPoint(e);
+    // The first click of the pair has already aimed; this only zooms.
+    if (at) this.aimAt(at, true, false);
+  }
+
+  private enqueue(task: () => Promise<void>): void {
+    this.pending++;
+    this.aiming = true;
+    this.requestUpdate();
+    this.queue = this.queue
+      .catch(() => {})
+      .then(task)
+      .catch(() => {})
+      .then(() => {
+        this.pending--;
+        if (this.pending === 0) {
+          this.aiming = false;
+          this.requestUpdate();
+        }
+      });
+  }
+
+  private markAim(x: number, y: number): void {
+    this.aim = { x, y };
+    if (this.aimTimer !== null) clearTimeout(this.aimTimer);
+    this.aimTimer = window.setTimeout(() => {
+      this.aim = null;
+      this.aimTimer = null;
+      this.requestUpdate();
+    }, 700);
+    this.requestUpdate();
+  }
+
+  private aimAt(
+    at: { nx: number; ny: number; x: number; y: number },
+    zoom: boolean,
+    move = true,
+  ): void {
+    this.markAim(at.x, at.y);
+    // A move already running swallows a new one rather than queueing it: the
+    // picture is a second or two behind the camera, so an impatient second
+    // click is aimed at where things were, and obeying both is how you end up
+    // pointing at the ceiling.
+    if (move && this.pending === 0) this.enqueue(() => this.moveTo(at));
+    if (zoom) this.enqueue(() => this.zoomIn());
+  }
+
+  private async moveTo(at: { nx: number; ny: number }): Promise<void> {
+    const sweep = this.config.sweepMs > 0 ? this.config.sweepMs : 900;
+    // Half a frame of offset is `n` = 1, so the travel is n/2 frames.
+    const ms = (n: number) => Math.round((Math.abs(n) / 2) * sweep * CameraPanel.AIM_FRACTION);
+    // One axis at a time: the diagonal ops exist, but the two axes need
+    // different durations and a diagonal can only have one.
+    await this.command('aim', async () => {
+      const px = ms(at.nx);
+      if (px >= CameraPanel.MIN_NUDGE_MS) await this.nudge(at.nx > 0 ? 'Right' : 'Left', px);
+      const py = ms(at.ny);
+      if (py >= CameraPanel.MIN_NUDGE_MS) await this.nudge(at.ny > 0 ? 'Down' : 'Up', py);
+    });
+  }
+
+  /** Run one axis for a while, then stop it. */
+  private async nudge(op: PtzOp, ms: number): Promise<void> {
+    await this.client!.ptz(op, CameraPanel.AIM_SPEED);
+    await new Promise((resolve) => window.setTimeout(resolve, ms));
+    await this.client!.stop();
+  }
+
+  /** A step in, by a quarter of the travel where that is knowable. */
+  private async zoomIn(): Promise<void> {
+    if (this.zoom) {
+      const step = Math.max(1, Math.round((this.zoom.max - this.zoom.min) * 0.25));
+      const target = Math.min(this.zoom.max, this.zoom.pos + step);
+      if (target === this.zoom.pos) return;
+      this.zoomWanted = target;
+      await this.pushZoom();
+      return;
+    }
+    await this.command('zoom', async () => {
+      await this.nudge('ZoomInc', 500);
+    });
+  }
+
   private async refreshZoom(): Promise<void> {
     if (!this.client?.readable || !this.controls.zoom) return;
     try {
@@ -571,6 +759,22 @@ export class CameraPanel extends PanelElement {
               </label>
             `
           : html`
+              <label class="param" title="How long to run the motors to sweep a whole frame width, at the speed used for click-to-centre. Raise it if a click barely moves, lower it if it overshoots — a click that falls short converges when you click again, one that overshoots never settles.">
+                <span class="param-label">Aim travel</span>
+                <span class="param-input">
+                  <input
+                    type="number"
+                    min="100"
+                    max="10000"
+                    step="50"
+                    .value=${String(c.sweepMs)}
+                    @change=${(e: Event) =>
+                      (this.config = { ...c, sweepMs: Number((e.target as HTMLInputElement).value) || 900 })}
+                  />
+                  <em>ms</em>
+                </span>
+              </label>
+
               <label class="param wide">
                 <span class="param-label">Address</span>
                 <span class="param-input">
@@ -714,7 +918,25 @@ export class CameraPanel extends PanelElement {
    */
   private renderZoomSlider(): TemplateResult | typeof nothing {
     const zoom = this.zoom;
-    if (!zoom) return nothing;
+    if (!zoom) {
+      // Say why. An absent control is indistinguishable from a broken one, and
+      // the two reasons here have completely different answers: one is the
+      // camera, the other is where this page is served from.
+      if (this.zoomWhy === 'unsupported') {
+        return html`<div class="cam-zoom-note">
+          This camera does not report a lens position, so there is nothing for a slider to
+          follow. The buttons step it.
+        </div>`;
+      }
+      if (this.zoomWhy === 'blind') {
+        return html`<div class="cam-zoom-note">
+          No slider: this page cannot read the camera's replies, so where the lens is standing is
+          unknowable. Serve the app from the same origin as the camera, or put a proxy that adds
+          CORS headers in front of it.
+        </div>`;
+      }
+      return nothing;
+    }
     const at = this.zoomWanted ?? zoom.pos;
     const span = zoom.max - zoom.min;
     const percent = Math.round(((at - zoom.min) / span) * 100);
@@ -849,12 +1071,18 @@ export class CameraPanel extends PanelElement {
                             </option>`,
                           )}
                         </select>
+                        <em class="cam-sub">${this.spotBright}%</em>
                         <input
                           type="range"
                           min="0"
                           max="100"
-                          title="Brightness"
+                          title="Spotlight brightness"
+                          aria-label="Spotlight brightness"
                           .value=${String(this.spotBright)}
+                          @input=${(e: Event) => {
+                            this.spotBright = Number((e.target as HTMLInputElement).value);
+                            this.requestUpdate();
+                          }}
                           @change=${(e: Event) => {
                             this.spotBright = Number((e.target as HTMLInputElement).value);
                             void this.command('spotlight', () =>
@@ -947,7 +1175,14 @@ export class CameraPanel extends PanelElement {
           : nothing}
         ${this.showSetup ? this.renderSetup() : nothing}
 
-        <div class="cam-view ${this.live ? '' : 'idle'}">
+        <div
+          class="cam-view ${this.live ? '' : 'idle'} ${this.aimable ? 'aimable' : ''}"
+          title=${this.aimable
+            ? 'Click to bring that point to the middle. Double-click to bring it in and zoom.'
+            : ''}
+          @click=${(e: MouseEvent) => this.onViewClick(e)}
+          @dblclick=${(e: MouseEvent) => this.onViewDoubleClick(e)}
+        >
           ${this.live && this.usingVideo
             ? html`<video class="cam-video" muted playsinline autoplay></video>`
             : nothing}
@@ -961,6 +1196,12 @@ export class CameraPanel extends PanelElement {
                   : nothing}
               `
             : html`<span class="hint">${this.busy ? 'Looking for the camera…' : 'Not connected'}</span>`}
+          ${this.aim
+            ? html`<span
+                class="cam-aim ${this.aiming ? 'moving' : ''}"
+                style="left:${this.aim.x}px; top:${this.aim.y}px"
+              ></span>`
+            : nothing}
         </div>
 
         ${this.live && !this.showSetup ? this.renderControls() : nothing}

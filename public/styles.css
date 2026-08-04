@@ -1016,6 +1016,27 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .cam-view { position: relative; flex: 1; min-height: 140px; background: #000;
   border-radius: var(--radius); overflow: hidden; display: grid; place-items: center; }
 .cam-view.idle { background: var(--bg-raised); }
+/* Clicking the picture aims the camera, so say so with the pointer. */
+.cam-view.aimable { cursor: crosshair; }
+
+/* Where the last click landed. It exists because the camera takes a moment to
+   move and the stills are a few frames behind: without it a click looks like
+   nothing happened, and the natural response is to click again — which aims
+   twice at a target that has already been half reached. */
+.cam-aim { position: absolute; width: 26px; height: 26px; margin: -13px 0 0 -13px;
+  border: 2px solid var(--accent); border-radius: 50%; pointer-events: none;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
+  animation: cam-aim-pop 700ms ease-out forwards; }
+.cam-aim.moving { animation: cam-aim-wait 900ms ease-in-out infinite; }
+@keyframes cam-aim-pop {
+  0% { transform: scale(0.4); opacity: 1; }
+  60% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(1.25); opacity: 0; }
+}
+@keyframes cam-aim-wait {
+  0%, 100% { transform: scale(0.85); opacity: 0.9; }
+  50% { transform: scale(1.1); opacity: 0.45; }
+}
 .cam-frame { position: absolute; top: 0; right: 0; bottom: 0; left: 0; width: 100%; height: 100%;
   object-fit: contain; opacity: 0; }
 .cam-frame.showing { opacity: 1; }
@@ -1051,6 +1072,9 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .cam-zoom-slider input { flex: 1; min-width: 0; }
 .cam-zoom-slider em { font-style: normal; font-family: var(--mono); font-size: 11px;
   color: var(--text-faint); width: 34px; text-align: right; }
+.cam-zoom-note { font-size: 11px; line-height: 1.5; color: var(--text-faint); }
+.cam-mode .cam-sub { font-style: normal; font-family: var(--mono); font-size: 11px;
+  color: var(--text-faint); width: 30px; text-align: right; }
 
 .cam-presets { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .cam-modes { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; }

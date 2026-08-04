@@ -42,7 +42,8 @@ Twenty-one panels, arranged onto pages you lay out yourself:
   geometry checked against the machine's own travel, every file shown before it
   is written, and nothing run for you
 - **Camera** — live H.264 over HTTP-FLV where the camera allows it, pipelined
-  stills where it does not, with pan/tilt and lighting for Reolink
+  stills where it does not, with pan/tilt and lighting for Reolink. Click the
+  picture to bring that point to the middle, double-click to zoom in on it
 - **Job, Console, Files, Macros, Object model, Diagnostics, Preflight**
 
 Every field that holds a position has a crosshair beside it that fills it in

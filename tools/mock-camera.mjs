@@ -69,6 +69,14 @@ const state = {
   whiteLed: { state: 0, mode: 1, bright: 100 },
   isp: { channel: 0, dayNight: 'Auto', exposure: 'Auto', antiFlicker: 'Off', backLight: 'Off' },
   commands: [],
+  /**
+   * Every command with the moment it arrived.
+   *
+   * Timestamps because click-to-aim is a duration: the panel starts a motor and
+   * stops it a while later, and the only way to check it ran for the right
+   * length of time is to look at when the two requests landed.
+   */
+  log: [],
 };
 
 let frame = 0;
@@ -125,6 +133,8 @@ function handleCommand(entry) {
   const cmd = entry?.cmd;
   const param = entry?.param ?? {};
   state.commands.push(cmd);
+  state.log.push({ cmd, op: param.op ?? null, at: Date.now() });
+  if (state.log.length > 200) state.log.shift();
 
   switch (cmd) {
     case 'GetDevInfo':
@@ -243,6 +253,10 @@ const server = createServer(async (req, res) => {
 
   // A debug hook for the test harness: what has the camera actually been told?
   if (url.pathname === '/_state') {
+    if (url.searchParams.has('reset')) {
+      state.log = [];
+      state.commands = [];
+    }
     return sendJson(res, state);
   }
 
