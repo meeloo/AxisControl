@@ -146,6 +146,20 @@ const options = {
   // subtle happens when the target is too high: the bundle uses syntax the
   // engine cannot parse, the module is rejected whole, and the page is blank.
   target: ['es2019', 'safari12'],
+  // esbuild from 0.25 onwards marks destructuring as unsupported on Safari 13
+  // and below, and it has no transform for it — so naming safari12 as a target
+  // stops being a request to down-level and becomes a hard build failure, 183
+  // errors deep, most of them inside lit and dockview. Newer esbuild, same
+  // source, no build.
+  //
+  // Asserting support here is not wishful: the bundle that ran on the actual
+  // iPad mini 2 was built by esbuild 0.24, which does not transform
+  // destructuring either, and it ran. Whatever edge case the compatibility
+  // table is guarding against, this code does not reach it.
+  //
+  // Everything else safari12 asks for still applies. With 0.24 the output is
+  // byte-for-byte identical with and without this line.
+  supported: { destructuring: true },
   sourcemap: prod ? false : 'inline',
   minify: prod,
   legalComments: 'none',
@@ -160,8 +174,11 @@ if (watch) {
   await ctx.watch();
   console.log('[build] watching…');
   if (serve) {
-    const { host, port } = await ctx.serve({ servedir: 'dist', port: 8080 });
-    console.log(`[build] dev server → http://${host === '0.0.0.0' ? 'localhost' : host}:${port}`);
+    // `host` on esbuild 0.24, `hosts` on 0.25+. Getting this wrong prints
+    // "http://undefined:8080" as the first thing a new checkout ever says.
+    const served = await ctx.serve({ servedir: 'dist', port: 8080 });
+    const host = served.host ?? served.hosts?.[0] ?? 'localhost';
+    console.log(`[build] dev server → http://${host === '0.0.0.0' ? 'localhost' : host}:${served.port}`);
     console.log('[build] point the UI at your controller via the connect bar (CORS is enabled by M586 C"*")');
   }
 } else {
