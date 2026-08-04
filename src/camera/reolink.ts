@@ -84,9 +84,14 @@ interface Command {
  * from the detail string alone is impossible.
  */
 const REFUSAL_HINTS: Record<number, string> = {
+  // Two very different causes, and the camera uses the same two words for both.
+  // A non-administrator gets it for any setting; an administrator gets it for
+  // something the device will not do *now* — a zoom motor still travelling
+  // refuses the next position.
   [-26]:
-    'the account this panel uses is probably not an administrator on the camera — ' +
-    'viewing and PTZ are allowed to any user, but changing a setting is not',
+    'either the account this panel uses is not an administrator (viewing and PTZ are ' +
+    'allowed to any user, changing a setting is not), or the camera would not do it at ' +
+    'that moment — a lens still moving refuses the next command',
   [-13]: 'the camera would not take that value for this model',
   [-6]: 'the camera did not accept the user name or password',
 };

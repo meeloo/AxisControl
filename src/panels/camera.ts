@@ -761,7 +761,10 @@ export class CameraPanel extends PanelElement {
       // Confirm rather than assume. The knob has been showing where it was
       // asked to go; a camera that clamped the request, or refused it, is only
       // visible by reading the lens back once the drag has settled.
-      window.setTimeout(() => void this.refreshZoom(), 600);
+      // Long enough for the lens to have finished travelling. Reading too soon
+      // catches it mid-move and snaps the knob to a position it is only
+      // passing through.
+      window.setTimeout(() => void this.refreshZoom(), 1500);
     }
   }
 
@@ -1027,8 +1030,17 @@ export class CameraPanel extends PanelElement {
           step="1"
           .value=${String(at)}
           @input=${(e: Event) => {
+            // Move the knob and the readout, and send nothing. A drag is dozens
+            // of events and the lens is a motor: asked to go somewhere while it
+            // is still going somewhere else, this camera refuses with "ability
+            // error" — so the first step of a drag lands and the rest are
+            // rejected, which reads as "it zoomed once and then complained".
             this.zoomWanted = Number((e.target as HTMLInputElement).value);
             this.requestUpdate();
+          }}
+          @change=${(e: Event) => {
+            // Let go, then go. One command per gesture.
+            this.zoomWanted = Number((e.target as HTMLInputElement).value);
             void this.pushZoom();
           }}
         />
