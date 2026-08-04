@@ -41,6 +41,17 @@ const LATENCY = Number(process.env.MOCK_LATENCY ?? 0);
  */
 const POWER_LED_STATES = (process.env.MOCK_POWER_LED ?? 'On,Off').split(',');
 
+/**
+ * Milliseconds a zoom takes, during which another zoom is refused.
+ *
+ * The lens is a motor. Told to go somewhere while it is still going somewhere
+ * else, a real camera answers "ability error" — the same two words it uses for
+ * a permission problem, which is what makes it worth reproducing rather than
+ * imagining.
+ */
+const ZOOM_BUSY_MS = Number(process.env.MOCK_ZOOM_BUSY_MS ?? 0);
+let zoomBusyUntil = 0;
+
 /** Answer every setting change with the refusal a non-admin account gets. */
 const LIMITED_USER = process.env.MOCK_LIMITED_USER === '1';
 
@@ -282,6 +293,10 @@ function handleCommand(entry) {
 
     case 'StartZoomFocus': {
       if (NO_ZOOM_POS) break;
+      if (ZOOM_BUSY_MS && Date.now() < zoomBusyUntil) {
+        return { cmd, code: 1, error: { detail: 'ability error', rspCode: -26 } };
+      }
+      zoomBusyUntil = Date.now() + ZOOM_BUSY_MS;
       const zf = param.ZoomFocus ?? {};
       if (zf.op === 'ZoomPos' && typeof zf.pos === 'number') {
         state.zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round(zf.pos)));

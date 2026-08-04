@@ -750,7 +750,19 @@ export class CameraPanel extends PanelElement {
       while (this.zoomWanted !== null && this.zoomWanted !== this.zoom?.pos) {
         const target: number = this.zoomWanted;
         await this.command('zoom', async () => {
-          await this.client!.setZoom(target);
+          try {
+            await this.client!.setZoom(target);
+          } catch (err) {
+            // A lens still travelling refuses the next position — the same
+            // "ability error" a camera gives a user who is not allowed at all,
+            // which is why it cannot simply be reported and dropped. One is
+            // permanent and one passes in about a second, and the only way to
+            // tell them apart is to wait and ask again. So: wait, ask again,
+            // and complain only if it says no twice.
+            if (!/rspCode -26/.test((err as Error).message)) throw err;
+            await new Promise((resolve) => window.setTimeout(resolve, 1400));
+            await this.client!.setZoom(target);
+          }
         });
         if (this.zoom) this.zoom = { ...this.zoom, pos: target };
         if (this.zoomWanted === target) this.zoomWanted = null;
