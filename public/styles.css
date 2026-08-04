@@ -1123,6 +1123,10 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 
 /* Picture settings: a column of sliders, each labelled and read out, because
    "sharpen 128" means nothing without knowing what the camera allows. */
+.cam-error { display: flex; align-items: flex-start; gap: 8px; }
+.cam-error span { flex: 1; min-width: 0; }
+.cam-error button { flex: none; }
+
 .cam-image { display: flex; flex-direction: column; gap: 4px; padding: 6px 0 2px; }
 .cam-image-row { display: flex; align-items: center; gap: 8px; font-size: 11px;
   color: var(--text-dim); }

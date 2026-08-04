@@ -12,7 +12,7 @@
 
 import { html, nothing, type TemplateResult } from 'lit';
 import { PanelElement, registerPanel } from '../ui/panel.js';
-import { loadSetting, saveSetting } from '../core/store.js';
+import { appendLog, loadSetting, saveSetting } from '../core/store.js';
 import { detectCamera } from '../camera/detect.js';
 import { DAY_NIGHT, ReolinkClient, SPOTLIGHT_MODES, rtspUrl, snapshotUrl } from '../camera/reolink.js';
 import type { PtzOp } from '../camera/reolink.js';
@@ -71,6 +71,8 @@ export class CameraPanel extends PanelElement {
   private probe: CameraProbe | null = null;
   private client: ReolinkClient | null = null;
   private error: string | null = null;
+  /** Which operation the message belongs to, so only that one may clear it. */
+  private errorFor: string | null = null;
   private busy = false;
   private showSetup = false;
   private live = false;
@@ -484,13 +486,31 @@ export class CameraPanel extends PanelElement {
 
   // --- Commands -----------------------------------------------------------
 
-  /** Every control goes through here, so a blind-mode failure is still seen. */
+  /**
+   * Every control goes through here, so a blind-mode failure is still seen.
+   *
+   * Only the *same* operation succeeding clears a message. Clearing on any
+   * success sounds tidier and is unreadable: a refused pan is followed a moment
+   * later by the Stop that ends the press, and if that Stop wipes the message
+   * the report of the refusal is on screen for about a second — long enough to
+   * notice, not long enough to read.
+   *
+   * It also goes to the console, so it can be read after the fact, and quoted.
+   * A camera's own words about why it said no are the most useful thing in the
+   * whole exchange.
+   */
   private async command(what: string, fn: () => Promise<void>): Promise<void> {
     try {
       await fn();
-      this.error = null;
+      if (this.errorFor === what) {
+        this.error = null;
+        this.errorFor = null;
+      }
     } catch (err) {
-      this.error = `${what}: ${(err as Error).message}`;
+      const message = `${what}: ${(err as Error).message}`;
+      this.error = message;
+      this.errorFor = what;
+      appendLog({ level: 'error', text: `camera: ${message}`, time: new Date() });
       // The switch or slider has already moved to where it was put. If the
       // camera refused, that reading is now a lie — so where the camera can be
       // asked, ask it, and let the control snap back to the truth.
@@ -1261,7 +1281,18 @@ export class CameraPanel extends PanelElement {
           </button>
         </div>
 
-        ${this.error ? html`<div class="warn-banner">${this.error}</div>` : nothing}
+        ${this.error
+          ? html`<div class="warn-banner cam-error">
+              <span>${this.error}</span>
+              <button
+                class="tiny"
+                title="Dismiss"
+                @click=${() => ((this.error = null), (this.errorFor = null), this.requestUpdate())}
+              >
+                ✕
+              </button>
+            </div>`
+          : nothing}
         ${probe?.note && !this.showSetup ? html`<div class="cam-hint">${probe.note}</div>` : nothing}
         ${this.videoNote && !this.showSetup
           ? html`<div class="cam-hint">
