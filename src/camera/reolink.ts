@@ -72,6 +72,25 @@ interface Command {
   param?: Record<string, unknown>;
 }
 
+/**
+ * What a refusal actually means, for the codes seen on real hardware.
+ *
+ * The camera's own `detail` is two or three words — "ability error", "set
+ * config failed" — which name the category and not the cause. These are the
+ * causes, established by watching the same command answered differently:
+ * `SetPowerLed` as an administrator returns -13 because the value was wrong for
+ * the model, and the identical request as a non-administrator returns -26. One
+ * is a bug in the request, the other is a permission, and telling them apart
+ * from the detail string alone is impossible.
+ */
+const REFUSAL_HINTS: Record<number, string> = {
+  [-26]:
+    'the account this panel uses is probably not an administrator on the camera — ' +
+    'viewing and PTZ are allowed to any user, but changing a setting is not',
+  [-13]: 'the camera would not take that value for this model',
+  [-6]: 'the camera did not accept the user name or password',
+};
+
 interface Reply {
   cmd: string;
   code: number;
@@ -215,8 +234,10 @@ export class ReolinkClient {
       if (!reply) throw new Error(`${command.cmd}: the camera did not answer`);
       if (reply.code !== 0) {
         const detail = reply.error?.detail ?? `code ${reply.code}`;
-        const rsp = reply.error?.rspCode != null ? ` (rspCode ${reply.error.rspCode})` : '';
-        throw new Error(`the camera refused ${command.cmd}: ${detail}${rsp}`);
+        const code = reply.error?.rspCode;
+        const rsp = code != null ? ` (rspCode ${code})` : '';
+        const hint = code != null && REFUSAL_HINTS[code] ? ` — ${REFUSAL_HINTS[code]}` : '';
+        throw new Error(`the camera refused ${command.cmd}: ${detail}${rsp}${hint}`);
       }
     }
   }

@@ -41,6 +41,9 @@ const LATENCY = Number(process.env.MOCK_LATENCY ?? 0);
  */
 const POWER_LED_STATES = (process.env.MOCK_POWER_LED ?? 'On,Off').split(',');
 
+/** Answer every setting change with the refusal a non-admin account gets. */
+const LIMITED_USER = process.env.MOCK_LIMITED_USER === '1';
+
 /** Pretend to be a camera with no absolute zoom. */
 const NO_ZOOM_POS = process.env.MOCK_NO_ZOOM_POS === '1';
 
@@ -173,6 +176,14 @@ function handleCommand(entry) {
 
   if (REFUSE.has(cmd)) {
     return { cmd, code: 1, error: { detail: 'not support', rspCode: -9 } };
+  }
+
+  // A user without administrator rights may watch and may drive the PTZ, and
+  // may not change a setting. The camera says "ability error" — the same words
+  // it uses for a command the model does not have, which is why the panel has
+  // to explain the difference rather than quote it.
+  if (LIMITED_USER && /^Set|^StartZoomFocus$/.test(cmd)) {
+    return { cmd, code: 1, error: { detail: 'ability error', rspCode: -26 } };
   }
 
   switch (cmd) {
