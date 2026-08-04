@@ -1189,13 +1189,13 @@ export class CameraPanel extends PanelElement {
           @dblclick=${(e: MouseEvent) => this.onViewDoubleClick(e)}
         >
           ${this.live && this.usingVideo
-            ? html`<video class="cam-video" muted playsinline autoplay></video>`
+            ? html`<video class="cam-video" muted playsinline autoplay draggable="false"></video>`
             : nothing}
           ${this.live && !this.usingVideo
             ? html`
-                <img class="cam-frame showing" alt="Camera" />
-                <img class="cam-frame" alt="" />
-                <img class="cam-frame" alt="" />
+                <img class="cam-frame showing" alt="Camera" draggable="false" />
+                <img class="cam-frame" alt="" draggable="false" />
+                <img class="cam-frame" alt="" draggable="false" />
                 ${this.frameErrors >= FRAME_ERROR_LIMIT
                   ? html`<span class="cam-stale">No frames from the camera</span>`
                   : nothing}

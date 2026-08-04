@@ -10,6 +10,7 @@
 // because the board reads it off the SD card single-threaded.
 
 import { gzipSync } from 'node:zlib';
+import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync, cpSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
@@ -108,6 +109,33 @@ function emitStatic() {
   cpSync(depFile('dockview-core', 'dist/styles/dockview.css'), 'dist/dockview.css');
 }
 
+/**
+ * Stamp the asset links in index.html with a hash of what they point at.
+ *
+ * Without this, a rebuild is invisible. `styles.css` and `cnc.js` keep their
+ * names for ever, so a browser that has them cached — and the Duet serves
+ * static files with nothing to say otherwise — carries on using the old ones.
+ * That is not a theoretical problem: "I pulled and rebuilt and the change is
+ * not there" is indistinguishable from a bug in the change.
+ *
+ * A content hash rather than a build timestamp, so an unchanged file keeps its
+ * URL and stays cached. Rewritten from `public/index.html` every time rather
+ * than edited in place, so repeated builds do not stack stamps.
+ */
+function stampHtml() {
+  const stamp = (file) => {
+    const path = join('dist', file);
+    if (!existsSync(path)) return file;
+    const hash = createHash('sha256').update(readFileSync(path)).digest('hex').slice(0, 8);
+    return `${file}?v=${hash}`;
+  };
+  let html = readFileSync(join('public', 'index.html'), 'utf8');
+  for (const file of ['styles.css', 'dockview.css', 'cnc.js']) {
+    html = html.replace(`"${file}"`, `"${stamp(file)}"`);
+  }
+  writeFileSync(join('dist', 'index.html'), html);
+}
+
 /** Write .gz siblings for anything the Duet will serve compressed. */
 function gzipDist() {
   const compressible = /\.(js|css|html|svg|json|map)$/;
@@ -165,6 +193,9 @@ const options = {
   legalComments: 'none',
   loader: { '.css': 'text', '.glsl': 'text' },
   define: { 'process.env.NODE_ENV': prod ? '"production"' : '"development"' },
+  // After every build, watch included: the hash can only be taken once the
+  // bundle it names has been written.
+  plugins: [{ name: 'stamp-html', setup: (build) => build.onEnd(() => stampHtml()) }],
 };
 
 emitStatic();

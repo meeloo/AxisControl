@@ -119,7 +119,7 @@ cnc-dashboard { display: flex; flex-direction: column; flex: 1; min-height: 0; }
    -webkit-touch-callout stops the long-press menu that iOS puts over an image,
    which would otherwise sit on top of the camera view the moment you held a
    finger on it to aim. */
-#app {
+html, body, #app {
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
@@ -133,10 +133,21 @@ pre, code, .selectable {
   -webkit-touch-callout: default;
 }
 
-/* A picture is dragged out of the page by default, which on the camera view
-   means an aim-click that starts a drag ends up as a ghost image following the
-   pointer instead. */
-img, canvas, video { -webkit-user-drag: none; }
+/* Images are the stubborn case. An ancestor's user-select is enough in Chrome,
+   and WebKit has a long history of letting a replaced element be selected and
+   dragged anyway — which is how you end up with a blue rectangle over the
+   camera view after a double-click. So the rule is repeated on the element
+   rather than inherited, the drag is refused, and on the camera's own frames
+   the picture is taken out of hit-testing altogether: the click handler lives
+   on the wrapper, so aiming still works, and there is no longer an image under
+   the pointer for the engine to select or drag in the first place. */
+img, canvas, video {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-user-drag: none;
+  -webkit-touch-callout: none;
+}
+.cam-frame, .cam-video { pointer-events: none; }
 
 button, input, select, textarea { font-family: inherit; font-size: inherit; color: inherit; }
 

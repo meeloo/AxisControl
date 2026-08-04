@@ -154,7 +154,17 @@ export class ReolinkClient {
 
   /** Send commands. Returns the replies, or null when they cannot be read. */
   async send(commands: Command[]): Promise<Reply[] | null> {
-    const url = apiUrl(this.config, this.creds);
+    // `?cmd=` as well as the body. reolink_aio puts the command in both, and
+    // some firmware routes on the query rather than parsing the body first —
+    // on a camera whose replies cannot be read, a command silently ignored for
+    // that reason is indistinguishable from one that worked. Harmless where it
+    // is redundant, so it is always sent when there is a single command to
+    // name.
+    const url = apiUrl(
+      this.config,
+      this.creds,
+      commands.length === 1 ? { cmd: commands[0].cmd } : {},
+    );
     const init: RequestInit = {
       method: 'POST',
       // text/plain keeps the request CORS-simple, so no preflight is issued —

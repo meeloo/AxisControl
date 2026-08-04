@@ -376,6 +376,46 @@ export function installCompat(): void {
   // — `@supports (gap: 1px)` is true on Safari 12 because grid gap works there.
   // So it is measured, once, and published as a class for the stylesheet.
   document.documentElement.classList.toggle('no-flex-gap', !supportsFlexGap());
+
+  refuseSelection();
+}
+
+/**
+ * Regions where selecting text is the point, and everywhere else is not.
+ *
+ * Kept in step with the `user-select` rules in styles.css — the CSS states the
+ * intent, this enforces it.
+ */
+const SELECTABLE =
+  'input, textarea, .console-out, .om-row, pre, code, .editor-text, .diag-value, .diag-detail, .selectable';
+
+/**
+ * Refuse to start a selection outside those regions.
+ *
+ * `user-select: none` ought to be enough, and in some engines it is. But the
+ * property is specified in terms of where a selection may *begin* and says
+ * remarkably little about replaced content — an image is not text, and whether
+ * an ancestor's `none` should stop the image itself being selected is left
+ * open. Engines read that differently, and a blue rectangle over the camera
+ * view is the result of one of the readings.
+ *
+ * `selectstart` has no such ambiguity: refuse the event and no selection
+ * begins, whatever the stylesheet was taken to mean. It is checked against the
+ * same list the CSS uses, so console output and file contents still select and
+ * a double-click in a text field still takes the word.
+ */
+function refuseSelection(): void {
+  document.addEventListener('selectstart', (event) => {
+    const target = event.target;
+    const el =
+      target instanceof Element
+        ? target
+        : target instanceof Node
+          ? target.parentElement
+          : null;
+    if (el?.closest(SELECTABLE)) return;
+    event.preventDefault();
+  });
 }
 
 /**
