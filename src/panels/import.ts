@@ -42,6 +42,28 @@ interface Built {
 /** Blank margin around the drawing in the preview, px. */
 const PREVIEW_MARGIN = 16;
 
+/** How near the pointer has to be to a path to pick it, in screen pixels. */
+const PICK_SLACK = 7;
+
+/** Distance from a point to a line segment, all in the same space. */
+function distanceToSegment(
+  x: number,
+  y: number,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+): number {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const lengthSquared = dx * dx + dy * dy;
+  // A degenerate segment is a point, and the projection below would divide by
+  // zero rather than say so.
+  if (lengthSquared < 1e-12) return Math.hypot(x - ax, y - ay);
+  const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / lengthSquared));
+  return Math.hypot(x - (ax + t * dx), y - (ay + t * dy));
+}
+
 /**
  * A point some way along a path, with the direction of travel there.
  *
@@ -112,6 +134,19 @@ export class ImportPanel extends PanelElement {
   private resizeObserver: ResizeObserver | null = null;
   /** Last result of build(), kept so the canvas draws what the buttons will run. */
   private built: Built | null = null;
+  /**
+   * Paths left out of the cut, by index into `placed`.
+   *
+   * Indices rather than identities because the geometry is recomputed from the
+   * file on every render — nothing persists to hold an id on. That makes the
+   * set only as stable as the path *count*, so anything that re-chains the
+   * drawing has to clear it (see `rechain`).
+   */
+  private excluded = new Set<number>();
+  /** Path under the pointer in the preview, for highlighting and the cursor. */
+  private hovered: number | null = null;
+  /** Screen mapping from the last draw, so a click can be turned back into geometry. */
+  private view: { cx: number; cy: number; scale: number; w: number; h: number } | null = null;
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -146,6 +181,7 @@ export class ImportPanel extends PanelElement {
   private async loadFile(file: File): Promise<void> {
     this.busy = true;
     this.error = null;
+    this.rechain();
     this.requestUpdate();
     try {
       const text = await file.text();
@@ -222,15 +258,50 @@ export class ImportPanel extends PanelElement {
     if (!drawing) return null;
     const paths = this.placed;
     if (!paths.length) return null;
+    const chosen = paths.filter((_, i) => !this.excluded.has(i));
+    if (!chosen.length) return null;
 
-    const { loops, warnings } = offsetPaths(paths, {
-      side: this.side,
-      toolDiameter: this.toolDiameter,
-      allowance: this.allowance,
-      tolerance: this.curveTolerance,
-    });
+    let ready: Polyline[];
+    let warnings: string[];
 
-    const ready = orderForCut(orientForCut(loops, this.climb, this.side));
+    if (this.side === 'on') {
+      // No compensation, so nothing needs a side and everything is cut alike.
+      const result = offsetPaths(chosen, {
+        side: 'on',
+        toolDiameter: this.toolDiameter,
+        allowance: this.allowance,
+        tolerance: this.curveTolerance,
+      });
+      ready = result.loops;
+      warnings = result.warnings;
+    } else {
+      // An open path has no inside and no outside, so it cannot be offset to a
+      // side — but that is a reason to cut it on the line, not a reason to
+      // throw it away. A drawing is usually a profile plus some engraving, and
+      // dropping the engraving silently because the profile wanted an offset
+      // loses half the file.
+      const closed = chosen.filter((p) => p.closed && p.points.length >= 3);
+      const open = chosen.filter((p) => !(p.closed && p.points.length >= 3));
+
+      // Only when there is something to offset: asked to offset nothing,
+      // Clipper's wrapper rightly complains, and "no closed profiles" is not a
+      // problem worth reporting on a drawing that is all engraving.
+      const result = closed.length
+        ? offsetPaths(closed, {
+            side: this.side,
+            toolDiameter: this.toolDiameter,
+            allowance: this.allowance,
+            tolerance: this.curveTolerance,
+          })
+        : { loops: [], warnings: [] };
+      warnings = result.warnings;
+      // Open paths first. They are detail cut into stock that is still whole;
+      // running them after a profile has been cut free means engraving a part
+      // held on by tabs. profile() then says how wide the tool makes them.
+      ready = [...open, ...orderForCut(orientForCut(result.loops, this.climb, this.side))];
+    }
+
+    if (!ready.length) return null;
     const size = this.size;
 
     const program = profile(ready, {
@@ -318,6 +389,7 @@ export class ImportPanel extends PanelElement {
 
     const cx = (minX + maxX) / 2;
     const cy = (minY + maxY) / 2;
+    this.view = { cx, cy, scale, w: width, h: height };
     // Machine Y grows up, canvas Y grows down. Getting this wrong here would
     // show a mirrored part as correct, which is the one mistake the preview
     // exists to catch.
@@ -335,17 +407,23 @@ export class ImportPanel extends PanelElement {
     };
 
     // The drawing, thin and faint: it is the reference, not the instruction.
+    // Dashed means "not being cut" — the one distinction worth spending the
+    // line style on, since a path left out is otherwise indistinguishable from
+    // one the tool simply has not reached.
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
-    ctx.strokeStyle = colour('--text-faint', '#8a94a1');
-    ctx.lineWidth = 1;
-    for (const path of source) {
-      // An open path cannot be offset, and is dashed to say so before the
-      // warning underneath has to.
-      ctx.setLineDash(path.closed ? [] : [3, 3]);
+    source.forEach((path, index) => {
+      const out = this.excluded.has(index);
+      ctx.strokeStyle = out
+        ? colour('--text-faint', '#8a94a1')
+        : colour('--text-dim', '#55606d');
+      ctx.lineWidth = index === this.hovered ? 2.5 : 1;
+      ctx.setLineDash(out ? [4, 4] : []);
+      ctx.globalAlpha = out ? 0.55 : 1;
       trace(path);
-    }
+    });
     ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
 
     if (nearOrigin) this.drawOrigin(ctx, px(0), py(0), colour('--text-dim', '#55606d'));
 
@@ -360,6 +438,79 @@ export class ImportPanel extends PanelElement {
       const at = alongPath(loop, 0.3);
       if (at) this.drawArrow(ctx, px(at.x), py(at.y), at.dx, -at.dy);
     }
+  }
+
+  // --- Picking a path out of the picture ----------------------------------
+
+  /**
+   * Which path is under this point on the canvas, or null.
+   *
+   * Measured in screen pixels rather than millimetres, so the tolerance is the
+   * same size to the eye whatever the drawing is scaled to — 6mm of slack on a
+   * zoomed-out metre-long part would swallow everything.
+   */
+  private pathAt(offsetX: number, offsetY: number): number | null {
+    const view = this.view;
+    const paths = this.built?.source ?? this.placed;
+    if (!view || !paths.length) return null;
+
+    const px = (x: number): number => view.w / 2 + (x - view.cx) * view.scale;
+    const py = (y: number): number => view.h / 2 - (y - view.cy) * view.scale;
+
+    let best: number | null = null;
+    let bestDistance = PICK_SLACK;
+    paths.forEach((path, index) => {
+      const pts = path.points;
+      const last = path.closed ? pts.length : pts.length - 1;
+      for (let i = 0; i < last; i++) {
+        const a = pts[i];
+        const b = pts[(i + 1) % pts.length];
+        const d = distanceToSegment(
+          offsetX,
+          offsetY,
+          px(a[0]),
+          py(a[1]),
+          px(b[0]),
+          py(b[1]),
+        );
+        if (d < bestDistance) {
+          bestDistance = d;
+          best = index;
+        }
+      }
+    });
+    return best;
+  }
+
+  private onPreviewMove(e: MouseEvent): void {
+    const found = this.pathAt(e.offsetX, e.offsetY);
+    if (found === this.hovered) return;
+    this.hovered = found;
+    // Redraw directly: nothing in the template depends on the hover except the
+    // cursor, and a full re-render rebuilds the whole tool path to move a
+    // highlight.
+    if (this.canvas) this.canvas.style.cursor = found === null ? '' : 'pointer';
+    this.draw();
+  }
+
+  private onPreviewClick(e: MouseEvent): void {
+    const found = this.pathAt(e.offsetX, e.offsetY);
+    if (found === null) return;
+    if (this.excluded.has(found)) this.excluded.delete(found);
+    else this.excluded.add(found);
+    this.requestUpdate();
+  }
+
+  /**
+   * Forget which paths were left out.
+   *
+   * The set is keyed by position in the chained path list, and joining segments
+   * differently renumbers that list — so a tolerance change would silently move
+   * the exclusions onto other paths. Clearing is the honest answer.
+   */
+  private rechain(): void {
+    this.excluded.clear();
+    this.hovered = null;
   }
 
   /** The work origin: a quartered circle, the way a drawing datum is marked. */
@@ -473,16 +624,28 @@ export class ImportPanel extends PanelElement {
         ${numberField('Origin X', this.originX, (v) => ((this.originX = v), this.requestUpdate()), { suffix: 'mm', capture: fromAxis('X', 'work') })}
         ${numberField('Origin Y', this.originY, (v) => ((this.originY = v), this.requestUpdate()), { suffix: 'mm', capture: fromAxis('Y', 'work') })}
         ${numberField('Curve tolerance', this.curveTolerance, (v) => ((this.curveTolerance = v), this.requestUpdate()), { suffix: 'mm', step: 0.005, title: 'How far a flattened curve may stray from the true one.' })}
-        ${numberField('Join gap', this.joinTolerance, (v) => ((this.joinTolerance = v), this.requestUpdate()), { suffix: 'mm', step: 0.01, title: 'Segment ends this close are treated as joined. A DXF rectangle is four separate lines and needs this to become one loop.' })}
+        ${numberField('Join gap', this.joinTolerance, (v) => ((this.joinTolerance = v), this.rechain(), this.requestUpdate()), { suffix: 'mm', step: 0.01, title: 'Segment ends this close are treated as joined. A DXF rectangle is four separate lines and needs this to become one loop. Changing it renumbers the paths, so anything left out of the cut comes back.' })}
       </div>
     `;
   }
 
   private renderPreview(): TemplateResult {
     const cut = this.built?.cut.length ?? 0;
+    const total = (this.built?.source ?? this.placed).length;
+    const left = this.excluded.size;
     return html`
       <div class="import-preview">
-        <canvas class="import-canvas"></canvas>
+        <canvas
+          class="import-canvas"
+          title="Click a path to leave it out of the cut, or to put it back."
+          @mousemove=${(e: MouseEvent) => this.onPreviewMove(e)}
+          @mouseleave=${() => {
+            if (this.hovered === null) return;
+            this.hovered = null;
+            this.draw();
+          }}
+          @click=${(e: MouseEvent) => this.onPreviewClick(e)}
+        ></canvas>
         <div class="import-legend">
           <span class="import-key drawing">drawing</span>
           <span class="import-key cut">
@@ -491,6 +654,14 @@ export class ImportPanel extends PanelElement {
               : 'no tool path'}
           </span>
           <span class="hint">arrow shows cut direction</span>
+          <span class="import-picked">
+            ${left
+              ? html`${total - left} of ${total} paths
+                  <button class="tiny" @click=${() => (this.excluded.clear(), this.requestUpdate())}>
+                    Cut all
+                  </button>`
+              : html`click a path to leave it out`}
+          </span>
         </div>
       </div>
     `;
@@ -549,7 +720,7 @@ export class ImportPanel extends PanelElement {
                 : nothing}
               ${built ? html`<div class="pack-note">${built.program.summary}</div>` : nothing}
               <div class="pack-actions">
-                <button class="tiny" @click=${() => ((this.drawing = null), this.requestUpdate())}>
+                <button class="tiny" @click=${() => ((this.drawing = null), this.rechain(), this.requestUpdate())}>
                   Another file
                 </button>
                 <button ?disabled=${!built} @click=${() => built && preview(built.program)}>

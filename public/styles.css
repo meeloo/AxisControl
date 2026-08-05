@@ -537,8 +537,12 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .import-key { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .import-key::before { content: ''; width: 14px; height: 0; flex: none;
   border-top: 2px solid currentColor; }
-.import-key.drawing { color: var(--text-faint); }
+.import-key.drawing { color: var(--text-dim); }
 .import-key.cut { color: var(--accent); }
+/* Pushed to the far end: it is a state readout, not a third key. */
+.import-picked { margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
+  white-space: nowrap; }
+.import-picked button { min-height: 22px; padding: 1px 7px; }
 
 /* ---------- Macros ---------- */
 
