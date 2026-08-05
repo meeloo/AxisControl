@@ -1280,6 +1280,19 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
    touch screen are a coin toss about which one moves. */
 .atc-scroll { flex: 1; min-height: 0; overflow: auto; }
 
+/* The bank selector. Wraps rather than scrolls: a machine has two or three
+   banks, not twenty, and a row that wraps is readable at any panel width. */
+.atc-banks { display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.atc-banks .seg { flex: 0 1 auto; min-width: 0; display: inline-flex; gap: 6px;
+  align-items: baseline; }
+.atc-banks .seg em { font-style: normal; font-family: var(--mono); font-size: 11px;
+  opacity: 0.7; }
+.atc-banks .seg.active em { opacity: 0.85; }
+.atc-bank-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline;
+  margin: 14px 0 4px; padding: 0 12px; font-size: 12px; }
+.atc-bank-head em { font-style: normal; font-size: 11px; color: var(--text-dim); }
+
 .atc-group { border-bottom: 1px solid var(--border); padding-bottom: 4px; }
 .atc-group:last-child { border-bottom: 0; }
 .atc-group h4 { margin: 0; padding: 10px 12px 0; font-size: 12px;
