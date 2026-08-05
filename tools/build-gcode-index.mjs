@@ -147,7 +147,18 @@ function parseParam(line) {
   };
 }
 
-function parseIndex(html) {
+function parseIndex(rawHtml) {
+  // wiki.js puts a permalink inside every heading:
+  //
+  //   <h2 id="m5811-..."><a class="toc-anchor" href="#m5811-...">¶</a> M581.1: …</h2>
+  //
+  // so the heading text begins "¶ M581.1: …" and no code heading matches, and
+  // the section labels read "¶ Parameters" so no section is found either. One
+  // pass over the document removing them is the whole fix — and it is why the
+  // parser found exactly zero of 400-odd codes rather than some of them, which
+  // is the shape of a structural miss rather than a fussy selector.
+  const html = rawHtml.replace(/<a\b[^>]*class="[^"]*toc-anchor[^"]*"[^>]*>[\s\S]*?<\/a>/gi, '');
+
   // Headings carry the code; everything until the next heading of the same or
   // higher level belongs to it.
   const headingRe = /<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi;
