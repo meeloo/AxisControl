@@ -420,6 +420,83 @@ export class JogPanel extends PanelElement {
     `;
   }
 
+  // --- Work zero ----------------------------------------------------------
+
+  /**
+   * Where work zero is in machine coordinates, so the tooltip can show it.
+   *
+   * Worth showing: the button goes to the origin of whichever WCS is active,
+   * and the commonest way for this to surprise someone is that it is not the
+   * WCS they thought.
+   */
+  private zeroAt(letter: string): number | null {
+    const axis = machine.get().axes.find((a) => a.letter === letter);
+    if (!axis || !axis.homed) return null;
+    return Math.round((axis.machine - axis.work) * 1000) / 1000;
+  }
+
+  /**
+   * Rapid to the work origin.
+   *
+   * Z goes up first, always, and that is not negotiable: X and Y moving with
+   * the tool still down drags it through whatever is on the table, and "I was
+   * already clear" is not something a button can know. It costs a rapid on an
+   * axis that is 135mm long here, and it cannot crash.
+   *
+   * With Z, the descent comes last and lands on work zero — which is the whole
+   * point of the button, and also the reason it is a separate one from XY.
+   *
+   * M120/M121 around it so the machine is left in whatever distance mode it was
+   * in; jog moves are relative, and leaving G90 set behind would make the next
+   * one absolute.
+   */
+  private goWorkZero(withZ: boolean): void {
+    const z = machine.get().axes.find((a) => a.letter === 'Z');
+    const lift = z && isFinite(z.max) ? `G53 G0 Z${z.max}\n` : '';
+    const descend = withZ ? 'G0 Z0\n' : '';
+    void actions.send(`M120\nG90\n${lift}G0 X0 Y0\n${descend}M121`);
+  }
+
+  /** Every axis the work-zero moves touch has to know where it is. */
+  private get zeroReady(): boolean {
+    const axes = machine.get().axes;
+    return ['X', 'Y', 'Z'].every((l) => axes.find((a) => a.letter === l)?.homed === true);
+  }
+
+  private renderWorkZero(): TemplateResult {
+    const ready = this.canMove && this.zeroReady;
+    const at = (l: string) => {
+      const v = this.zeroAt(l);
+      return v === null ? '?' : String(v);
+    };
+    const where = `work zero is X${at('X')} Y${at('Y')} Z${at('Z')} in machine coordinates`;
+    const why = !this.zeroReady
+      ? 'Home X, Y and Z first — a work offset means nothing until the machine knows where it is.'
+      : '';
+
+    return html`
+      <span class="label">Work zero</span>
+      <div class="segmented">
+        <button
+          class="seg"
+          ?disabled=${!ready}
+          title=${why || `Lift Z clear, then rapid to X0 Y0 — ${where}`}
+          @click=${() => this.goWorkZero(false)}
+        >
+          XY
+        </button>
+        <button
+          class="seg"
+          ?disabled=${!ready}
+          title=${why || `Lift Z clear, rapid to X0 Y0, then down to Z0 — ${where}`}
+          @click=${() => this.goWorkZero(true)}
+        >
+          XYZ
+        </button>
+      </div>
+    `;
+  }
+
   // --- Cursors ------------------------------------------------------------
 
   private renderCursors(): TemplateResult {
@@ -495,6 +572,7 @@ export class JogPanel extends PanelElement {
         </div>
 
         <div class="jog-foot">
+          ${this.renderWorkZero()}
           <span class="label">Rings</span>
           <div class="segmented">
             ${[2, 3, 4, 5, 6].map(

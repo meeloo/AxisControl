@@ -96,6 +96,10 @@ export class CarveraDriver implements MachineDriver {
   async clearRotation(): Promise<void> {
     todo('clearRotation');
   }
+  async reset(): Promise<void> {
+    todo('reset');
+  }
+
   async emergencyStop(): Promise<void> {
     todo('emergencyStop');
   }

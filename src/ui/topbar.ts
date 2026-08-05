@@ -274,9 +274,29 @@ export class TopBar extends PanelElement {
     `;
   }
 
+  /**
+   * M999, with a question first.
+   *
+   * Unlike the stop beside it, this is not something you ever press in a hurry:
+   * it reboots the board, which drops the job, forgets homing and takes the
+   * network with it for a few seconds. Nothing about pressing a small button
+   * says any of that, so it is said.
+   */
+  private restart(): void {
+    const halted = machine.peek().status === 'halted';
+    const detail = halted
+      ? 'Restart the controller (M999)?\n\nThe controller is halted and this is the way back. It reboots, ' +
+        'so homing is lost and it will be off the network for a few seconds.'
+      : 'Restart the controller (M999)?\n\nIt reboots: any job stops, homing is lost, and it will be off ' +
+        'the network for a few seconds.';
+    if (!confirm(detail)) return;
+    void actions.reset();
+  }
+
   protected override render(): TemplateResult {
     const state = machine.get();
     const live = connected.get();
+    const halted = state.status === 'halted';
     const busy = connecting.get();
     const err = connectionError.get();
     const info = driverInfo(driverId.get());
@@ -318,6 +338,21 @@ export class TopBar extends PanelElement {
             : nothing}
         </div>
 
+        <!-- Restart sits beside Stop because it is the way back from it: after
+             M112 the firmware refuses everything until it is reset, and a panel
+             that can stop a machine but not start it again is half a control.
+             It steps forward when the machine is actually halted, which is the
+             one moment nothing else on this bar will do anything. -->
+        <button
+          class=${halted ? 'restart urgent' : 'restart'}
+          ?disabled=${!live}
+          title=${halted
+            ? 'The controller is halted. Restart it (M999) to bring it back.'
+            : 'Restart the controller firmware (M999)'}
+          @click=${() => this.restart()}
+        >
+          ${halted ? 'RESTART' : 'Restart'}
+        </button>
         <button class="estop" title="Emergency stop (M112) — or press Escape twice"
           @click=${() => void actions.estop()}>
           STOP

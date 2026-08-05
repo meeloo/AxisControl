@@ -824,6 +824,15 @@ function handleGcode(gcode) {
         }, 3000);
       }
       bumpSeq('state');
+    } else if (/^M999\b/.test(upper.trim()) && !/PROBE/.test(upper)) {
+      // A restart. The real board reboots — it stops answering for a few
+      // seconds and comes back with nothing homed — so the parts a client can
+      // observe are reproduced: the halt clears and the reference is gone.
+      state.status = 'idle';
+      for (const a of axes) a.homed = false;
+      pushReply('Resetting');
+      bumpSeq('state');
+      bumpSeq('move');
     } else if (upper.startsWith('M112')) {
       state.status = 'halted';
       spindle.state = 'stopped';
@@ -987,15 +996,31 @@ function handleGcode(gcode) {
       rotation.angle = 0;
       rotation.centre = [0, 0];
       bumpSeq('move');
-    } else if (upper.startsWith('G1') || upper.startsWith('G0')) {
+    } else if (/^(?:G53\s+)?G[01](?![\d.])/.test(upper)) {
+      // A move, with or without the G53 prefix. Matching only lines that START
+      // with G0/G1 meant every "G53 G0 X…" — which is how the ATC macros and
+      // anything else that works in machine coordinates are written — was
+      // dropped on the floor without a word.
       const relative = cmds.some((c) => c.toUpperCase() === 'G91');
+      // G53 means "this line is in machine coordinates"; without it an absolute
+      // move is in the active workplace and the offset has to be added. Taking
+      // the number as a machine coordinate regardless made "go to work zero"
+      // land on the machine origin in the fixture while doing the right thing
+      // on a real board — a mock that quietly disagrees with the firmware is
+      // worse than no mock.
+      // On this line, not on one of its own: G53 is a modifier that applies to
+      // the move it prefixes — "G53 G0 X0" — and only to that one. G91 is the
+      // opposite, a mode set on its own line, which is why the two are tested
+      // differently.
+      const machineCoords = /(?:^|\s)G53(?:\s|$)/.test(upper);
       for (const a of axes) {
         const m = new RegExp(`${a.letter}(-?[\\d.]+)`).exec(upper);
         if (m) {
           const v = Number(m[1]);
-          a.machinePosition = relative
-            ? Math.max(a.min, Math.min(a.max, a.machinePosition + v))
-            : v;
+          const target = relative
+            ? a.machinePosition + v
+            : v + (machineCoords ? 0 : a.workplaceOffsets[workplaceNumber]);
+          a.machinePosition = Math.max(a.min, Math.min(a.max, target));
         }
       }
       bumpSeq('move');

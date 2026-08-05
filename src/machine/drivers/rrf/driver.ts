@@ -499,6 +499,21 @@ export class RrfDriver implements MachineDriver {
     await this.requireClient().gcode('M112');
   }
 
+  /**
+   * M999 — restart the firmware.
+   *
+   * Sent through the client rather than send(), which waits for a reply: the
+   * board reboots instead of answering, so waiting can only ever time out.
+   *
+   * The board goes away for a few seconds afterwards. The poll loop already
+   * treats that as a lost connection and reconnects, so nothing else is needed
+   * here beyond not tearing down the session ourselves.
+   */
+  async reset(): Promise<void> {
+    this.log('warning', 'RESTART (M999) — the controller will reboot');
+    await this.requireClient().gcode('M999');
+  }
+
   async setSpindle(rpm: number, direction: 'forward' | 'reverse'): Promise<void> {
     await this.send(`${direction === 'forward' ? 'M3' : 'M4'} S${rpm}`);
   }

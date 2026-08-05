@@ -178,6 +178,7 @@ export const actions = {
     run('set rotation', (d) => d.setRotation(angle, centreX, centreY)),
   clearRotation: () => run('clear rotation', (d) => d.clearRotation()),
   estop: () => run('emergency stop', (d) => d.emergencyStop()),
+  reset: () => run('restart controller', (d) => d.reset()),
   setSpindle: (rpm: number, dir: 'forward' | 'reverse') =>
     run('set spindle', (d) => d.setSpindle(rpm, dir)),
   stopSpindle: () => run('stop spindle', (d) => d.stopSpindle()),

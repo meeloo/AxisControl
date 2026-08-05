@@ -1565,3 +1565,16 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .rose-cell.stuck text { fill: var(--text-faint); }
 .jog-cursor-note { font-style: normal; font-size: 10px; color: var(--text-faint);
   text-transform: uppercase; letter-spacing: 0.06em; }
+
+/* Restart, beside Stop. Quiet until the machine is halted, when it is the only
+   control on the bar that will do anything — see the note in ui/topbar.ts. */
+.restart { flex: none; font-weight: 600; }
+.restart.urgent {
+  background: var(--warn); border-color: var(--warn); color: #fff;
+  animation: restart-pulse 1.6s ease-in-out infinite;
+}
+.restart.urgent:hover:not(:disabled) { background: color-mix(in srgb, var(--warn) 88%, white); }
+@keyframes restart-pulse { 50% { opacity: 0.72; } }
+/* A blinking button is worse than a still one for anyone who finds motion
+   painful, and the colour alone still says it. */
+@media (prefers-reduced-motion: reduce) { .restart.urgent { animation: none; } }

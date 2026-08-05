@@ -98,6 +98,14 @@ export interface MachineDriver {
   /** Cancel any coordinate rotation. */
   clearRotation(): Promise<void>;
   emergencyStop(): Promise<void>;
+  /**
+   * Bring the controller back from an emergency stop.
+   *
+   * Separate from emergencyStop because it is the only way out of one: after
+   * M112 the firmware refuses everything until it is reset, and without this
+   * the app can stop a machine it cannot start again.
+   */
+  reset(): Promise<void>;
 
   // --- Spindle -----------------------------------------------------------
   setSpindle(rpm: number, direction: 'forward' | 'reverse'): Promise<void>;
