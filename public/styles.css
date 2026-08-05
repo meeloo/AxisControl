@@ -1463,3 +1463,49 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
   flex: 1 1 auto; min-width: 0; color: var(--text-dim);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+
+/* ---------- Which folder a panel opens in ---------- */
+
+.dirpick { position: relative; flex: 0 1 auto; min-width: 0; }
+.dirpick-open { display: inline-flex; gap: 4px; align-items: baseline; max-width: 100%; }
+.dirpick-path { font-family: var(--mono); overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; min-width: 0; }
+.dirpick-caret { flex: none; opacity: 0.6; }
+
+/* Above the panel it sits in, and wide enough to read a path. Not inside any
+   scrolling list — a menu that scrolls away with the list it is filtering is
+   worse than no menu. */
+.dirpick-menu {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 60;
+  min-width: max(240px, 100%); max-width: min(420px, 88vw);
+  background: var(--bg-panel); border: 1px solid var(--border-strong);
+  border-radius: var(--radius); box-shadow: 0 8px 24px var(--shadow); padding: 6px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.dirpick-head { display: flex; gap: 6px; align-items: center; }
+/* No direction: rtl to keep the tail visible — it moves the leading slash to
+   the end, so /sys renders as "sys/". A path that reads wrong is worse than a
+   path that is cut short. */
+.dirpick-here { flex: 1 1 auto; min-width: 0; font-family: var(--mono); font-size: 11px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dirpick-list { flex: 1 1 auto; min-height: 0; max-height: 40vh; overflow-y: auto;
+  -webkit-overflow-scrolling: touch; display: flex; flex-direction: column; gap: 2px; }
+.dirpick-item { flex: none; text-align: left; background: transparent; border: 0;
+  padding: 5px 8px; min-height: 30px; font-family: var(--mono); font-size: 12px;
+  border-radius: 4px; }
+.dirpick-item:hover { background: var(--bg-raised); }
+.dirpick-actions { display: flex; gap: 6px; align-items: center; }
+.dirpick-error { color: var(--bad); font-size: 11px; }
+
+/* The Files panel navigates already, so it only needs "start here". */
+.files-bar .pinned { color: var(--accent); border-color: var(--accent); }
+
+.macro-bar .hint { flex: none; }
+.macro-bar .dirpick { margin-right: auto; }
+
+/* The folder chooser must not be clipped by the list it sits above, so the
+   scrolling moved inside. */
+.viewer-picker { overflow: visible; display: flex; flex-direction: column; gap: 6px; }
+.viewer-picker-bar { flex: none; display: flex; align-items: center; }
+.viewer-picker-list { flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  -webkit-overflow-scrolling: touch; }

@@ -99,6 +99,16 @@ const tools = [
 // Sizes are patched from FILE_CONTENT below so job progress is consistent with
 // what the viewer actually parses.
 const FILES = {
+  // The card root. A real board lists its top-level directories here, and DWC
+  // shows them; the mock did not, which quietly made "browse up from /gcodes"
+  // untestable and looked like the app's fault rather than the fixture's.
+  '/': [
+    { type: 'd', name: 'sys', size: 0, date: '2026-06-20T09:00:00' },
+    { type: 'd', name: 'macros', size: 0, date: '2026-06-20T09:00:00' },
+    { type: 'd', name: 'gcodes', size: 0, date: '2026-06-20T09:00:00' },
+    { type: 'd', name: 'filaments', size: 0, date: '2026-06-20T09:00:00' },
+    { type: 'd', name: 'www', size: 0, date: '2026-06-20T09:00:00' },
+  ],
   '/sys': [
     { type: 'f', name: 'config.g', size: 1042, date: '2026-07-01T10:12:00' },
     { type: 'f', name: 'atcConfig.g', size: 2310, date: '2026-07-02T18:40:00' },
@@ -596,7 +606,10 @@ const server = createServer(async (req, res) => {
 
     case '/rr_filelist': {
       const dir = url.searchParams.get('dir') ?? '/';
-      const files = FILES[dir.replace(/\/$/, '')] ?? null;
+      // Trailing slash stripped, except from the root itself — "/" normalised
+      // to "" looked up nothing, so the card root listed as "does not exist".
+      const key = dir.length > 1 ? dir.replace(/\/$/, '') : dir;
+      const files = FILES[key] ?? null;
       if (!files) return sendJson(res, { dir, first: 0, files: [], next: 0, err: 2 });
       return sendJson(res, { dir, first: 0, files, next: 0, err: 0 });
     }

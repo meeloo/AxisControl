@@ -30,6 +30,7 @@ import {
 import { formatDuration } from '../core/util.js';
 import { toolShape, type ToolShape } from '../tools/shape.js';
 import { getTool, loadTools } from '../tools/table.js';
+import { dirPicker, panelDir } from '../ui/folder.js';
 
 /**
  * Zoom per wheel event, as a fraction of the current distance.
@@ -585,9 +586,15 @@ export class ViewerPanel extends PanelElement {
     this.requestUpdate();
     if (!this.pickerOpen) return;
 
+    await this.listFolder();
+  }
+
+  /** List whichever folder this panel has been pointed at. */
+  private async listFolder(): Promise<void> {
     const driver = activeDriver();
     if (!driver) return;
-    const root = capabilities.peek().gcodeRoot;
+    const home = capabilities.peek().gcodeRoot;
+    const root = panelDir('viewer', home) ?? home;
     const entries = await run('list G-code', (d) => d.listFiles(root));
     this.files = (entries ?? []).filter((e) => !e.directory && /\.(g|gcode|nc|tap)$/i.test(e.name));
     this.requestUpdate();
@@ -924,6 +931,10 @@ export class ViewerPanel extends PanelElement {
         ${this.pickerOpen
           ? html`
               <div class="viewer-picker">
+                <div class="viewer-picker-bar">
+                  ${dirPicker('viewer', caps.gcodeRoot, () => void this.listFolder())}
+                </div>
+                <div class="viewer-picker-list">
                 ${this.files.length
                   ? this.files.map(
                       (f) => html`
@@ -932,7 +943,10 @@ export class ViewerPanel extends PanelElement {
                         </button>
                       `,
                     )
-                  : html`<div class="empty">No G-code files in ${caps.gcodeRoot}</div>`}
+                  : html`<div class="empty">
+                      No G-code files in ${panelDir('viewer', caps.gcodeRoot)}
+                    </div>`}
+                </div>
               </div>
             `
           : nothing}

@@ -23,6 +23,7 @@ import {
 } from '../core/store.js';
 import { BUSY_STATES, type FileEntry } from '../machine/types.js';
 import { empty } from '../ui/widgets.js';
+import { dirPicker, panelDir } from '../ui/folder.js';
 
 /** Macros grouped by the folder they live in, root first. */
 interface MacroGroup {
@@ -81,7 +82,7 @@ export class MacrosPanel extends PanelElement {
     // Load once per connection rather than on every render — the machine signal
     // ticks four times a second and a filelist walk per tick would hammer the
     // board for a directory that changes about once a month.
-    const root = capabilities.peek().macroRoot;
+    const root = panelDir('macros', capabilities.peek().macroRoot);
     const key = connected.peek() ? root : null;
     if (key && this.loadedFor !== key && !this.loading) {
       this.loadedFor = key;
@@ -100,7 +101,8 @@ export class MacrosPanel extends PanelElement {
 
   private async load(): Promise<void> {
     const driver = activeDriver();
-    const root = capabilities.peek().macroRoot;
+    const home = capabilities.peek().macroRoot;
+    const root = panelDir('macros', home);
     if (!driver || !root) return;
 
     this.loading = true;
@@ -110,8 +112,15 @@ export class MacrosPanel extends PanelElement {
     try {
       this.groups = await this.walk(driver, root, '', 0);
     } catch (err) {
-      this.error = (err as Error).message;
-      this.groups = [];
+      // A chosen folder can be renamed or deleted between sessions. Say so and
+      // show the macros that are there rather than an empty panel.
+      if (root !== home && home) {
+        this.error = `${root} is not there any more — showing ${home}.`;
+        this.groups = await this.walk(driver, home, '', 0).catch(() => []);
+      } else {
+        this.error = (err as Error).message;
+        this.groups = [];
+      }
     } finally {
       this.loading = false;
       this.requestUpdate();
@@ -220,7 +229,12 @@ export class MacrosPanel extends PanelElement {
     return html`
       <div class="macros">
         <div class="macro-bar">
-          <span class="hint">${count} macro${count === 1 ? '' : 's'} in ${caps.macroRoot}</span>
+          <span class="hint">${count} macro${count === 1 ? '' : 's'} in</span>
+          ${dirPicker('macros', caps.macroRoot, () => {
+            this.loadedFor = null;
+            void this.load();
+            this.requestUpdate();
+          })}
           <label class="macro-confirm" title="Ask before running. Off means one press runs it.">
             <input
               type="checkbox"
@@ -235,7 +249,7 @@ export class MacrosPanel extends PanelElement {
         </div>
         ${this.error ? html`<div class="warn-banner">${this.error}</div>` : nothing}
         ${!this.loading && !count && !this.error
-          ? empty(`No .g files under ${caps.macroRoot}.`)
+          ? empty(`No .g files under ${panelDir('macros', caps.macroRoot)}.`)
           : nothing}
         <div class="macro-scroll">${this.groups.map((g) => this.renderGroup(g))}</div>
         ${live && !this.canRun

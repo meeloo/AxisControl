@@ -14,6 +14,7 @@ import { basename, formatBytes, parentPath } from '../core/util.js';
 import type { FileEntry } from '../machine/types.js';
 import { enableGcodeComplete } from '../ui/complete.js';
 import { paintGcode } from '../ui/gcode-color.js';
+import { panelDir, setPanelDir } from '../ui/folder.js';
 
 const TEXT_EXTENSIONS = /\.(g|gcode|nc|txt|json|csv|md|cfg|conf|ini|log)$/i;
 /** Which of those are G-code, and so get completion and colour. */
@@ -54,7 +55,7 @@ export class FilesPanel extends PanelElement {
       const now = connected.get();
       if (now && !wasConnected) {
         const caps = capabilities.peek();
-        this.cwd = caps.configRoot ?? caps.gcodeRoot;
+        this.cwd = panelDir('files', caps.configRoot ?? caps.gcodeRoot) ?? '/';
         void this.load();
       }
       wasConnected = now;
@@ -112,8 +113,18 @@ export class FilesPanel extends PanelElement {
       this.entries = await driver.listFiles(dir);
       this.cwd = dir;
     } catch (err) {
-      this.error = (err as Error).message;
-      this.entries = [];
+      // A remembered folder can be deleted, or belong to a different card. Fall
+      // back to the controller's own root rather than leaving the panel stuck
+      // on a folder the operator cannot navigate out of.
+      const home = capabilities.peek().configRoot ?? capabilities.peek().gcodeRoot;
+      if (dir !== home && home) {
+        this.error = `${dir} is not there any more — showing ${home}.`;
+        this.entries = await driver.listFiles(home).catch(() => []);
+        this.cwd = home;
+      } else {
+        this.error = (err as Error).message;
+        this.entries = [];
+      }
     } finally {
       this.loading = false;
       this.requestUpdate();
@@ -238,6 +249,18 @@ export class FilesPanel extends PanelElement {
           </button>
           <button class="tiny" title="Refresh" @click=${() => void this.load()}>⟳</button>
           <span class="files-path">${this.cwd}</span>
+          <button
+            class=${panelDir('files', null) === this.cwd ? 'tiny pin pinned' : 'tiny pin'}
+            title=${panelDir('files', null) === this.cwd
+              ? 'This panel opens here. Click to forget it.'
+              : `Open in ${this.cwd} next time`}
+            @click=${() => {
+              setPanelDir('files', panelDir('files', null) === this.cwd ? null : this.cwd);
+              this.requestUpdate();
+            }}
+          >
+            ${panelDir('files', null) === this.cwd ? '★' : '☆'}
+          </button>
         </div>
 
         ${this.error ? html`<div class="files-error">${this.error}</div>` : nothing}
