@@ -1339,8 +1339,15 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 @media (max-width: 620px) { .gc-body { grid-template-columns: minmax(0, 1fr); } }
 .gc-hits { overflow-y: auto; -webkit-overflow-scrolling: touch; min-height: 0;
   display: flex; flex-direction: column; gap: 1px; }
+/* flex: none is load-bearing. These are flex children of a column with a
+   bounded height, so they default to flex-shrink: 1 and get squashed below
+   their own content — 80 rows into the space for 40. The text still paints at
+   full size and overflows, but the background only fills the crushed box, so
+   the hover highlight lands on a row you are not pointing at. Nothing about
+   the symptom suggests "the rows are the wrong height", which is what made it
+   look like a misplaced overlay. */
 .gc-hit { display: flex; gap: 8px; align-items: baseline; text-align: left;
-  min-width: 0; padding: 4px 6px; min-height: 0;
+  flex: none; min-width: 0; padding: 4px 6px; min-height: 0;
   background: transparent; border-color: transparent; font-size: 12px; }
 .gc-hit strong { font-family: var(--mono); flex: none; }
 .gc-hit span { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis;
