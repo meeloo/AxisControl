@@ -1,6 +1,6 @@
 {
   "name": "axiscontrol",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A CNC-first web front end for RepRapFirmware controllers",
   "license": "Apache-2.0",
   "author": "Sébastien Métrot",
