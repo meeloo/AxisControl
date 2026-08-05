@@ -38,6 +38,21 @@ export function nearestStep(value: number): number {
 }
 
 /**
+ * Index of the largest ladder rung that is no bigger than `value`.
+ *
+ * Rounds down where nearestStep rounds to the closest, which is what an axis's
+ * own travel calls for: a Z with 135mm of it should offer 100 and not 500, or
+ * the biggest button on the column is one the machine can never complete.
+ */
+export function stepAtMost(value: number): number {
+  let best = 0;
+  for (let i = 0; i < STEP_LADDER.length; i++) {
+    if (STEP_LADDER[i] <= value) best = i;
+  }
+  return best;
+}
+
+/**
  * The distances for `count` rings whose outermost is `STEP_LADDER[maxIndex]`.
  *
  * Returned innermost first, so index 0 is the finest move. Clamped at the

@@ -506,6 +506,9 @@ const round = (n) => Math.round(n * 1000) / 1000;
  * input pin and nothing else changes it.
  */
 const probesTriggered = [false, false];
+
+/** Every G-code the board has been sent, for the test hook below. */
+const sent = [];
 const probeTriggered = (i) => probesTriggered[i] === true;
 
 // --- HTTP ----------------------------------------------------------------
@@ -592,6 +595,12 @@ const server = createServer(async (req, res) => {
 
     case '/rr_gcode': {
       const gcode = url.searchParams.get('gcode') ?? '';
+      // Kept so a test can ask what was actually sent, rather than inferring it
+      // from where the axis ended up — the board clamps to its own limits, so
+      // the position after a move cannot tell a clamped request from a clamped
+      // result.
+      sent.push(gcode);
+      if (sent.length > 200) sent.shift();
       handleGcode(gcode);
       return sendJson(res, { buff: 1024 });
     }
@@ -667,6 +676,12 @@ const server = createServer(async (req, res) => {
 
   // Test hooks. Not firmware behaviour — a way for a test to see what actually
   // landed on the card, and to start from an empty one.
+  if (path === '/_gcode') {
+    cors(res);
+    if (url.searchParams.get('clear') !== null) sent.length = 0;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify(sent));
+  }
   if (path === '/_files') {
     cors(res);
     res.writeHead(200, { 'Content-Type': 'application/json' });

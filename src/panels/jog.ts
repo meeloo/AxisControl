@@ -36,6 +36,7 @@ import {
   STEP_LADDER,
   nearestStep,
   ringSteps,
+  stepAtMost,
   stepLabel,
   stepTick,
 } from '../core/steps.js';
@@ -149,9 +150,78 @@ export class JogPanel extends PanelElement {
     return connected.get() && !BUSY_STATES.has(machine.get().status);
   }
 
-  /** Distances for each ring, innermost first. */
+  /** Distances for each ring of the XY rose, innermost first. */
   private get steps(): number[] {
     return ringSteps(this.settings.maxStep, this.settings.rings);
+  }
+
+  /**
+   * Distances for one of the vertical columns.
+   *
+   * Taken from the axis's own travel rather than from the Reach slider. Reach is
+   * an XY idea — how far across the table you want one press to carry you — and
+   * applying it to Z gave this machine a 500mm button on an axis with 135mm to
+   * move in, and the same button on the dust shoe's U, which has 70. The ladder
+   * still steps in the same 1–5 rungs, so the columns and the rose remain
+   * comparable; only the top of the ladder differs.
+   */
+  private columnSteps(letter: string): number[] {
+    const axis = machine.get().axes.find((a) => a.letter === letter);
+    const travel = axis && isFinite(axis.min) && isFinite(axis.max) ? axis.max - axis.min : 0;
+    // No travel reported is not the same as no travel: fall back to the rose's
+    // ladder rather than offering a single 0.01mm button.
+    if (!(travel > 0)) return this.steps;
+    return ringSteps(stepAtMost(travel), this.settings.rings);
+  }
+
+  /**
+   * How far an axis can still go that way before its soft limit.
+   *
+   * Null when the question is meaningless — an axis that has not been homed has
+   * no machine position worth trusting, and the firmware is not enforcing limits
+   * on it either.
+   */
+  private headroom(letter: string, sign: number): number | null {
+    const axis = machine.get().axes.find((a) => a.letter === letter);
+    if (!axis || !axis.homed) return null;
+    if (!isFinite(axis.min) || !isFinite(axis.max) || axis.max <= axis.min) return null;
+    return Math.max(0, sign > 0 ? axis.max - axis.machine : axis.machine - axis.min);
+  }
+
+  /**
+   * What a press would actually do.
+   *
+   * The firmware will not run past a soft limit, so a 10mm button 3mm from the
+   * end of the axis is a 3mm button — and it says 10. Naming the axis that runs
+   * out first matters on a diagonal, where the number alone does not say which
+   * of X and Y stopped it.
+   *
+   * The move sent is clamped to match. Displaying the truth and then asking for
+   * something else would leave the firmware to refuse it, which on RRF is an
+   * error in the console rather than a shorter move.
+   */
+  private reachable(deltas: Record<string, number>): { deltas: Record<string, number>; limit: string | null; mm: number } {
+    const asked = Math.max(...Object.values(deltas).map((d) => Math.abs(d)));
+    let room = Infinity;
+    let limit: string | null = null;
+
+    for (const [letter, delta] of Object.entries(deltas)) {
+      const free = this.headroom(letter, Math.sign(delta));
+      if (free === null) continue;
+      if (free < room) {
+        room = free;
+        limit = letter;
+      }
+    }
+
+    if (room >= asked) return { deltas, limit: null, mm: asked };
+
+    // Rounded down, not to nearest: landing a hair past the limit is exactly
+    // the refusal this is here to avoid.
+    const mm = Math.floor(room * 1000) / 1000;
+    const scaled: Record<string, number> = {};
+    for (const [letter, delta] of Object.entries(deltas)) scaled[letter] = Math.sign(delta) * mm;
+    return { deltas: scaled, limit, mm };
   }
 
   /** NOT `update` — that is a LitElement lifecycle method. */
@@ -179,8 +249,10 @@ export class JogPanel extends PanelElement {
   // --- Motion -------------------------------------------------------------
 
   private move(deltas: Record<string, number>): void {
-    const feed = Math.min(this.settings.feed, this.feedLimit(Object.keys(deltas)));
-    void actions.jog(deltas, feed);
+    const { deltas: actual, mm } = this.reachable(deltas);
+    if (!(mm > 0)) return;
+    const feed = Math.min(this.settings.feed, this.feedLimit(Object.keys(actual)));
+    void actions.jog(actual, feed);
   }
 
   private startRepeat(deltas: Record<string, number>): void {
@@ -241,15 +313,28 @@ export class JogPanel extends PanelElement {
         if (octant.dy) deltas.Y = octant.dy * mm;
         const { onDown, onUp } = this.pressHandlers(deltas);
 
+        // What this sector would really do. Clamped sectors show the distance
+        // they can reach, not the one they are named after.
+        const reach = this.reachable(deltas);
+        const stuck = reach.limit !== null && reach.mm <= 0;
+        const short = reach.limit !== null && reach.mm > 0;
+        const cls = `rose-cell${enabled ? '' : ' disabled'}${short ? ' short' : ''}${stuck ? ' stuck' : ''}`;
+
         sectors.push(svg`
           <g
-            class=${enabled ? 'rose-cell' : 'rose-cell disabled'}
+            class=${cls}
             @pointerdown=${onDown}
             @pointerup=${onUp}
             @pointercancel=${onUp}
             @pointerleave=${onUp}
           >
-            <title>${octant.name} ${stepLabel(mm)}mm</title>
+            <title>${octant.name} ${stepLabel(mm)}mm${
+              stuck
+                ? ` — ${reach.limit} is at its limit, this would not move`
+                : short
+                  ? ` — ${reach.limit} max reached after ${stepLabel(reach.mm)}mm`
+                  : ''
+            }</title>
             <path d=${sectorPath(rInner, rOuter, octant.angle, half)} />
             <text
               x=${lx}
@@ -257,7 +342,7 @@ export class JogPanel extends PanelElement {
               dy="0.36em"
               transform=${`rotate(${labelRotation(octant.angle)} ${lx} ${ly})`}
               style="font-size:${fontSize}px"
-            >${stepTick(mm)}</text>
+            >${stuck ? 'max' : short ? stepTick(reach.mm) : stepTick(mm)}</text>
           </g>
         `);
       }
@@ -286,22 +371,34 @@ export class JogPanel extends PanelElement {
    * distance whichever control you reach for.
    */
   private renderColumn(letter: string): TemplateResult {
-    const steps = this.steps;
+    const steps = this.columnSteps(letter);
     const enabled = this.canMove;
     const button = (mm: number, sign: 1 | -1) => {
-      const { onDown, onUp } = this.pressHandlers({ [letter]: sign * mm });
+      const deltas = { [letter]: sign * mm };
+      const { onDown, onUp } = this.pressHandlers(deltas);
+      const reach = this.reachable(deltas);
+      const stuck = reach.limit !== null && reach.mm <= 0;
+      const short = reach.limit !== null && reach.mm > 0;
+      const end = sign > 0 ? 'max' : 'min';
       return html`
         <button
-          class="jog-cell"
-          ?disabled=${!enabled}
-          title="${letter}${sign > 0 ? '+' : '−'} ${stepLabel(mm)}mm"
+          class="jog-cell${short ? ' short' : ''}${stuck ? ' stuck' : ''}"
+          ?disabled=${!enabled || stuck}
+          title=${stuck
+            ? `${letter} is at its ${end} — this would not move`
+            : short
+              ? `${letter}${sign > 0 ? '+' : '−'} ${stepLabel(mm)}mm — only ${stepLabel(reach.mm)}mm to ${letter} ${end}`
+              : `${letter}${sign > 0 ? '+' : '−'} ${stepLabel(mm)}mm`}
           @pointerdown=${onDown}
           @pointerup=${onUp}
           @pointercancel=${onUp}
           @pointerleave=${onUp}
         >
           <span class="jog-arrow">${sign > 0 ? '▲' : '▼'}</span>
-          <span class="jog-mm">${stepLabel(mm)}</span>
+          <span class="jog-mm">${stuck ? '—' : stepLabel(short ? reach.mm : mm)}</span>
+          ${short || stuck
+            ? html`<span class="jog-max">${letter} ${end}</span>`
+            : nothing}
         </button>
       `;
     };
@@ -339,6 +436,7 @@ export class JogPanel extends PanelElement {
           <span class="jog-cursor-head">
             <span>Reach</span>
             <strong>${stepLabel(steps[steps.length - 1])} mm</strong>
+            <em class="jog-cursor-note">XY</em>
           </span>
           <input
             type="range"

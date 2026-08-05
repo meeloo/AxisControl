@@ -1546,3 +1546,22 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .cam-fold-summary { flex: 1 1 auto; min-width: 0; font-style: normal; font-size: 11px;
   color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cam-fold.open .cam-controls { padding: 0 10px 10px; }
+
+/* Jog cells that a soft limit has cut short.
+   The number shown is what the press would really do, so the marker has to say
+   that it is a limit and not a step you chose — otherwise the column reads as a
+   ladder with a strange rung in it. */
+.jog-cell.short .jog-mm, .rose-cell.short text { fill: var(--warn); color: var(--warn); }
+.jog-cell.short, .jog-cell.stuck { position: relative; }
+.jog-cell .jog-max {
+  font-size: 8px; line-height: 1; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--warn); white-space: nowrap;
+}
+.jog-cell.stuck { opacity: 0.5; }
+.jog-cell.stuck .jog-mm { color: var(--text-faint); }
+.rose-cell.short path { fill: var(--tint-warn); }
+.rose-cell.stuck { pointer-events: none; }
+.rose-cell.stuck path { fill: var(--bg-raised); }
+.rose-cell.stuck text { fill: var(--text-faint); }
+.jog-cursor-note { font-style: normal; font-size: 10px; color: var(--text-faint);
+  text-transform: uppercase; letter-spacing: 0.06em; }
