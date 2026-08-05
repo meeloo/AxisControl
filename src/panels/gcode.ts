@@ -57,8 +57,16 @@ export class GcodePanel extends PanelElement {
       if (hit) this.selected = hit;
       this.requestUpdate();
       // Follow the cursor, or arrowing past the fold moves a highlight nobody
-      // can see.
-      window.setTimeout(() => this.querySelector('.gc-hit.on')?.scrollIntoView({ block: 'nearest' }), 0);
+      // can see. Focus follows it too, but only when it was already in the
+      // list: taking it out of the search box would mean the next character
+      // typed went nowhere.
+      const inList = document.activeElement?.classList.contains('gc-hit') ?? false;
+      window.setTimeout(() => {
+        const row = this.querySelector<HTMLElement>('.gc-hit.on');
+        if (!row) return;
+        if (inList) row.focus({ preventScroll: true });
+        row.scrollIntoView({ block: 'nearest' });
+      }, 0);
     } else if (e.key === 'Enter') {
       e.preventDefault();
       const hit = results[this.cursor];
@@ -71,10 +79,20 @@ export class GcodePanel extends PanelElement {
     }
   }
 
-  private pick(entry: GcodeEntry): void {
+  /**
+   * Show a code, and put the keyboard where the eye is.
+   *
+   * The focus call is not decoration. Clicking a button does not focus it in
+   * Safari — a macOS convention rather than a bug — so after picking a result
+   * with the mouse the keys went to the document body, the panel never saw
+   * them, and the arrows simply stopped working. Chromium focuses the button
+   * for you, which is why the test I wrote first passed while the app did not.
+   */
+  private pick(entry: GcodeEntry, row?: HTMLElement): void {
     this.selected = entry;
     this.cursor = this.results.indexOf(entry);
     this.requestUpdate();
+    row?.focus({ preventScroll: true });
   }
 
   private renderEntry(entry: GcodeEntry): TemplateResult {
@@ -152,7 +170,7 @@ export class GcodePanel extends PanelElement {
                   (entry, i) => html`
                     <button
                       class="gc-hit ${i === this.cursor ? 'on' : ''} ${entry === this.selected ? 'sel' : ''}"
-                      @click=${() => this.pick(entry)}
+                      @click=${(e: Event) => this.pick(entry, e.currentTarget as HTMLElement)}
                     >
                       <strong>${entry.code}</strong>
                       <span>${entry.title}</span>
