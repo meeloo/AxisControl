@@ -21,3 +21,4 @@ import './preflight.js';
 import './resume.js';
 import './overrides.js';
 import './atc.js';
+import './install.js';

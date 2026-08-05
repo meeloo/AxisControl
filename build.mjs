@@ -10,6 +10,7 @@
 // because the board reads it off the SD card single-threaded.
 
 import { gzipSync } from 'node:zlib';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync, cpSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -136,6 +137,62 @@ function stampHtml() {
   writeFileSync(join('dist', 'index.html'), html);
 }
 
+/**
+ * What this build is, so a copy of the app can say whether it is out of date.
+ *
+ * Version and commit only — deliberately no timestamp. The build stamp goes
+ * into the bundle, and a value that changes on every build would change the
+ * bundle's content hash on every build, which is exactly what the stamping
+ * below exists to avoid. The commit already changes when the code does.
+ *
+ * A `+` means the tree had uncommitted changes: a build that says it is
+ * 3a4984a when it is 3a4984a plus whatever was being tried at the time is a
+ * build that will refuse an update it needs.
+ */
+function buildStamp() {
+  const manifest = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'));
+  let commit = 'unknown';
+  try {
+    const git = (...args) =>
+      execFileSync('git', args, { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+    commit = git('rev-parse', '--short', 'HEAD');
+    if (git('status', '--porcelain')) commit += '+';
+  } catch {
+    // No git, or a source archive rather than a checkout. Not worth failing over.
+  }
+  return { version: manifest.version ?? '0.0.0', commit };
+}
+
+const BUILD = buildStamp();
+
+/**
+ * The list of files that make up a deployed copy, written into dist itself.
+ *
+ * The installer copies this list rather than guessing at names. Guessing is how
+ * a deploy silently misses the file that was added last week — and on a machine
+ * whose only feedback is a blank page, that is a bad way to find out.
+ *
+ * Written last, after the gzipping, so the .gz siblings are in it.
+ */
+function emitBuildJson() {
+  const files = [];
+  const walk = (dir, prefix) => {
+    for (const entry of readdirSync(dir).sort()) {
+      const p = join(dir, entry);
+      if (statSync(p).isDirectory()) walk(p, `${prefix}${entry}/`);
+      // The manifest never lists itself, in either form: it is fetched by name
+      // and a stale .gz of it from an earlier build would be installed as
+      // gospel.
+      else if (!/^build\.json/.test(entry)) files.push(`${prefix}${entry}`);
+    }
+  };
+  walk('dist', '');
+  writeFileSync(
+    join('dist', 'build.json'),
+    `${JSON.stringify({ ...BUILD, builtAt: new Date().toISOString(), files }, null, 2)}\n`,
+  );
+}
+
 /** Write .gz siblings for anything the Duet will serve compressed. */
 function gzipDist() {
   const compressible = /\.(js|css|html|svg|json|map)$/;
@@ -192,10 +249,25 @@ const options = {
   minify: prod,
   legalComments: 'none',
   loader: { '.css': 'text', '.glsl': 'text' },
-  define: { 'process.env.NODE_ENV': prod ? '"production"' : '"development"' },
+  define: {
+    'process.env.NODE_ENV': prod ? '"production"' : '"development"',
+    __BUILD__: JSON.stringify(BUILD),
+  },
   // After every build, watch included: the hash can only be taken once the
   // bundle it names has been written.
-  plugins: [{ name: 'stamp-html', setup: (build) => build.onEnd(() => stampHtml()) }],
+  plugins: [
+    {
+      name: 'stamp-html',
+      setup: (build) =>
+        build.onEnd(() => {
+          stampHtml();
+          // Under --watch there is no gzip pass, but the installer still needs
+          // the file list: installing from a dev server is the normal way to
+          // put a new build on the machine.
+          emitBuildJson();
+        }),
+    },
+  ],
 };
 
 emitStatic();
@@ -215,5 +287,6 @@ if (watch) {
 } else {
   await esbuild.build(options);
   gzipDist();
-  console.log('[build] wrote dist/ (with .gz siblings)');
+  emitBuildJson();
+  console.log(`[build] wrote dist/ (with .gz siblings) — ${BUILD.version} ${BUILD.commit}`);
 }

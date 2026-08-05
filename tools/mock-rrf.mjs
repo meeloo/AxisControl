@@ -295,7 +295,7 @@ function generateHeightMap({ xMin, xMax, yMin, yMax, sx, sy }) {
 for (const entries of Object.values(FILES)) {
   for (const e of entries) {
     const full = Object.keys(FILE_CONTENT).find((p) => p.endsWith(`/${e.name}`));
-    if (full) e.size = Buffer.byteLength(FILE_CONTENT[full], 'utf8');
+    if (full) e.size = Buffer.byteLength(FILE_CONTENT[full]);
   }
 }
 
@@ -480,6 +480,8 @@ const MIME = {
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json',
   '.map': 'application/json',
+  '.png': 'image/png',
+  '.svg': 'image/svg+xml',
 };
 
 // Deliberately as limited as the real firmware.
@@ -586,7 +588,7 @@ const server = createServer(async (req, res) => {
       // and a client can only show an indeterminate bar. A real controller knows
       // the file size and sends it, so the mock must too — otherwise the
       // determinate progress path never gets exercised here.
-      const body = Buffer.from(content, 'utf8');
+      const body = Buffer.isBuffer(content) ? content : Buffer.from(content, 'utf8');
       res.writeHead(200, { 'Content-Type': 'text/plain', 'Content-Length': body.length });
       return res.end(body);
     }
@@ -595,13 +597,16 @@ const server = createServer(async (req, res) => {
       const name = url.searchParams.get('name') ?? '';
       const chunks = [];
       for await (const c of req) chunks.push(c);
-      const body = Buffer.concat(chunks).toString('utf8');
+      // Kept as a Buffer, not decoded to a string: the app installer writes
+      // PNGs and gzip streams, and a round trip through utf8 turns both into
+      // rubbish that still looks like a successful upload.
+      const body = Buffer.concat(chunks);
       FILE_CONTENT[name] = body;
       // ...and it appears in the directory. Storing the content without
       // listing it is the mock being kinder than the firmware in the one
       // direction that matters: anything that writes files and then checks
       // they arrived would see them all missing, forever.
-      addToListing(name, Buffer.byteLength(body));
+      addToListing(name, body.length);
       pushReply(`Uploaded ${name}`);
       return sendJson(res, { err: 0 });
     }
@@ -619,6 +624,53 @@ const server = createServer(async (req, res) => {
 
     default:
       break;
+  }
+
+  // Test hooks. Not firmware behaviour — a way for a test to see what actually
+  // landed on the card, and to start from an empty one.
+  if (path === '/_files') {
+    cors(res);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify(Object.keys(FILE_CONTENT).sort()));
+  }
+  if (path === '/_wipe') {
+    const dir = url.searchParams.get('dir') ?? '';
+    for (const key of Object.keys(FILE_CONTENT)) {
+      if (dir && key.startsWith(`${dir}/`)) delete FILE_CONTENT[key];
+    }
+    cors(res);
+    res.writeHead(200);
+    return res.end('ok');
+  }
+
+  // Anything uploaded under /www is served from there, which is what makes an
+  // installed copy of the app reachable at http://machine/AxisControl/ — and
+  // the only way to test that the install produced something that actually
+  // runs, rather than a directory of files that uploaded without complaint.
+  //
+  // The .gz preference is the firmware's, and it is the half of this most
+  // likely to be got wrong: RRF serves `cnc.js.gz` in answer to a request for
+  // `cnc.js`, with Content-Encoding set, and an installer that uploaded only
+  // the plain files would work here and be slow on the real board — while one
+  // that uploaded only the .gz files would work on the board and 404 against a
+  // mock that did not do this.
+  const wwwPath = `/www${path.replace(/\/$/, '/index.html')}`;
+  const accepts = /\bgzip\b/.test(req.headers['accept-encoding'] ?? '');
+  const zipped = FILE_CONTENT[`${wwwPath}.gz`];
+  const plain = FILE_CONTENT[wwwPath];
+  if (zipped !== undefined || plain !== undefined) {
+    const useGz = zipped !== undefined && accepts;
+    const raw = useGz ? zipped : (plain ?? zipped);
+    const body = Buffer.isBuffer(raw) ? raw : Buffer.from(String(raw), 'utf8');
+    cors(res);
+    const headers = {
+      'Content-Type': MIME[extname(wwwPath)] ?? 'application/octet-stream',
+      'Content-Length': body.length,
+      'Cache-Control': 'no-store',
+    };
+    if (useGz) headers['Content-Encoding'] = 'gzip';
+    res.writeHead(200, headers);
+    return res.end(body);
   }
 
   // Static: serve dist/ so same-origin can be tested too.

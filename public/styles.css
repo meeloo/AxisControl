@@ -1256,3 +1256,25 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .atc-summary { flex: 1; font-size: 11px; color: var(--text-faint); }
 .atc-group-note button.link { background: none; border: 0; padding: 0; min-height: 0;
   font: inherit; color: var(--accent); text-decoration: underline; cursor: pointer; }
+
+/* ---------- Install / update ---------- */
+
+.inst { gap: 10px; }
+/* Three readings side by side: what is on the machine, what this copy is, what
+   GitHub has. The comparison is the information — any one of them alone says
+   nothing about whether to press anything. */
+.inst-grid { display: flex; flex-wrap: wrap; gap: 10px 20px; padding: 0 12px; }
+.inst-cell { display: flex; flex-direction: column; gap: 1px; min-width: 150px; flex: 1 1 150px; }
+.inst-cell strong { font-family: var(--mono); font-size: 15px; }
+.inst-cell .hint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inst-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-faint); }
+.inst-update { margin: 0 12px; }
+.inst-actions { flex-wrap: wrap; }
+.inst-progress { display: flex; align-items: center; gap: 8px; padding: 0 12px;
+  font-size: 11px; color: var(--text-dim); }
+.inst-progress progress { flex: 1; min-width: 0; height: 8px; }
+.inst-progress em { font-style: normal; font-family: var(--mono); }
+.inst-options { display: flex; flex-wrap: wrap; gap: 4px 16px; padding: 0 12px; font-size: 11px; }
+.pack-note.good { color: var(--good); }
+.warn-banner.bad { color: var(--bad-text); background: var(--tint-bad); }

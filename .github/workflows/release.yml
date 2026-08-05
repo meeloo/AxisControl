@@ -1,0 +1,89 @@
+# Publish a build that the in-app updater can install.
+#
+# The updater reads the release list from the GitHub API and downloads the
+# first `.zip` asset it finds, so what this has to produce is one zip holding
+# the contents of `dist` — including `build.json`, which is what tells the
+# installer which files belong and what version they are.
+#
+# Triggered by a tag rather than by every push to main. An update prompt is an
+# interruption on a machine that is working, and it should mean "a version was
+# published", not "somebody committed something".
+#
+#   npm version patch && git push --follow-tags
+#
+# The tag is the version the updater compares against, so it has to match
+# package.json — the check below fails the build rather than publishing a
+# release that would either never be offered or be offered for ever.
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The build stamps the short commit hash into the bundle, and a
+          # shallow clone with no history still resolves HEAD — but fetch-depth
+          # 0 keeps `git describe` and friends usable if this grows.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Check the tag matches package.json
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p "require('./package.json').version")"
+          BUILT="$(node -p "require('./dist/build.json').version")"
+          if [ "$TAG" != "$PKG" ] || [ "$TAG" != "$BUILT" ]; then
+            echo "tag $TAG, package.json $PKG, build.json $BUILT — these must agree."
+            echo "The updater compares the tag against the installed build.json;"
+            echo "if they differ, the update either never appears or never clears."
+            exit 1
+          fi
+
+      - name: Check the build is complete
+        run: |
+          node -e "
+            const m = require('./dist/build.json');
+            const { existsSync } = require('fs');
+            const missing = m.files.filter((f) => !existsSync('dist/' + f));
+            if (missing.length) { console.error('missing from dist:', missing); process.exit(1); }
+            if (!m.files.includes('index.html') || !m.files.includes('cnc.js')) {
+              console.error('build.json does not name the entry files'); process.exit(1);
+            }
+            console.log(m.files.length + ' files, ' + m.version + ' ' + m.commit);
+          "
+
+      # Zipped from inside dist/, so the archive has no wrapping directory. The
+      # updater strips one if it finds it, but not needing to is simpler to
+      # reason about when something goes wrong on a machine in a workshop.
+      - name: Package
+        run: cd dist && zip -qr ../axis-control.zip . && cd .. && ls -lh axis-control.zip
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: axis-control.zip
+          generate_release_notes: true
+          # A tag with a prerelease suffix publishes as one, so it reaches only
+          # the installs that opted into betas.
+          prerelease: ${{ contains(github.ref_name, '-') }}
