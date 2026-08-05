@@ -398,7 +398,17 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
   display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
   width: 100%; text-align: left; background: transparent; border-color: transparent;
   padding: 8px 10px;
+  /* A grid item defaults to min-width: auto and will not shrink below its own
+     content, so a long description pushed the column wider than the track and
+     ran over the one beside it. The same trap as min-height on a flex item,
+     one axis over. */
+  min-width: 0;
 }
+/* Wrapped rather than truncated: the description is the whole reason to read
+   the row, and an ellipsis hides exactly the words that distinguish two
+   similar panels. */
+.picker-item strong, .picker-item small { max-width: 100%; white-space: normal;
+  overflow-wrap: anywhere; }
 .picker-item:hover { background: var(--bg-panel); }
 .picker-item small { color: var(--text-faint); font-size: 11px; }
 .picker-item em { color: var(--text-faint); font-size: 11px; font-style: normal; }
@@ -1316,3 +1326,50 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
    irreversible is one button away, so it says so at full size. */
 .fw-armed { margin: 0 12px; display: flex; flex-direction: column; gap: 6px; }
 .fw-armed-actions { display: flex; gap: 6px; align-items: center; }
+
+/* ---------- G-code reference ---------- */
+
+.gc { gap: 8px; height: 100%; min-height: 0; }
+.gc-search { margin: 0 12px; min-height: 34px; font-size: 14px; }
+/* Results beside the entry, so picking one does not lose the list you were
+   scanning — the whole point is comparing two similar codes. Collapses to one
+   column in a narrow panel, where the detail is what matters. */
+.gc-body { display: grid; grid-template-columns: minmax(0, 230px) minmax(0, 1fr);
+  gap: 10px; padding: 0 12px 10px; flex: 1 1 auto; min-height: 0; }
+@media (max-width: 620px) { .gc-body { grid-template-columns: minmax(0, 1fr); } }
+.gc-hits { overflow-y: auto; -webkit-overflow-scrolling: touch; min-height: 0;
+  display: flex; flex-direction: column; gap: 1px; }
+.gc-hit { display: flex; gap: 8px; align-items: baseline; text-align: left;
+  min-width: 0; padding: 4px 6px; min-height: 0;
+  background: transparent; border-color: transparent; font-size: 12px; }
+.gc-hit strong { font-family: var(--mono); flex: none; }
+.gc-hit span { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; min-width: 0; }
+.gc-hit:hover { background: var(--bg-raised); }
+.gc-hit.on { background: var(--bg-raised); border-color: var(--border); }
+.gc-hit.sel strong { color: var(--accent); }
+.gc-detail { overflow-y: auto; -webkit-overflow-scrolling: touch; min-height: 0; }
+.gc-entry-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.gc-entry-head strong { font-family: var(--mono); font-size: 17px; }
+.gc-support { font-size: 11px; color: var(--warn); margin-top: 2px; }
+.gc-section { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-faint); margin: 10px 0 3px; }
+/* The letter in its own column, so the eye runs down them looking for the one
+   it wants rather than reading every description. */
+/* The letter column is capped rather than auto. Some parameters are named
+   "X,Y,U,V,W,A,B,C...aaa:bbb", and an auto column sizes to the widest of them
+   — squeezing every description in the panel into a few characters because of
+   one entry. Capped and wrapping, the long name takes two lines and the prose
+   keeps its width. */
+.gc-params { display: grid; grid-template-columns: minmax(0, 9em) minmax(0, 1fr);
+  gap: 3px 8px; font-size: 12px; align-items: start; }
+.gc-param { font-family: var(--mono); color: var(--accent);
+  white-space: normal; overflow-wrap: anywhere; }
+.gc-param.req { font-weight: 700; }
+.gc-params em { color: var(--text-faint); font-style: normal; font-size: 11px; }
+.gc-examples { font-family: var(--mono); font-size: 11px; background: var(--bg-raised);
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 8px;
+  overflow-x: auto; white-space: pre; margin: 0; }
+.gc-notes { margin: 0; padding-left: 18px; font-size: 12px; color: var(--text-dim);
+  display: flex; flex-direction: column; gap: 3px; }
+.gc-link { display: inline-block; margin-top: 10px; color: var(--accent); }

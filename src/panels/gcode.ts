@@ -1,0 +1,189 @@
+// The G-code reference.
+//
+// The index is shipped with the app (see docs/types.ts for why it cannot be
+// fetched), so this panel is search over a local array — which is the point:
+// it answers in a keystroke, with no network, standing at the machine.
+//
+// Arranged around the two questions that actually get asked, which are
+// opposites. "What does M574's P do" starts from the code; "what was the code
+// for endstops" starts from the words. One box does both, because deciding
+// which mode you are in before you type is the friction being removed.
+
+import { html, nothing, type TemplateResult } from 'lit';
+import { PanelElement, registerPanel } from '../ui/panel.js';
+import { searchCodes, type GcodeEntry, type GcodeIndex } from '../docs/types.js';
+
+/** Loaded once per page, shared by every instance of the panel. */
+let loading: Promise<GcodeIndex> | null = null;
+
+function loadIndex(): Promise<GcodeIndex> {
+  loading ??= fetch(new URL('gcodes.json', document.baseURI).href)
+    .then((res) => {
+      if (!res.ok) throw new Error(`the reference is not on the machine (HTTP ${res.status})`);
+      return res.json() as Promise<GcodeIndex>;
+    })
+    .catch((err) => {
+      // Cleared so a retry is possible; a failed fetch cached for ever would
+      // mean the panel never worked again without a reload.
+      loading = null;
+      throw err;
+    });
+  return loading;
+}
+
+export class GcodePanel extends PanelElement {
+  private index: GcodeIndex | null = null;
+  private error: string | null = null;
+  private query = '';
+  /** Which result the keyboard is on. */
+  private cursor = 0;
+  private selected: GcodeEntry | null = null;
+
+  override connectedCallback(): void {
+    super.connectedCallback();
+    void loadIndex().then(
+      (index) => ((this.index = index), this.requestUpdate()),
+      (err: Error) => ((this.error = err.message), this.requestUpdate()),
+    );
+  }
+
+  private get results(): GcodeEntry[] {
+    return this.index ? searchCodes(this.index.codes, this.query, 80) : [];
+  }
+
+  private onKey(e: KeyboardEvent): void {
+    const results = this.results;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const next = this.cursor + (e.key === 'ArrowDown' ? 1 : -1);
+      this.cursor = Math.max(0, Math.min(results.length - 1, next));
+      this.requestUpdate();
+      // Follow the cursor, or arrowing past the fold moves a highlight nobody
+      // can see.
+      window.setTimeout(() => this.querySelector('.gc-hit.on')?.scrollIntoView({ block: 'nearest' }), 0);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const hit = results[this.cursor];
+      if (hit) this.pick(hit);
+    } else if (e.key === 'Escape') {
+      this.query = '';
+      this.cursor = 0;
+      this.requestUpdate();
+    }
+  }
+
+  private pick(entry: GcodeEntry): void {
+    this.selected = entry;
+    this.cursor = this.results.indexOf(entry);
+    this.requestUpdate();
+  }
+
+  private renderEntry(entry: GcodeEntry): TemplateResult {
+    return html`
+      <div class="gc-entry">
+        <div class="gc-entry-head">
+          <strong>${entry.code}</strong>
+          <span>${entry.title}</span>
+        </div>
+        ${entry.support ? html`<div class="gc-support">${entry.support}</div>` : nothing}
+
+        ${entry.params.length
+          ? html`<div class="gc-section">Parameters</div>
+              <div class="gc-params">
+                ${entry.params.map(
+                  (p) => html`
+                    <code class="gc-param ${p.required ? 'req' : ''}">${p.letter}</code>
+                    <span>${p.text}${p.required ? html`<em> — required</em>` : nothing}</span>
+                  `,
+                )}
+              </div>`
+          : nothing}
+
+        ${entry.examples.length
+          ? html`<div class="gc-section">Examples</div>
+              <pre class="gc-examples">${entry.examples.join('\n')}</pre>`
+          : nothing}
+
+        ${entry.notes.length
+          ? html`<div class="gc-section">Notes</div>
+              <ul class="gc-notes">
+                ${entry.notes.map((n) => html`<li>${n}</li>`)}
+              </ul>`
+          : nothing}
+
+        ${entry.url
+          ? html`<a class="hint gc-link" href=${entry.url} target="_blank" rel="noreferrer">
+              Read it on docs.duet3d.com
+            </a>`
+          : nothing}
+      </div>
+    `;
+  }
+
+  protected override render(): TemplateResult {
+    if (this.error) {
+      return html`<div class="pack gc">
+        <div class="warn-banner bad">${this.error}</div>
+        <div class="pack-note">
+          The reference ships with the app. If this copy was installed before it existed, install
+          again from the Install panel.
+        </div>
+      </div>`;
+    }
+    if (!this.index) return html`<div class="pack gc"><div class="pack-note">Loading…</div></div>`;
+
+    const results = this.results;
+    return html`
+      <div class="pack gc">
+        <input
+          class="gc-search"
+          type="search"
+          placeholder="M574, 581.1, or endstop…"
+          .value=${this.query}
+          @input=${(e: Event) => {
+            this.query = (e.target as HTMLInputElement).value;
+            this.cursor = 0;
+            this.requestUpdate();
+          }}
+          @keydown=${(e: KeyboardEvent) => this.onKey(e)}
+        />
+        <div class="gc-body">
+          <div class="gc-hits">
+            ${results.length
+              ? results.map(
+                  (entry, i) => html`
+                    <button
+                      class="gc-hit ${i === this.cursor ? 'on' : ''} ${entry === this.selected ? 'sel' : ''}"
+                      @click=${() => this.pick(entry)}
+                    >
+                      <strong>${entry.code}</strong>
+                      <span>${entry.title}</span>
+                    </button>
+                  `,
+                )
+              : html`<div class="pack-note">Nothing matches “${this.query}”.</div>`}
+          </div>
+          <div class="gc-detail">
+            ${this.selected
+              ? this.renderEntry(this.selected)
+              : html`<div class="pack-note">
+                  ${this.index.codes.length} codes. Type a number to look one up, or a word to find
+                  out which one you want.
+                </div>`}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+}
+
+customElements.define('cnc-gcode', GcodePanel);
+
+registerPanel({
+  id: 'gcode',
+  title: 'G-code reference',
+  tag: 'cnc-gcode',
+  defaultWidth: 6,
+  defaultHeight: 520,
+  description: 'Search the RepRapFirmware G-code dictionary, offline',
+});
