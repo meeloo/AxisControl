@@ -1531,3 +1531,18 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .gc-hint-chip.used { opacity: 0.45; text-decoration: line-through; }
 .gc-hint-chip.on { background: var(--accent); color: #fff; }
 .gc-hint-detail { margin-top: 5px; color: var(--text-dim); }
+
+/* The camera's controls, folded away. The picture is what the panel is for;
+   pan, zoom and lights are for the minute a month when the view needs moving. */
+.cam-fold { flex: none; border-top: 1px solid var(--border); }
+.cam-fold-head {
+  display: flex; gap: 8px; align-items: baseline; width: 100%;
+  background: transparent; border: 0; border-radius: 0;
+  padding: 7px 10px; min-height: 34px; text-align: left; font-size: 12px;
+}
+.cam-fold-head:hover { background: var(--bg-raised); }
+.cam-fold-caret { flex: none; width: 10px; color: var(--text-dim); }
+.cam-fold-title { flex: none; font-weight: 600; }
+.cam-fold-summary { flex: 1 1 auto; min-width: 0; font-style: normal; font-size: 11px;
+  color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cam-fold.open .cam-controls { padding: 0 10px 10px; }

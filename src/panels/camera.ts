@@ -105,6 +105,15 @@ export class CameraPanel extends PanelElement {
   private errorFor: string | null = null;
   private busy = false;
   private showSetup = false;
+  /**
+   * Whether the pan/zoom/light controls are unfolded.
+   *
+   * Folded by default and remembered, because the camera is mostly something
+   * you glance at: the picture is the point, and the controls are for the
+   * minute a month when the view needs moving. Collapsed, the panel is the
+   * picture and a title, which is what it is for.
+   */
+  private showControls = loadSetting('cameraControlsOpen', false);
   /** Reveal the stored camera password, for when it has to be checked. */
   private showPassword = false;
   private live = false;
@@ -1286,6 +1295,47 @@ export class CameraPanel extends PanelElement {
     `;
   }
 
+  /**
+   * The controls, behind a fold.
+   *
+   * The summary on the header is not decoration: a collapsed section that just
+   * says "Controls" makes you open it to find out whether the thing you want is
+   * in there. Listing what this particular camera can actually do answers that
+   * without a click.
+   */
+  private renderControlsSection(): TemplateResult | typeof nothing {
+    const c = this.controls;
+    if (!this.client) return nothing;
+
+    const has: string[] = [];
+    if (c.pan) has.push('pan');
+    if (c.zoom) has.push('zoom');
+    if (c.zoom && (this.lens.focus.state || this.autoFocus !== null)) has.push('focus');
+    if (this.presets.length || c.presets) has.push('presets');
+    if (c.irLights || c.spotlight || c.dayNight || c.statusLed) has.push('lights');
+    if (!has.length) return nothing;
+
+    return html`
+      <div class="cam-fold ${this.showControls ? 'open' : ''}">
+        <button
+          class="cam-fold-head"
+          aria-expanded=${this.showControls ? 'true' : 'false'}
+          title=${this.showControls ? 'Hide the camera controls' : 'Show the camera controls'}
+          @click=${() => {
+            this.showControls = !this.showControls;
+            saveSetting('cameraControlsOpen', this.showControls);
+            this.requestUpdate();
+          }}
+        >
+          <span class="cam-fold-caret">${this.showControls ? '▾' : '▸'}</span>
+          <span class="cam-fold-title">Controls</span>
+          <em class="cam-fold-summary">${has.join(' · ')}</em>
+        </button>
+        ${this.showControls ? this.renderControls() : nothing}
+      </div>
+    `;
+  }
+
   private renderControls(): TemplateResult | typeof nothing {
     const c = this.controls;
     if (!this.client) return nothing;
@@ -1562,7 +1612,7 @@ export class CameraPanel extends PanelElement {
             : nothing}
         </div>
 
-        ${this.live && !this.showSetup ? this.renderControls() : nothing}
+        ${this.live && !this.showSetup ? this.renderControlsSection() : nothing}
         ${this.showSetup && this.config.kind !== 'generic' && this.config.url
           ? html`<p class="hint cam-rtsp">
               RTSP (for VLC or a bridge): <code>${rtspUrl(this.config, { ...this.creds, password: '•••' })}</code>
