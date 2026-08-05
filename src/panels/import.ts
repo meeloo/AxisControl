@@ -14,6 +14,7 @@
 import { html, nothing, type TemplateResult } from 'lit';
 import { PanelElement, registerPanel } from '../ui/panel.js';
 import { connected, machine } from '../core/store.js';
+import { theme } from '../core/theme.js';
 import { checkField, numberField, selectField } from '../ui/widgets.js';
 import { fromAxis, fromDepthBelow } from '../ui/capture.js';
 import { preview, saveAndRun } from '../ui/program.js';
@@ -21,12 +22,58 @@ import { importSvg } from '../import/svg.js';
 import { importDxf } from '../import/dxf.js';
 import { chain, place } from '../import/geometry.js';
 import { offsetPaths, orderForCut, orientForCut, type CutSide } from '../import/offset.js';
-import { boundsOf, type ImportedDrawing, type Polyline } from '../import/types.js';
+import { boundsOf, pathLength, type ImportedDrawing, type Polyline } from '../import/types.js';
 import { profile } from '../cam/profile.js';
 import type { GeneratedProgram } from '../cam/format.js';
 
 /** Where to put the drawing's own bounding box in work coordinates. */
 type Anchor = 'bottom-left' | 'centre' | 'as-drawn';
+
+/** What the panel has worked out from the current settings. */
+interface Built {
+  program: GeneratedProgram;
+  warnings: string[];
+  /** The drawing as placed, before the tool was compensated for. */
+  source: Polyline[];
+  /** What the tool centre will actually follow. */
+  cut: Polyline[];
+}
+
+/** Blank margin around the drawing in the preview, px. */
+const PREVIEW_MARGIN = 16;
+
+/**
+ * A point some way along a path, with the direction of travel there.
+ *
+ * Used to put one arrowhead on each cut loop. Which way round a loop is cut is
+ * the difference between climb and conventional milling, and it is set by a
+ * checkbox two rows down — this is the only place it can be seen rather than
+ * taken on trust.
+ */
+function alongPath(path: Polyline, fraction: number): { x: number; y: number; dx: number; dy: number } | null {
+  const total = pathLength(path);
+  if (!(total > 0)) return null;
+  const target = total * fraction;
+  const last = path.closed ? path.points.length : path.points.length - 1;
+  let walked = 0;
+  for (let i = 0; i < last; i++) {
+    const a = path.points[i];
+    const b = path.points[(i + 1) % path.points.length];
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (len <= 0) continue;
+    if (walked + len >= target) {
+      const t = (target - walked) / len;
+      return {
+        x: a[0] + (b[0] - a[0]) * t,
+        y: a[1] + (b[1] - a[1]) * t,
+        dx: (b[0] - a[0]) / len,
+        dy: (b[1] - a[1]) / len,
+      };
+    }
+    walked += len;
+  }
+  return null;
+}
 
 export class ImportPanel extends PanelElement {
   private drawing: ImportedDrawing | null = null;
@@ -60,12 +107,38 @@ export class ImportPanel extends PanelElement {
   private tabWidth = 6;
   private tabHeight = 1.5;
 
+  // Preview
+  private canvas: HTMLCanvasElement | null = null;
+  private resizeObserver: ResizeObserver | null = null;
+  /** Last result of build(), kept so the canvas draws what the buttons will run. */
+  private built: Built | null = null;
+
   override connectedCallback(): void {
     super.connectedCallback();
     this.bind(() => {
       connected.get();
       machine.get();
+      // The preview draws in the stylesheet's colours, and a canvas does not
+      // repaint itself when they change.
+      theme.get();
     });
+  }
+
+  protected override updated(): void {
+    const canvas = this.querySelector<HTMLCanvasElement>('canvas.import-canvas');
+    if (canvas !== this.canvas) {
+      this.resizeObserver?.disconnect();
+      this.resizeObserver = null;
+      this.canvas = canvas;
+      if (canvas) {
+        // The panel is resizable in the dock, and the drawing is fitted to the
+        // width it is given.
+        this.resizeObserver = new ResizeObserver(() => this.draw());
+        this.resizeObserver.observe(canvas);
+        this.onDispose(() => this.resizeObserver?.disconnect());
+      }
+    }
+    this.draw();
   }
 
   // --- Loading ------------------------------------------------------------
@@ -144,7 +217,7 @@ export class ImportPanel extends PanelElement {
     return box ? { w: box.max[0] - box.min[0], h: box.max[1] - box.min[1] } : null;
   }
 
-  private build(): { program: GeneratedProgram; warnings: string[] } | null {
+  private build(): Built | null {
     const drawing = this.drawing;
     if (!drawing) return null;
     const paths = this.placed;
@@ -177,7 +250,150 @@ export class ImportPanel extends PanelElement {
         (size ? `, ${size.w.toFixed(1)} x ${size.h.toFixed(1)}mm, ${this.side} of line` : ''),
     });
 
-    return { program, warnings: [...warnings, ...program.warnings] };
+    return { program, warnings: [...warnings, ...program.warnings], source: paths, cut: ready };
+  }
+
+  // --- Preview ------------------------------------------------------------
+
+  /**
+   * Draw the placed drawing and the path the tool will follow.
+   *
+   * Everything on this panel is a number typed into a box, and three of those
+   * numbers — scale, side of the line, and tool diameter — go wrong in ways
+   * that are invisible until the cutter is in the material. A mirrored part, a
+   * cut on the wrong side, a tool too fat for the slot: all of them are obvious
+   * here and nowhere else.
+   */
+  private draw(): void {
+    const canvas = this.canvas;
+    if (!canvas) return;
+
+    const width = canvas.clientWidth;
+    const height = canvas.clientHeight;
+    if (!(width > 0) || !(height > 0)) return;
+
+    // Backing store only — the CSS size is 100% of the box, so this never
+    // feeds back into layout and the ResizeObserver above cannot loop.
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.round(width * dpr);
+    canvas.height = Math.round(height * dpr);
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+
+    const css = getComputedStyle(canvas);
+    const colour = (name: string, fallback: string): string =>
+      css.getPropertyValue(name).trim() || fallback;
+
+    const source = this.built?.source ?? this.placed;
+    const cut = this.built?.cut ?? [];
+    const box = boundsOf([...source, ...cut]);
+    if (!box) return;
+
+    let [minX, minY] = box.min;
+    let [maxX, maxY] = box.max;
+    // Where zero sits relative to the part is what the Place and Origin fields
+    // above are for, so bring it into frame — but only when it is near. A part
+    // parked a metre from zero would otherwise be shrunk to a speck to make
+    // room for an empty field.
+    const reach = Math.max(maxX - minX, maxY - minY, 1) * 0.6;
+    const nearOrigin =
+      0 >= minX - reach && 0 <= maxX + reach && 0 >= minY - reach && 0 <= maxY + reach;
+    if (nearOrigin) {
+      minX = Math.min(minX, 0);
+      minY = Math.min(minY, 0);
+      maxX = Math.max(maxX, 0);
+      maxY = Math.max(maxY, 0);
+    }
+
+    const spanX = Math.max(maxX - minX, 1e-6);
+    const spanY = Math.max(maxY - minY, 1e-6);
+    const scale = Math.min(
+      (width - 2 * PREVIEW_MARGIN) / spanX,
+      (height - 2 * PREVIEW_MARGIN) / spanY,
+    );
+    if (!(scale > 0) || !isFinite(scale)) return;
+
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    // Machine Y grows up, canvas Y grows down. Getting this wrong here would
+    // show a mirrored part as correct, which is the one mistake the preview
+    // exists to catch.
+    const px = (x: number): number => width / 2 + (x - cx) * scale;
+    const py = (y: number): number => height / 2 - (y - cy) * scale;
+
+    const trace = (path: Polyline): void => {
+      const pts = path.points;
+      if (pts.length < 2) return;
+      ctx.beginPath();
+      ctx.moveTo(px(pts[0][0]), py(pts[0][1]));
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(px(pts[i][0]), py(pts[i][1]));
+      if (path.closed) ctx.closePath();
+      ctx.stroke();
+    };
+
+    // The drawing, thin and faint: it is the reference, not the instruction.
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = colour('--text-faint', '#8a94a1');
+    ctx.lineWidth = 1;
+    for (const path of source) {
+      // An open path cannot be offset, and is dashed to say so before the
+      // warning underneath has to.
+      ctx.setLineDash(path.closed ? [] : [3, 3]);
+      trace(path);
+    }
+    ctx.setLineDash([]);
+
+    if (nearOrigin) this.drawOrigin(ctx, px(0), py(0), colour('--text-dim', '#55606d'));
+
+    // The tool path, over the top and in the accent colour: this is what will
+    // actually run.
+    ctx.strokeStyle = colour('--accent', '#0a63c9');
+    ctx.lineWidth = 1.75;
+    for (const loop of cut) trace(loop);
+
+    ctx.fillStyle = colour('--accent', '#0a63c9');
+    for (const loop of cut) {
+      const at = alongPath(loop, 0.3);
+      if (at) this.drawArrow(ctx, px(at.x), py(at.y), at.dx, -at.dy);
+    }
+  }
+
+  /** The work origin: a quartered circle, the way a drawing datum is marked. */
+  private drawOrigin(ctx: CanvasRenderingContext2D, x: number, y: number, colour: string): void {
+    const r = 5;
+    ctx.save();
+    ctx.strokeStyle = colour;
+    ctx.fillStyle = colour;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI / 2);
+    ctx.lineTo(x, y);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x, y, r, Math.PI, Math.PI * 1.5);
+    ctx.lineTo(x, y);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  private drawArrow(ctx: CanvasRenderingContext2D, x: number, y: number, dx: number, dy: number): void {
+    const len = 6;
+    const wide = 3.2;
+    ctx.beginPath();
+    ctx.moveTo(x + dx * len, y + dy * len);
+    ctx.lineTo(x - dx * len * 0.4 - dy * wide, y - dy * len * 0.4 + dx * wide);
+    ctx.lineTo(x - dx * len * 0.4 + dy * wide, y - dy * len * 0.4 - dx * wide);
+    ctx.closePath();
+    ctx.fill();
   }
 
   // --- Render -------------------------------------------------------------
@@ -242,6 +458,8 @@ export class ImportPanel extends PanelElement {
         : nothing}
       ${drawing.warnings.map((w) => html`<div class="warn-banner">${w}</div>`)}
 
+      ${this.renderPreview()}
+
       <div class="param-grid">
         ${numberField('Scale', this.scale, (v) => ((this.scale = v), this.requestUpdate()), { suffix: 'mm/unit', step: 0.0001, title: 'Millimetres per unit of the source file. The size above updates as you change it.' })}
         ${size
@@ -256,6 +474,24 @@ export class ImportPanel extends PanelElement {
         ${numberField('Origin Y', this.originY, (v) => ((this.originY = v), this.requestUpdate()), { suffix: 'mm', capture: fromAxis('Y', 'work') })}
         ${numberField('Curve tolerance', this.curveTolerance, (v) => ((this.curveTolerance = v), this.requestUpdate()), { suffix: 'mm', step: 0.005, title: 'How far a flattened curve may stray from the true one.' })}
         ${numberField('Join gap', this.joinTolerance, (v) => ((this.joinTolerance = v), this.requestUpdate()), { suffix: 'mm', step: 0.01, title: 'Segment ends this close are treated as joined. A DXF rectangle is four separate lines and needs this to become one loop.' })}
+      </div>
+    `;
+  }
+
+  private renderPreview(): TemplateResult {
+    const cut = this.built?.cut.length ?? 0;
+    return html`
+      <div class="import-preview">
+        <canvas class="import-canvas"></canvas>
+        <div class="import-legend">
+          <span class="import-key drawing">drawing</span>
+          <span class="import-key cut">
+            ${cut
+              ? `tool path, ${this.side === 'on' ? 'on the line' : `${this.side} the line`}`
+              : 'no tool path'}
+          </span>
+          <span class="hint">arrow shows cut direction</span>
+        </div>
       </div>
     `;
   }
@@ -294,7 +530,10 @@ export class ImportPanel extends PanelElement {
 
   protected override render(): TemplateResult {
     const live = connected.get();
+    // Stashed, not just used here: the canvas is drawn after this returns and
+    // has to show the same geometry the buttons below would run.
     const built = this.drawing ? this.build() : null;
+    this.built = built;
 
     return html`
       <div class="pack import">

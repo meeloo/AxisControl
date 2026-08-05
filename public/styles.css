@@ -523,6 +523,23 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .import-size em { font-size: 12px; font-style: normal; color: var(--text-faint); }
 .import-rule { height: 1px; background: var(--border); margin: 2px 12px; }
 
+/* A picture of the placed drawing and the path the tool will follow. Fixed
+   height, because it is a check on the numbers above rather than the panel's
+   subject — the viewer is where a program gets looked at properly. */
+.import-preview { display: flex; flex-direction: column; gap: 4px; margin: 0 12px; }
+.import-canvas {
+  display: block; width: 100%; height: 190px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-raised);
+}
+.import-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px;
+  font-size: 11px; color: var(--text-dim); }
+.import-key { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.import-key::before { content: ''; width: 14px; height: 0; flex: none;
+  border-top: 2px solid currentColor; }
+.import-key.drawing { color: var(--text-faint); }
+.import-key.cut { color: var(--accent); }
+
 /* ---------- Macros ---------- */
 
 .macros { padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; height: 100%;
