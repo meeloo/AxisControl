@@ -896,17 +896,36 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
    nobody notices in a screenshot and everybody notices when "mm/min" reads as
    "mm/mi". */
 .param-grid {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
   gap: 6px 12px; padding: 10px 12px; overflow: auto;
 }
 /* min-width:0 on both the row and the input, because a grid or flex item
    defaults to min-width:auto and refuses to shrink below its content. A <select>
    sizes itself to its longest option, so one wordy option — "Left (probe
    approaches +X)" — pushed the control straight through the next column. */
-.param { display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  min-width: 0; }
-.param-label { color: var(--text-dim); font-size: 12px; white-space: nowrap; }
+/* Three columns, the same in every row: label, capture button, control.
+   A grid rather than a flex row with space-between, because space-between put
+   each control wherever its own label ended — so nothing lined up vertically
+   and the panel read as a heap. The button column is reserved whether or not
+   the row has one, since a column that appears and disappears is not a column. */
+/* The control column is a fixed width, not auto. With auto the label column
+   took whatever was left, so a row holding a narrow select started its control
+   25px right of the row above it holding a wide one — aligned in the markup and
+   visibly crooked on screen. */
+.param { display: grid; grid-template-columns: minmax(0, 1fr) 28px 136px;
+  align-items: center; gap: 8px; min-width: 0; }
+.param-cap { display: flex; align-items: center; justify-content: center; }
+/* 290px above, not 220: a row needs its label, a 28px button column and a
+   136px control, and at 220 the label had nowhere to go and ran underneath the
+   button. Params pair up on a wide panel and stack on a narrow one, which is
+   what auto-fit is for — the minimum just has to be the width a row actually
+   needs. The ellipsis is the backstop for a label longer than any of that. */
+.param-label { color: var(--text-dim); font-size: 12px; white-space: nowrap;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .param-input { display: flex; align-items: center; gap: 4px; min-width: 0; }
+/* A select fills the column rather than sizing to its longest option, which is
+   what used to shove it through the next one. */
+.param-input select { width: 100%; }
 /* min-width:0 so the input yields first when a row is tight: a number field
    that has shrunk is still readable, a unit that has been pushed out of the
    column is not. */
@@ -921,17 +940,17 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
    row of accent-coloured buttons would read as the important thing on the
    panel, which it is not. It lights up on hover, and greys out with the reason
    in its tooltip when the axis it needs is unhomed. */
-.param-input .capture {
+.param-cap .capture {
   flex: none; width: 28px; min-height: 28px; padding: 0;
   display: inline-flex; align-items: center; justify-content: center;
   background: transparent; border-color: var(--border); color: var(--text-faint);
 }
-.param-input .capture:hover:not(:disabled) {
+.param-cap .capture:hover:not(:disabled) {
   background: var(--tint-accent); border-color: var(--accent); color: var(--accent);
 }
-.param-input .capture svg { display: block; }
+.param-cap .capture svg { display: block; }
 
-.param.check-param { justify-content: flex-start; gap: 6px; grid-column: 1 / -1; }
+.param.check-param { display: flex; justify-content: flex-start; gap: 6px; grid-column: 1 / -1; }
 .param.check-param input { min-height: 0; width: 15px; height: 15px; }
 .param.check-param span { font-size: 12px; color: var(--text-dim); }
 .param-note { grid-column: 1 / -1; color: var(--text-faint); font-size: 11px;

@@ -33,31 +33,46 @@ interface Open {
 }
 
 const enabled = new WeakSet<Box>();
+/** Boxes that only complete when asked. */
+const manual = new WeakSet<Box>();
 let popup: HTMLDivElement | null = null;
 let hint: HTMLDivElement | null = null;
 let open: Open | null = null;
 let listening = false;
 
-/** Turn on G-code completion for a box. Idempotent — call it from updated(). */
-export function enableGcodeComplete(box: Box): void {
+/**
+ * Turn on G-code completion for a box. Idempotent — call it from updated().
+ *
+ * `auto` decides whether typing opens the list by itself. A console line is one
+ * command being composed and the suggestions are the point, so it does. A file
+ * is mostly being navigated and read, and a list that appears over the next
+ * line every time you touch a key is in the way — so there it waits to be
+ * asked. Moving the caret never opens it in either.
+ */
+export function enableGcodeComplete(box: Box, opts: { auto?: boolean } = {}): void {
   if (enabled.has(box)) return;
   enabled.add(box);
+  if (opts.auto === false) manual.add(box);
 
   // Warm the index so the first keystroke has something to say. Failure is
   // silence: a machine without the reference file simply does not complete.
   void loadIndex().catch(() => {});
 
+  // Typing. In a manual box this only ever narrows a list already open — it
+  // never opens one.
   box.addEventListener('input', () => refresh(box));
-  box.addEventListener('click', () => refresh(box));
-  // Moving the caret without changing the text still changes which parameter
-  // you are on, and the hint has to keep up with it.
+  // Moving the caret changes which parameter the hint is describing, so the
+  // hint has to keep up. It must not open the suggestion list, though: a popup
+  // that appears because you clicked onto a line is a popup you did not ask
+  // for, and it covers the line below the one you are reading.
   //
-  // Not while the popup is open: the arrows belong to it then, and recomputing
+  // Not while the list is open: the arrows belong to it then, and recomputing
   // here threw away the item just highlighted — so Enter fell through to the
   // console and sent the half-typed line instead of completing it.
+  box.addEventListener('click', () => refresh(box, { hintOnly: true }));
   box.addEventListener('keyup', (e) => {
     if (open) return;
-    if (/^(Arrow|Home|End|Page)/.test((e as KeyboardEvent).key)) refresh(box);
+    if (/^(Arrow|Home|End|Page)/.test((e as KeyboardEvent).key)) refresh(box, { hintOnly: true });
   });
   box.addEventListener('blur', () => close());
   box.addEventListener('scroll', () => close());
@@ -72,9 +87,13 @@ export function enableGcodeComplete(box: Box): void {
   }
 }
 
-function refresh(box: Box): void {
+function refresh(box: Box, opts: { hintOnly?: boolean; asked?: boolean } = {}): void {
   const index = peekIndex();
   if (!index || box.disabled || box.readOnly) return close();
+
+  // A box that waits to be asked shows only the hint until it is — except once
+  // the list is up, when typing filters it like anywhere else.
+  const quiet = opts.hintOnly || (manual.has(box) && !opts.asked && (!open || open.box !== box));
 
   const caret = box.selectionStart;
   if (caret === null || caret !== box.selectionEnd) return close();
@@ -85,7 +104,7 @@ function refresh(box: Box): void {
   const lineEnd = box.value.indexOf('\n', caret);
   const line = box.value.slice(start, lineEnd === -1 ? undefined : lineEnd);
 
-  const found = suggest(index.codes, line, caret - start);
+  const found = quiet ? { items: [], from: 0, to: 0 } : suggest(index.codes, line, caret - start);
   if (!found.items.length) {
     open = null;
     if (popup) popup.style.display = 'none';
@@ -109,7 +128,9 @@ function close(): void {
 }
 
 function onKeyDown(e: KeyboardEvent): void {
-  if (!open || e.target !== open.box) return;
+  const target = e.target as Box;
+  const ours = target instanceof HTMLElement && enabled.has(target);
+  if (!ours) return;
 
   const stop = () => {
     e.preventDefault();
@@ -117,6 +138,24 @@ function onKeyDown(e: KeyboardEvent): void {
     // keys and the panel's Enter-to-send.
     e.stopPropagation();
   };
+
+  // Ask for the list. Escape is what macOS has used for completion since long
+  // before this app; Ctrl+Space is the same key everywhere else, and both are
+  // bound because the machine is driven from whatever is to hand.
+  //
+  // Escape is swallowed rather than passed on, which costs something worth
+  // knowing: the global Escape-Escape emergency stop cannot be reached from
+  // inside a G-code box. Letting it through would mean dismissing an unwanted
+  // popup with two quick presses halted the machine — the exact accident this
+  // is not worth risking. The red STOP is on screen at all times regardless.
+  const asks = e.key === 'Escape' || (e.code === 'Space' && (e.ctrlKey || e.metaKey));
+  if (asks && (!open || open.box !== target)) {
+    stop();
+    refresh(target, { asked: true });
+    return;
+  }
+
+  if (!open || e.target !== open.box) return;
 
   switch (e.key) {
     case 'Escape':
@@ -178,7 +217,9 @@ function accept(which: number): void {
       box.setSelectionRange(at + 1, at + 1);
     }
   }
-  refresh(box);
+  // asked, so a box that waits to be asked carries on offering the parameters
+  // of the command it was just given rather than shutting after one word.
+  refresh(box, { asked: true });
 }
 
 /**

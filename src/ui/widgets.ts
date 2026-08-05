@@ -101,6 +101,33 @@ export function field(label: string, control: TemplateResult): TemplateResult {
  * every position field in the app gets the same control, in the same place,
  * with the same guards — see ui/capture.ts.
  */
+/**
+ * One parameter row: label, capture button, control.
+ *
+ * Every field goes through this so the three columns line up down a panel. The
+ * capture button sits BEFORE the control rather than after it, which is the
+ * whole trick: after it, its position depended on the width of whatever came
+ * before — a suffix of "mm" or "mm/min" or nothing at all — so no two rows
+ * agreed and the column read as scattered.
+ *
+ * The empty span when a field has no capture is not decoration either. Grid
+ * places children in order, so a row that skipped it would put its control in
+ * the button's column and knock itself out of line with every other row.
+ */
+function paramRow(
+  label: string,
+  control: TemplateResult,
+  opts: { capture?: TemplateResult | typeof nothing; title?: string; cls?: string } = {},
+): TemplateResult {
+  return html`
+    <label class="param ${opts.cls ?? ''}" title=${opts.title ?? ''}>
+      <span class="param-label">${label}</span>
+      <span class="param-cap">${opts.capture ?? nothing}</span>
+      <span class="param-input">${control}</span>
+    </label>
+  `;
+}
+
 export function numberField(
   label: string,
   value: number,
@@ -114,26 +141,24 @@ export function numberField(
     capture?: Capture;
   } = {},
 ): TemplateResult {
-  return html`
-    <label class="param" title=${opts.title ?? ''}>
-      <span class="param-label">${label}</span>
-      <span class="param-input">
-        <input
-          type="number"
-          .value=${String(value)}
-          step=${opts.step ?? 'any'}
-          min=${opts.min ?? ''}
-          max=${opts.max ?? ''}
-          @change=${(e: Event) => {
-            const v = Number((e.target as HTMLInputElement).value);
-            if (isFinite(v)) onChange(v);
-          }}
-        />
-        ${opts.suffix ? html`<em>${opts.suffix}</em>` : nothing}
-        ${opts.capture ? captureButton(opts.capture, onChange) : nothing}
-      </span>
-    </label>
-  `;
+  return paramRow(
+    label,
+    html`
+      <input
+        type="number"
+        .value=${String(value)}
+        step=${opts.step ?? 'any'}
+        min=${opts.min ?? ''}
+        max=${opts.max ?? ''}
+        @change=${(e: Event) => {
+          const v = Number((e.target as HTMLInputElement).value);
+          if (isFinite(v)) onChange(v);
+        }}
+      />
+      ${opts.suffix ? html`<em>${opts.suffix}</em>` : nothing}
+    `,
+    { capture: opts.capture ? captureButton(opts.capture, onChange) : nothing, title: opts.title },
+  );
 }
 
 /** Free-text parameter input — pin names, labels. Fires on change, not per key. */
@@ -143,19 +168,18 @@ export function textField(
   onChange: (v: string) => void,
   opts: { placeholder?: string; title?: string } = {},
 ): TemplateResult {
-  return html`
-    <label class="param" title=${opts.title ?? ''}>
-      <span class="param-label">${label}</span>
-      <span class="param-input">
-        <input
-          type="text"
-          .value=${value}
-          placeholder=${opts.placeholder ?? ''}
-          @change=${(e: Event) => onChange((e.target as HTMLInputElement).value)}
-        />
-      </span>
-    </label>
-  `;
+  return paramRow(
+    label,
+    html`
+      <input
+        type="text"
+        .value=${value}
+        placeholder=${opts.placeholder ?? ''}
+        @change=${(e: Event) => onChange((e.target as HTMLInputElement).value)}
+      />
+    `,
+    { title: opts.title },
+  );
 }
 
 export function selectField<T extends string>(
@@ -164,18 +188,16 @@ export function selectField<T extends string>(
   options: Array<{ value: T; label: string }>,
   onChange: (v: T) => void,
 ): TemplateResult {
-  return html`
-    <label class="param">
-      <span class="param-label">${label}</span>
-      <span class="param-input">
-        <select @change=${(e: Event) => onChange((e.target as HTMLSelectElement).value as T)}>
-          ${options.map(
-            (o) => html`<option value=${o.value} ?selected=${o.value === value}>${o.label}</option>`,
-          )}
-        </select>
-      </span>
-    </label>
-  `;
+  return paramRow(
+    label,
+    html`
+      <select @change=${(e: Event) => onChange((e.target as HTMLSelectElement).value as T)}>
+        ${options.map(
+          (o) => html`<option value=${o.value} ?selected=${o.value === value}>${o.label}</option>`,
+        )}
+      </select>
+    `,
+  );
 }
 
 export function checkField(

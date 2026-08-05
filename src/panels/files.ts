@@ -91,7 +91,8 @@ export class FilesPanel extends PanelElement {
   protected override updated(): void {
     const box = this.querySelector<HTMLTextAreaElement>('.editor-text');
     if (!box) return;
-    if (this.isGcode) enableGcodeComplete(box);
+    // Manual: in a file the list has to be asked for. See ui/complete.ts.
+    if (this.isGcode) enableGcodeComplete(box, { auto: false });
 
     const layer = this.querySelector<HTMLElement>('.editor-hl');
     if (!layer) return;
