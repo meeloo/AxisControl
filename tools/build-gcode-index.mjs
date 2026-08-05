@@ -26,6 +26,7 @@
 // shipping an index that is quietly half empty.
 
 import { writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -38,31 +39,55 @@ const flag = (name) => {
 
 const SOURCE = flag('--url') ?? 'https://docs.duet3d.com/User_manual/Reference/Gcodes';
 const from = flag('--from');
+const quiet = !!flag('--quiet');
 const out = resolve(root, flag('--out') ?? 'public/gcodes.json');
 /** Below this many codes, assume the parse failed rather than the page shrank. */
 const EXPECTED_MINIMUM = Number(flag('--min') ?? 200);
 
 // --- Getting the page -------------------------------------------------------
 
+/** What was built last time, so an unchanged page can be recognised. */
+function previous() {
+  if (!existsSync(out)) return null;
+  try {
+    return JSON.parse(readFileSync(out, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+const sha = (text) => createHash('sha256').update(text).digest('hex').slice(0, 16);
+
 async function loadPage() {
   if (from) {
     const path = resolve(process.cwd(), from);
     if (!existsSync(path)) throw new Error(`no such file: ${path}`);
-    console.log(`[gcode-index] reading ${from}`);
-    return readFileSync(path, 'utf8');
+    if (!quiet) console.log(`[gcode-index] reading ${from}`);
+    return { html: readFileSync(path, 'utf8') };
   }
-  console.log(`[gcode-index] fetching ${SOURCE}`);
-  const res = await fetch(SOURCE, {
-    headers: {
-      // wiki.js behind a CDN answers a bare programmatic request with a
-      // challenge page rather than the document.
-      'User-Agent':
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
-      Accept: 'text/html,application/xhtml+xml',
-    },
-  });
+  const last = previous();
+  const headers = {
+    // wiki.js behind a CDN answers a bare programmatic request with a
+    // challenge page rather than the document.
+    'User-Agent':
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
+    Accept: 'text/html,application/xhtml+xml',
+  };
+  // Ask the server whether it is worth sending 850KB. A 304 is the cheap
+  // answer to "has the reference changed", and the common one — the page is
+  // edited every few weeks and this runs on every build.
+  if (last?.etag) headers['If-None-Match'] = last.etag;
+  else if (last?.lastModified) headers['If-Modified-Since'] = last.lastModified;
+
+  if (!quiet) console.log(`[gcode-index] fetching ${SOURCE}`);
+  const res = await fetch(SOURCE, { headers });
+  if (res.status === 304) return { unchanged: true };
   if (!res.ok) throw new Error(`HTTP ${res.status} from ${SOURCE}`);
-  return res.text();
+  return {
+    html: await res.text(),
+    etag: res.headers.get('etag'),
+    lastModified: res.headers.get('last-modified'),
+  };
 }
 
 // --- HTML, reduced to text --------------------------------------------------
@@ -296,14 +321,32 @@ function inspect(html) {
 
 // --- Go ---------------------------------------------------------------------
 
-const page = await loadPage();
+const fetched = await loadPage();
 
-if (flag('--inspect')) {
-  inspect(page);
+// The server says it has not changed since the index was built. Nothing to do,
+// and nothing written — rewriting an identical file on every build would put a
+// diff in front of anyone running `git status` for no reason at all.
+if (fetched.unchanged) {
+  if (!quiet) console.log('[gcode-index] unchanged since the index was built (HTTP 304)');
   process.exit(0);
 }
 
-const codes = parseIndex(page);
+if (flag('--inspect')) {
+  inspect(fetched.html);
+  process.exit(0);
+}
+
+// Not every server honours a conditional request, and a CDN can answer 200
+// with the same bytes. Hashing the page catches that too, so "unchanged" means
+// unchanged rather than "the server felt like telling us".
+const pageHash = sha(fetched.html);
+const before = previous();
+if (before?.pageHash === pageHash && before.codes?.length) {
+  if (!quiet) console.log(`[gcode-index] unchanged since the index was built (same ${pageHash})`);
+  process.exit(0);
+}
+
+const codes = parseIndex(fetched.html);
 
 const withParams = codes.filter((c) => c.params.length).length;
 const withExamples = codes.filter((c) => c.examples.length).length;
@@ -325,6 +368,15 @@ if (codes.length < EXPECTED_MINIMUM) {
 mkdirSync(dirname(out), { recursive: true });
 writeFileSync(
   out,
-  `${JSON.stringify({ builtAt: new Date().toISOString(), source: SOURCE, codes })}\n`,
+  `${JSON.stringify({
+    builtAt: new Date().toISOString(),
+    source: SOURCE,
+    // Kept so the next build can ask the server whether it is worth fetching,
+    // and can tell for itself if the server answers 200 regardless.
+    pageHash,
+    etag: fetched.etag ?? null,
+    lastModified: fetched.lastModified ?? null,
+    codes,
+  })}\n`,
 );
 console.log(`[gcode-index] wrote ${out.replace(`${root}/`, '')}`);

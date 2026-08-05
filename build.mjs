@@ -10,7 +10,7 @@
 // because the board reads it off the SD card single-threaded.
 
 import { gzipSync } from 'node:zlib';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync, cpSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -269,6 +269,45 @@ const options = {
     },
   ],
 };
+
+/**
+ * Refresh the G-code reference before bundling.
+ *
+ * The script asks the server whether the page has changed and does nothing if
+ * it has not, so this costs one conditional request on a normal build and
+ * rewrites nothing — which matters, because a file rewritten on every build is
+ * a diff in front of anyone running `git status`.
+ *
+ * Only for a production build. Under --watch this would fire on every
+ * keystroke-triggered rebuild, and the reference does not change while you are
+ * editing a panel.
+ *
+ * A failure here does not fail the build. The generated index is committed, so
+ * no network means the reference is simply the one already in the tree — and a
+ * machine that cannot reach docs.duet3d.com is exactly the machine this whole
+ * approach exists for. A *parse* failure is different and does stop the build:
+ * that is the page having changed shape, and shipping a half-empty reference
+ * silently is the thing the script's own guard exists to prevent.
+ */
+function refreshGcodeIndex() {
+  const run = spawnSync(process.execPath, ['tools/build-gcode-index.mjs'], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  const output = `${run.stdout ?? ''}${run.stderr ?? ''}`.trim();
+  if (run.status === 0) {
+    for (const line of output.split('\n').filter(Boolean)) console.log(line);
+    return;
+  }
+  // The guard fires on a bad parse and says so; anything else is the network.
+  if (/expected at least/.test(output)) {
+    console.error(output);
+    fail('the G-code reference could not be parsed — see above');
+  }
+  console.warn('[build] G-code reference not refreshed (offline?); using the committed one');
+}
+
+if (prod) refreshGcodeIndex();
 
 emitStatic();
 
