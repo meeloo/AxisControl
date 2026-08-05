@@ -22,6 +22,7 @@
 // tool, and then nothing gets the tool change either.
 
 import { html, nothing, type TemplateResult } from 'lit';
+import { selectField } from './widgets.js';
 import {
   activeLibrary,
   describeTool,
@@ -137,25 +138,19 @@ export function toolPicker(opts: {
 
   return html`
     <div class="tool-pick">
-      <label class="param">
-        <span class="param-label">Tool</span>
-        <span class="param-input">
-          <select
-            title="Take the diameter, feeds and speeds from the tool library, and cut the job with this tool."
-            @change=${(e: Event) => {
-              const raw = (e.target as HTMLSelectElement).value;
-              opts.onPick(raw === '' ? null : (tools.find((t) => String(t.number) === raw) ?? null));
-            }}
-          >
-            <option value="" ?selected=${chosen === null}>Set by hand</option>
-            ${tools.map(
-              (t) => html`<option value=${String(t.number)} ?selected=${t.number === opts.selected}>
-                ${label(t)}
-              </option>`,
-            )}
-          </select>
-        </span>
-      </label>
+      ${selectField(
+        'Tool',
+        chosen === null ? '' : String(chosen.number),
+        [
+          { value: '', label: 'Set by hand' },
+          ...tools.map((t) => ({ value: String(t.number), label: label(t) })),
+        ],
+        (raw) => opts.onPick(raw === '' ? null : (tools.find((t) => String(t.number) === raw) ?? null)),
+        {
+          title:
+            'Take the diameter, feeds and speeds from the tool library, and cut the job with this tool.',
+        },
+      )}
       ${chosen
         ? html`<span class="tool-pick-note hint">
             ${opts.filled?.fields.length

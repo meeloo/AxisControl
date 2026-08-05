@@ -184,24 +184,20 @@ export class ProbePanel extends PanelElement {
         ${ROLES.map((r) => {
           const current = this.probeMap[r.role];
           return html`
-            <label class="param" title=${r.description}>
-              <span class="param-label">${r.label}</span>
-              <span class="param-input">
-                <select
-                  @change=${(e: Event) => {
-                    const v = (e.target as HTMLSelectElement).value;
-                    this.probeMap = { ...this.probeMap, [r.role]: v === '' ? null : Number(v) };
-                    saveProbeMap(this.probeMap);
-                    this.requestUpdate();
-                  }}
-                >
-                  <option value="" ?selected=${current === null}>not fitted</option>
-                  ${[0, 1, 2, 3].map(
-                    (k) => html`<option value=${k} ?selected=${current === k}>K${k}</option>`,
-                  )}
-                </select>
-              </span>
-            </label>
+            ${selectField(
+              r.label,
+              current === null ? '' : String(current),
+              [
+                { value: '', label: 'not fitted' },
+                ...[0, 1, 2, 3].map((k) => ({ value: String(k), label: `K${k}` })),
+              ],
+              (v) => {
+                this.probeMap = { ...this.probeMap, [r.role]: v === '' ? null : Number(v) };
+                saveProbeMap(this.probeMap);
+                this.requestUpdate();
+              },
+              { title: r.description },
+            )}
             <div class="param-note">${r.description}</div>
           `;
         })}

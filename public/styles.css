@@ -13,6 +13,9 @@
      straight. Wide enough for the two boxes of an XY point, which is what
      decides it — a lone input keeps its own 92px inside the column. */
   --pc: 168px;
+  /* Gutter between columns of parameters, and the gap between their rows. */
+  --pgap: 40px;
+  --prow: 6px;
   --bg: #eef1f5;
   --bg-panel: #ffffff;
   --bg-raised: #f4f6f9;
@@ -500,7 +503,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 /* Same minimum as .param-grid, and for the same reason: a column narrower than
    a row needs takes it out of the label, and "Pivot XY" ellipsised to "P…" is
    not a label. */
-.wcs-rot-form { display: grid; gap: 6px 14px;
+.wcs-rot-form { display: grid; gap: var(--prow) var(--pgap);
   grid-template-columns: repeat(auto-fit, minmax(calc(154px + var(--pc)), 1fr)); }
 
 /* ---------- Diagnostics ---------- */
@@ -907,7 +910,30 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
    "mm/mi". */
 .param-grid {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(calc(154px + var(--pc)), 1fr));
-  gap: 6px 12px; padding: 10px 12px; overflow: auto;
+  gap: var(--prow) var(--pgap); padding: 10px 12px; overflow: auto;
+}
+
+/* Columns of parameters, and the rule down the gutter between them.
+ *
+ * Two columns with 12px between them read as one wide row each: the eye pairs
+ * a label on the left with the input on the far right of the panel, which is
+ * the wrong input. A wide gutter with a hairline in it says where one column
+ * ends.
+ *
+ * Every row draws the rule half a gutter to its own left, and the first
+ * column's lands outside the container — which is why these containers clip
+ * their left edge, and why the gutter has to be wider than twice the padding.
+ * clip-path rather than overflow: the ATC's groups deliberately let their
+ * content overflow, and this must not take that away. */
+.param-grid, .cam-setup, .tool-edit, .wcs-rot-form {
+  clip-path: inset(-100vw -100vw -100vw 0);
+}
+:is(.param-grid, .cam-setup, .tool-edit, .wcs-rot-form) > .param { position: relative; }
+:is(.param-grid, .cam-setup, .tool-edit, .wcs-rot-form) > .param::before {
+  content: ''; position: absolute; width: 1px; background: var(--border);
+  left: calc(var(--pgap) / -2);
+  /* Half a row gap at each end, so the segments meet and read as one line. */
+  top: calc(var(--prow) / -2); bottom: calc(var(--prow) / -2);
 }
 /* min-width:0 on both the row and the input, because a grid or flex item
    defaults to min-width:auto and refuses to shrink below its content. A <select>
@@ -945,7 +971,10 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
    dragged its "mm" out of the column with it. */
 .param-input input, .param-input select { min-height: 30px; padding: 4px 8px; width: 100%;
   min-width: 0; font-family: var(--mono); font-size: 12px; }
-.param-input select { width: auto; min-width: 0; max-width: 100%; font-family: var(--sans);
+/* Fills the column like an input rather than sizing to its longest option: at
+   auto width a select of short choices stopped well short of where every other
+   control ended, and one with a wordy choice ran through the next column. */
+.param-input select { width: 100%; min-width: 0; max-width: 100%; font-family: var(--sans);
   text-overflow: ellipsis; }
 .param-input em { color: var(--text-faint); font-size: 11px; font-style: normal;
   flex: none; white-space: nowrap; }
@@ -1034,8 +1063,9 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
   margin-left: 8px; }
 .tool-actions { display: flex; gap: 3px; }
 
-.tool-edit { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 4px 12px; padding: 8px 12px 10px; background: var(--bg-raised);
+.tool-edit { --pc: 136px; --prow: 4px;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(calc(154px + var(--pc)), 1fr));
+  gap: var(--prow) var(--pgap); padding: 8px 12px 10px; background: var(--bg-raised);
   border-bottom: 1px solid var(--border); }
 .tool-edit .param.wide { grid-column: 1 / -1; }
 .tool-edit .param-input input[type="text"] { width: 100%; font-family: var(--sans); }
@@ -1222,8 +1252,12 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
   object-fit: contain; opacity: 0; }
 .cam-frame.showing { opacity: 1; }
 
-.cam-setup { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  gap: 6px 12px; padding: 10px; background: var(--bg-raised); border-radius: var(--radius); }
+/* Its own control width: no point rows here, so the column can be the narrower
+   one and the panel keeps two columns where the wide one would leave it one. */
+.cam-setup { --pc: 136px;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(calc(154px + var(--pc)), 1fr));
+  gap: var(--prow) var(--pgap); padding: 10px; background: var(--bg-raised);
+  border-radius: var(--radius); }
 .cam-setup .param.wide { grid-column: 1 / -1; }
 .cam-setup .param-input input[type="text"], .cam-setup .param-input input[type="password"] {
   width: 100%; font-family: var(--sans); }

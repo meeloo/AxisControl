@@ -130,7 +130,8 @@ function paramRow(
 
 export function numberField(
   label: string,
-  value: number,
+  /** null renders empty — for fields where blank means "work it out". */
+  value: number | null,
   onChange: (v: number) => void,
   opts: {
     step?: number;
@@ -139,6 +140,8 @@ export function numberField(
     suffix?: string;
     title?: string;
     capture?: Capture;
+    placeholder?: string;
+    cls?: string;
   } = {},
 ): TemplateResult {
   return paramRow(
@@ -146,7 +149,8 @@ export function numberField(
     html`
       <input
         type="number"
-        .value=${String(value)}
+        .value=${value === null ? '' : String(value)}
+        placeholder=${opts.placeholder ?? ''}
         step=${opts.step ?? 'any'}
         min=${opts.min ?? ''}
         max=${opts.max ?? ''}
@@ -157,7 +161,11 @@ export function numberField(
       />
       ${opts.suffix ? html`<em>${opts.suffix}</em>` : nothing}
     `,
-    { capture: opts.capture ? captureButton(opts.capture, onChange) : nothing, title: opts.title },
+    {
+      capture: opts.capture ? captureButton(opts.capture, onChange) : nothing,
+      title: opts.title,
+      cls: opts.cls,
+    },
   );
 }
 
@@ -244,7 +252,7 @@ export function textField(
   label: string,
   value: string,
   onChange: (v: string) => void,
-  opts: { placeholder?: string; title?: string } = {},
+  opts: { placeholder?: string; title?: string; cls?: string } = {},
 ): TemplateResult {
   return paramRow(
     label,
@@ -256,7 +264,7 @@ export function textField(
         @change=${(e: Event) => onChange((e.target as HTMLInputElement).value)}
       />
     `,
-    { title: opts.title },
+    { title: opts.title, cls: opts.cls },
   );
 }
 
@@ -265,6 +273,7 @@ export function selectField<T extends string>(
   value: T,
   options: Array<{ value: T; label: string }>,
   onChange: (v: T) => void,
+  opts: { title?: string; cls?: string } = {},
 ): TemplateResult {
   return paramRow(
     label,
@@ -275,6 +284,7 @@ export function selectField<T extends string>(
         )}
       </select>
     `,
+    { title: opts.title, cls: opts.cls },
   );
 }
 

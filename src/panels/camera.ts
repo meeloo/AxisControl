@@ -874,6 +874,7 @@ export class CameraPanel extends PanelElement {
       <div class="cam-setup">
         <label class="param">
           <span class="param-label">Camera</span>
+          <span class="param-cap"></span>
           <span class="param-input">
             <select
               @change=${(e: Event) => {
@@ -892,7 +893,8 @@ export class CameraPanel extends PanelElement {
           ? html`
               <label class="param wide">
                 <span class="param-label">Image or MJPEG URL</span>
-                <span class="param-input">
+                <span class="param-cap"></span>
+          <span class="param-input">
                   <input
                     type="text"
                     .value=${c.imageUrl}
@@ -916,7 +918,8 @@ export class CameraPanel extends PanelElement {
           : html`
               <label class="param" title="How long to run the motors to sweep a whole frame width, at the speed used for click-to-centre. Raise it if a click barely moves, lower it if it overshoots — a click that falls short converges when you click again, one that overshoots never settles.">
                 <span class="param-label">Aim travel</span>
-                <span class="param-input">
+                <span class="param-cap"></span>
+          <span class="param-input">
                   <input
                     type="number"
                     min="100"
@@ -932,7 +935,8 @@ export class CameraPanel extends PanelElement {
 
               <label class="param wide">
                 <span class="param-label">Address</span>
-                <span class="param-input">
+                <span class="param-cap"></span>
+          <span class="param-input">
                   <input
                     type="text"
                     .value=${c.url}
@@ -943,7 +947,8 @@ export class CameraPanel extends PanelElement {
               </label>
               <label class="param">
                 <span class="param-label">User</span>
-                <span class="param-input">
+                <span class="param-cap"></span>
+          <span class="param-input">
                   <input
                     type="text"
                     .value=${this.creds.user}
@@ -953,7 +958,8 @@ export class CameraPanel extends PanelElement {
               </label>
               <label class="param">
                 <span class="param-label">Password</span>
-                <span class="param-input">
+                <span class="param-cap"></span>
+          <span class="param-input">
                   <input
                     type=${this.showPassword ? 'text' : 'password'}
                     autocomplete="off"
@@ -980,7 +986,8 @@ export class CameraPanel extends PanelElement {
               </label>
               <label class="param">
                 <span class="param-label">Quality</span>
-                <span class="param-input">
+                <span class="param-cap"></span>
+          <span class="param-input">
                   <select
                     @change=${(e: Event) => (this.config = { ...c, quality: (e.target as HTMLSelectElement).value as 'sub' | 'main' })}
                   >
@@ -995,7 +1002,8 @@ export class CameraPanel extends PanelElement {
           ? html`
               <label class="param">
                 <span class="param-label">Picture</span>
-                <span class="param-input">
+                <span class="param-cap"></span>
+          <span class="param-input">
                   <select
                     @change=${(e: Event) => {
                       this.config = { ...c, mode: (e.target as HTMLSelectElement).value as CameraConfig['mode'] };
@@ -1013,6 +1021,7 @@ export class CameraPanel extends PanelElement {
 
         <label class="param">
           <span class="param-label">Frames / second</span>
+          <span class="param-cap"></span>
           <span class="param-input">
             <select
               ?disabled=${c.stream}

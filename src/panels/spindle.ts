@@ -9,6 +9,7 @@ import { html, nothing, type TemplateResult } from 'lit';
 import { PanelElement, registerPanel } from '../ui/panel.js';
 import { actions, capabilities, connected, machine, run } from '../core/store.js';
 import { BUSY_STATES } from '../machine/types.js';
+import { numberField, selectField, textField } from '../ui/widgets.js';
 import {
   TOOL_TYPES,
   activeLibrary,
@@ -381,45 +382,25 @@ export class SpindlePanel extends PanelElement {
       ${open
         ? html`
             <div class="tool-edit">
-              <label class="param">
-                <span class="param-label">Name</span>
-                <span class="param-input">
-                  <input type="text" .value=${info.name} placeholder="e.g. 6mm compression"
-                    @change=${(e: Event) => this.updateTool(n, { name: (e.target as HTMLInputElement).value })} />
-                </span>
-              </label>
-              <label class="param">
-                <span class="param-label">Diameter</span>
-                <span class="param-input">
-                  <input type="number" step="0.001" min="0" .value=${String(info.diameter)}
-                    @change=${(e: Event) => this.updateTool(n, { diameter: Number((e.target as HTMLInputElement).value) })} />
-                  <em>mm</em>
-                </span>
-              </label>
-              <label class="param">
-                <span class="param-label">Type</span>
-                <span class="param-input">
-                  <select @change=${(e: Event) => this.updateTool(n, { type: (e.target as HTMLSelectElement).value as ToolType })}>
-                    ${TOOL_TYPES.map(
-                      (t) => html`<option value=${t.value} ?selected=${t.value === info.type}>${t.label}</option>`,
-                    )}
-                  </select>
-                </span>
-              </label>
-              <label class="param">
-                <span class="param-label">Flutes</span>
-                <span class="param-input">
-                  <input type="number" step="1" min="0" .value=${String(info.flutes)}
-                    @change=${(e: Event) => this.updateTool(n, { flutes: Number((e.target as HTMLInputElement).value) })} />
-                </span>
-              </label>
-              <label class="param wide">
-                <span class="param-label">Notes</span>
-                <span class="param-input">
-                  <input type="text" .value=${info.notes} placeholder="feeds, material, anything"
-                    @change=${(e: Event) => this.updateTool(n, { notes: (e.target as HTMLInputElement).value })} />
-                </span>
-              </label>
+              ${textField('Name', info.name, (v) => this.updateTool(n, { name: v }), {
+                placeholder: 'e.g. 6mm compression',
+              })}
+              ${numberField('Diameter', info.diameter, (v) => this.updateTool(n, { diameter: v }), {
+                step: 0.001, min: 0, suffix: 'mm',
+              })}
+              ${selectField(
+                'Type',
+                info.type,
+                TOOL_TYPES.map((t) => ({ value: t.value, label: t.label })),
+                (v) => this.updateTool(n, { type: v as ToolType }),
+              )}
+              ${numberField('Flutes', info.flutes, (v) => this.updateTool(n, { flutes: v }), {
+                step: 1, min: 0,
+              })}
+              ${textField('Notes', info.notes, (v) => this.updateTool(n, { notes: v }), {
+                placeholder: 'feeds, material, anything',
+                cls: 'wide',
+              })}
               ${this.renderGeometry(n, info)}
             </div>
           `
@@ -437,23 +418,21 @@ export class SpindlePanel extends PanelElement {
    */
   private renderGeometry(n: number, info: ToolInfo): TemplateResult {
     const g = info.geometry ?? emptyGeometry();
+    // Blank rather than 0, since 0 here means "not stated" and reads as a
+    // measurement of nothing.
     const dim = (
       label: string,
       value: number,
       unit: string,
       apply: (v: number) => void,
       step = 0.1,
-    ) => html`
-      <label class="param">
-        <span class="param-label">${label}</span>
-        <span class="param-input">
-          <input type="number" step=${step} min="0" placeholder="auto"
-            .value=${value > 0 ? String(value) : ''}
-            @change=${(e: Event) => apply(Number((e.target as HTMLInputElement).value) || 0)} />
-          <em>${unit}</em>
-        </span>
-      </label>
-    `;
+    ) =>
+      numberField(label, value > 0 ? value : null, apply, {
+        step,
+        min: 0,
+        suffix: unit,
+        placeholder: 'auto',
+      });
 
     return html`
       <div class="tool-geom-head">Geometry — for the 3D view</div>
