@@ -4,6 +4,7 @@ import { html, type TemplateResult } from 'lit';
 import { repeat } from 'lit/directives/repeat.js';
 import { PanelElement, registerPanel } from '../ui/panel.js';
 import { actions, connected, loadSetting, log, saveSetting } from '../core/store.js';
+import { enableGcodeComplete } from '../ui/complete.js';
 
 const HISTORY_LIMIT = 100;
 
@@ -22,6 +23,9 @@ export class ConsolePanel extends PanelElement {
   }
 
   protected override updated(): void {
+    const input = this.querySelector<HTMLInputElement>('.console-in input');
+    if (input) enableGcodeComplete(input);
+
     // Keep the newest line visible unless the operator has scrolled up to read
     // something — yanking the view away mid-read is worse than a stale scroll.
     if (!this.pinned) return;
@@ -34,6 +38,19 @@ export class ConsolePanel extends PanelElement {
     this.pinned = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
   }
 
+  /**
+   * Put the draft into the box.
+   *
+   * By hand, because lit's `.value` binding is dirty-checked against the value
+   * lit itself last committed — and typing changes the DOM behind its back. So
+   * setting the draft back to "" after sending looks like no change at all, and
+   * the command that was just sent stays sitting in the box.
+   */
+  private showDraft(): void {
+    const input = this.querySelector<HTMLInputElement>('.console-in input');
+    if (input) input.value = this.draft;
+  }
+
   private submit(): void {
     const cmd = this.draft.trim();
     if (!cmd) return;
@@ -42,6 +59,7 @@ export class ConsolePanel extends PanelElement {
     saveSetting('mdiHistory', this.history);
     this.historyIndex = -1;
     this.draft = '';
+    this.showDraft();
     this.pinned = true;
 
     void actions.send(cmd);
@@ -49,8 +67,6 @@ export class ConsolePanel extends PanelElement {
   }
 
   private onKeyDown(e: KeyboardEvent): void {
-    const input = e.target as HTMLInputElement;
-
     if (e.key === 'Enter') {
       e.preventDefault();
       this.submit();
@@ -61,7 +77,7 @@ export class ConsolePanel extends PanelElement {
       if (this.historyIndex + 1 < this.history.length) {
         this.historyIndex++;
         this.draft = this.history[this.historyIndex];
-        input.value = this.draft;
+        this.showDraft();
       }
       return;
     }
@@ -74,7 +90,7 @@ export class ConsolePanel extends PanelElement {
         this.historyIndex = -1;
         this.draft = '';
       }
-      input.value = this.draft;
+      this.showDraft();
     }
   }
 

@@ -12,24 +12,7 @@
 import { html, nothing, type TemplateResult } from 'lit';
 import { PanelElement, registerPanel } from '../ui/panel.js';
 import { searchCodes, type GcodeEntry, type GcodeIndex } from '../docs/types.js';
-
-/** Loaded once per page, shared by every instance of the panel. */
-let loading: Promise<GcodeIndex> | null = null;
-
-function loadIndex(): Promise<GcodeIndex> {
-  loading ??= fetch(new URL('gcodes.json', document.baseURI).href)
-    .then((res) => {
-      if (!res.ok) throw new Error(`the reference is not on the machine (HTTP ${res.status})`);
-      return res.json() as Promise<GcodeIndex>;
-    })
-    .catch((err) => {
-      // Cleared so a retry is possible; a failed fetch cached for ever would
-      // mean the panel never worked again without a reload.
-      loading = null;
-      throw err;
-    });
-  return loading;
-}
+import { loadIndex } from '../docs/load.js';
 
 export class GcodePanel extends PanelElement {
   private index: GcodeIndex | null = null;

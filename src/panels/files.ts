@@ -12,8 +12,11 @@ import { PanelElement, registerPanel } from '../ui/panel.js';
 import { actions, activeDriver, appendLog, capabilities, connected, run } from '../core/store.js';
 import { basename, formatBytes, parentPath } from '../core/util.js';
 import type { FileEntry } from '../machine/types.js';
+import { enableGcodeComplete } from '../ui/complete.js';
 
 const TEXT_EXTENSIONS = /\.(g|gcode|nc|txt|json|csv|md|cfg|conf|ini|log)$/i;
+/** Which of those are G-code, and so get completion and colour. */
+const GCODE_EXTENSIONS = /\.(g|gcode|nc|tap)$/i;
 /** Refuse to open anything big enough to lock up the editor. */
 const MAX_EDIT_BYTES = 512 * 1024;
 
@@ -45,6 +48,14 @@ export class FilesPanel extends PanelElement {
       }
       wasConnected = now;
     });
+  }
+
+  protected override updated(): void {
+    // Only for files that are G-code. Completing M-codes into a JSON file would
+    // be noise, and the editor opens plenty that are not machine instructions.
+    if (!this.openPath || !GCODE_EXTENSIONS.test(this.openPath)) return;
+    const box = this.querySelector<HTMLTextAreaElement>('.editor-text');
+    if (box) enableGcodeComplete(box);
   }
 
   private get dirty(): boolean {

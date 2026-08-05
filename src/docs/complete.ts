@@ -77,11 +77,15 @@ export function suggest(
   const command = commandOnLine(line, token.start);
   const entry = command ? codes.find((c) => c.code === command) : null;
 
-  // A parameter, when the command is known and the token is not itself a
-  // command. "M574 X" completes X; "M574 M" would too, which is right — M is
-  // a parameter letter on plenty of commands.
-  if (entry && token.text && !/^[GgMmTt]\d/.test(token.text)) {
-    const head = token.text.slice(0, 1).toUpperCase();
+  // A parameter, when the command is known and the token is a bare letter.
+  // "M574 X" completes X; "M574 M" would too, which is right — M is a parameter
+  // letter on plenty of commands.
+  //
+  // Bare, strictly: once a value has been typed the question has been answered,
+  // and suggesting X over "X10" would offer to delete the 10. A suggestion that
+  // destroys what you just typed is worse than no suggestion at all.
+  if (entry && /^[A-Za-z]$/.test(token.text)) {
+    const head = token.text.toUpperCase();
     const items = entry.params
       .filter((p) => paramLetter(p.letter).startsWith(head))
       .slice(0, limit)
