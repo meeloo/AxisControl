@@ -166,10 +166,13 @@ export function totalBytes(files: Map<string, Uint8Array>): number {
 }
 
 /**
- * The URL an install becomes, given the address the machine is reached at.
+ * The directory an install lives at, as a URL. Ends in a slash so it can be
+ * used as a base for the files inside it.
  *
  * Built from the controller URL rather than assembled from a hostname, so a
  * machine on a non-standard port keeps it.
+ *
+ * This is NOT a URL to open. See `entryUrl`.
  */
 export function installedUrl(controllerUrl: string, dir = INSTALL_DIR): string {
   const path = dir.replace(/^\/www/, '');
@@ -177,6 +180,83 @@ export function installedUrl(controllerUrl: string, dir = INSTALL_DIR): string {
     return new URL(`${path}/`, controllerUrl).href;
   } catch {
     return `${controllerUrl.replace(/\/+$/, '')}${path}/`;
+  }
+}
+
+/**
+ * The URL to actually open, which names index.html explicitly.
+ *
+ * RepRapFirmware has no directory index. A request for `/AxisControl` or
+ * `/AxisControl/` resolves to no file, and the firmware's answer to a path it
+ * cannot resolve is to serve `/www/index.html` — which is DWC. DWC's router
+ * then finds no such route and renders its own "404 page not found", inside its
+ * own shell.
+ *
+ * That is a confusing symptom, because it is a 200 with a 404 drawn on it, from
+ * an application that is not this one. It means the request never reached these
+ * files, not that the files are missing.
+ */
+export function entryUrl(controllerUrl: string, dir = INSTALL_DIR): string {
+  return `${installedUrl(controllerUrl, dir)}index.html`;
+}
+
+/**
+ * A one-line page at `/www/<name>.html` that redirects to the real entry point.
+ *
+ * The only way to get a short URL out of a firmware with no directory index:
+ * `/AxisControl.html` has an extension, so it resolves to a file, and that file
+ * sends the browser on to `/AxisControl/index.html` where the relative asset
+ * paths work.
+ *
+ * It is the one thing this writes outside the install directory, which is why
+ * it is a choice rather than a default of the copying. It cannot collide with
+ * DWC: DWC ships `index.html` and a `css/`, `js/` and `fonts/` tree, and no
+ * top-level page named after this app.
+ */
+export function shortcutPath(dir = INSTALL_DIR): string {
+  return `${dir}.html`;
+}
+
+export function shortcutUrl(controllerUrl: string, dir = INSTALL_DIR): string {
+  const path = shortcutPath(dir).replace(/^\/www/, '');
+  try {
+    return new URL(path, controllerUrl).href;
+  } catch {
+    return `${controllerUrl.replace(/\/+$/, '')}${path}`;
+  }
+}
+
+export async function writeShortcut(driver: MachineDriver, dir = INSTALL_DIR): Promise<void> {
+  const target = `${dir.replace(/^\/www/, '')}/index.html`;
+  // A meta refresh rather than a script: it works with scripting disabled, it
+  // needs no framework, and it is understood by every browser this app claims
+  // to support — including the iOS 12 iPad this project keeps in scope.
+  const html =
+    '<!doctype html>\n<meta charset="utf-8">\n' +
+    `<meta http-equiv="refresh" content="0; url=${target}">\n` +
+    '<title>Axis Control</title>\n' +
+    `<p>Continue to <a href="${target}">Axis Control</a>.</p>\n`;
+  await driver.writeFile(shortcutPath(dir), new TextEncoder().encode(html));
+}
+
+/**
+ * Confirm the entry point serves this app rather than the one already there.
+ *
+ * The check that matters, and the one whose absence let a broken install look
+ * finished: every file can upload successfully and the page can still be DWC,
+ * because whether the firmware routes a URL to a file is a separate question
+ * from whether the file exists.
+ */
+export async function entryServesUs(url: string): Promise<boolean> {
+  try {
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) return false;
+    const html = await res.text();
+    // Our own entry, by the bundle it loads. DWC's index names its own chunks
+    // and never this.
+    return /src="cnc\.js/.test(html);
+  } catch {
+    return false;
   }
 }
 

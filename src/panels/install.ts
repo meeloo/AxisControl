@@ -18,6 +18,8 @@ import { activeDriver, appendLog, connected, controllerUrl, machine, saveSetting
 import { BUILD, describeBuild, isDirtyBuild } from '../core/build.js';
 import {
   INSTALL_DIR,
+  entryServesUs,
+  entryUrl,
   fetchBuild,
   installBuild,
   installedUrl,
@@ -25,7 +27,10 @@ import {
   ownOrigin,
   readManifest,
   sealInstall,
+  shortcutPath,
+  shortcutUrl,
   totalBytes,
+  writeShortcut,
   type BuildManifest,
 } from '../machine/install.js';
 import {
@@ -50,6 +55,8 @@ interface Settings {
   autoCheck: boolean;
   /** Offer prereleases as well as stable releases. */
   betas: boolean;
+  /** Write /www/AxisControl.html, so the short URL works. */
+  shortcut: boolean;
   lastCheck: number;
 }
 
@@ -57,6 +64,7 @@ export class InstallPanel extends PanelElement {
   private settings: Settings = {
     autoCheck: true,
     betas: false,
+    shortcut: true,
     lastCheck: 0,
     ...loadSetting<Partial<Settings>>('install', {}),
   };
@@ -208,13 +216,22 @@ export class InstallPanel extends PanelElement {
     );
     // Last, and only now: the manifest is what claims a complete copy is here.
     await sealInstall(driver, INSTALL_DIR, manifest);
+    if (this.settings.shortcut) await writeShortcut(driver, INSTALL_DIR);
 
     // Confirm by reading it back off the machine rather than by assuming the
     // uploads that returned success added up to a working copy.
-    this.installed = await readManifest(installedUrl(controllerUrl.peek()));
+    const url = controllerUrl.peek();
+    this.installed = await readManifest(installedUrl(url));
     if (!this.installed) {
       throw new Error(
         'Everything uploaded, but the machine will not serve it back. Check that /www is on the SD card and that there is space left.',
+      );
+    }
+    // And the part that files-uploaded-successfully does not cover: that the
+    // entry URL reaches this app rather than the web interface already there.
+    if (!(await entryServesUs(entryUrl(url)))) {
+      throw new Error(
+        `The files are on the machine, but ${entryUrl(url)} is being answered by something else — almost certainly DWC. That is what a "404 page not found" drawn inside the DWC shell means.`,
       );
     }
     this.done = `${describeBuild(this.installed)} is installed — ${mb(totalBytes(files))} written`;
@@ -224,7 +241,7 @@ export class InstallPanel extends PanelElement {
   // --- Render -------------------------------------------------------------
 
   private renderStatus(): TemplateResult {
-    const url = installedUrl(controllerUrl.get());
+    const url = entryUrl(controllerUrl.get());
     const installed = this.installed;
     const same = isSameBuild(installed ?? null, BUILD);
 
@@ -240,7 +257,7 @@ export class InstallPanel extends PanelElement {
                 : describeBuild(installed)}
           </strong>
           ${installed
-            ? html`<a class="hint" href=${url} target="_blank" rel="noreferrer">${url}</a>`
+            ? html`<a class="inst-link" href=${url} target="_blank" rel="noreferrer">${url}</a>`
             : html`<span class="hint">will be served from ${url}</span>`}
         </div>
         <div class="inst-cell">
@@ -309,10 +326,15 @@ export class InstallPanel extends PanelElement {
     return html`
       <div class="pack inst">
         <div class="pack-blurb">
-          Serve this app from the machine itself, at
-          <code>${INSTALL_DIR.replace('/www', '')}/</code> — beside DWC, which stays exactly where
-          it is. A tablet then needs nothing but the machine, and the controller is same-origin so
-          no CORS setting is involved.
+          Serve this app from the machine itself, beside DWC, which stays exactly where it is. A
+          tablet then needs nothing but the machine, and the controller is same-origin so no CORS
+          setting is involved.
+        </div>
+        <div class="pack-blurb inst-urlnote">
+          The address ends in <code>/index.html</code>. RepRapFirmware has no directory index:
+          <code>${INSTALL_DIR.replace('/www', '')}</code> on its own resolves to no file, and the
+          firmware answers an unresolvable path with DWC — which then shows its own
+          <em>404 page not found</em>. That page means the address, not the install.
         </div>
 
         ${this.renderStatus()}
@@ -359,6 +381,21 @@ export class InstallPanel extends PanelElement {
               }}
             />
             Check ${REPO} for updates, once a day
+          </label>
+          <label
+            class="check"
+            title="Writes ${shortcutPath()}, one line of HTML that redirects to the entry point. The only file written outside the install directory."
+          >
+            <input
+              type="checkbox"
+              .checked=${this.settings.shortcut}
+              @change=${(e: Event) => {
+                this.settings.shortcut = (e.target as HTMLInputElement).checked;
+                this.save();
+                this.requestUpdate();
+              }}
+            />
+            Add a ${shortcutUrl(controllerUrl.get()).replace(/^https?:\/\//, '')} shortcut
           </label>
           <label class="check">
             <input

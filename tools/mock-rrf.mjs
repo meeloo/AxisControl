@@ -193,6 +193,13 @@ function removeFromListing(full) {
 }
 
 const FILE_CONTENT = {
+  // DWC, near enough: a single-page app at the root of /www. Present so a test
+  // can tell "the machine served Axis Control" from "the machine served the
+  // web interface that was already there and it had no such route".
+  '/www/index.html':
+    '<!doctype html><html><body><div id="app">404 page not found</div>' +
+    '<!-- stand-in for Duet Web Control --></body></html>',
+
   // Includes the atcConfig.g call, because this machine has a working ATC.
   // Anything that checks whether the tool changer is actually loaded has to
   // see the normal case here, not a permanent warning.
@@ -654,7 +661,16 @@ const server = createServer(async (req, res) => {
   // the plain files would work here and be slow on the real board — while one
   // that uploaded only the .gz files would work on the board and 404 against a
   // mock that did not do this.
-  const wwwPath = `/www${path.replace(/\/$/, '/index.html')}`;
+  // A file under /www, resolved the way the firmware resolves one.
+  //
+  // Exact names only. RRF does NOT turn `/AxisControl/` into
+  // `/AxisControl/index.html` — there is no directory index — and pretending it
+  // did is how an installer gets shipped that works against this mock and
+  // serves DWC's 404 on the real board.
+  //
+  // The .gz preference IS the firmware's: it answers a request for `cnc.js`
+  // with `cnc.js.gz` and Content-Encoding set.
+  const wwwPath = `/www${path === '/' ? '/index.html' : path}`;
   const accepts = /\bgzip\b/.test(req.headers['accept-encoding'] ?? '');
   const zipped = FILE_CONTENT[`${wwwPath}.gz`];
   const plain = FILE_CONTENT[wwwPath];
@@ -682,6 +698,18 @@ const server = createServer(async (req, res) => {
     res.writeHead(200, { 'Content-Type': MIME[extname(file)] ?? 'application/octet-stream' });
     res.end(body);
   } catch {
+    // What the firmware does with a path it cannot resolve: serve /www's own
+    // index page, so a single-page app can route it client-side. On a real
+    // machine that page is DWC — which is why a request for /AxisControl comes
+    // back as DWC's "404 page not found" rather than as an HTTP 404, and why
+    // that symptom means "the request never reached your files".
+    const spa = FILE_CONTENT['/www/index.html'];
+    if (spa !== undefined) {
+      const body = Buffer.isBuffer(spa) ? spa : Buffer.from(String(spa), 'utf8');
+      cors(res);
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': body.length });
+      return res.end(body);
+    }
     cors(res);
     res.writeHead(404);
     res.end('not found');
