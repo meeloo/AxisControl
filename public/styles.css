@@ -351,7 +351,6 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .dv-host .dv-tabs-and-actions-container { border-bottom: 1px solid var(--border); }
 
 
-}
 
 
 
@@ -368,7 +367,12 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 
 .picker {
   position: fixed; right: 18px; top: 96px;
-  width: 300px; max-height: 60vh;
+  /* Wide enough for two columns where there is room, and never wider than the
+     screen. The list below decides how many columns that actually buys. */
+  width: min(640px, calc(100vw - 36px));
+  /* Bounded by the window rather than by a fraction of it: 60vh on a short
+     laptop screen still left the list taller than the space under it. */
+  max-height: calc(100vh - 114px);
   background: var(--bg-raised);
   border: 1px solid var(--border-strong);
   border-radius: 8px;
@@ -376,7 +380,20 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
   display: flex; flex-direction: column;
   box-shadow: 0 8px 32px var(--shadow);
 }
-.picker-list { overflow: auto; padding: 6px; }
+/* min-height: 0 is what makes the scrolling work. A flex item defaults to
+   min-height: auto, which means it refuses to shrink below its own content —
+   so the list grew past the panel, `overflow: auto` never had anything to
+   scroll, and the items past the bottom edge were simply unreachable.
+   -webkit-overflow-scrolling for the iPad this is meant to run on. */
+.picker-list {
+  overflow-y: auto; -webkit-overflow-scrolling: touch;
+  min-height: 0; flex: 1 1 auto;
+  padding: 6px;
+  display: grid; gap: 2px;
+  /* Two columns at the full width, one when the window is too narrow for
+     them — the description needs about this much to stay on one line. */
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+}
 .picker-item {
   display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
   width: 100%; text-align: left; background: transparent; border-color: transparent;
