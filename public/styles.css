@@ -1509,3 +1509,25 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .viewer-picker-bar { flex: none; display: flex; align-items: center; }
 .viewer-picker-list { flex: 1 1 auto; min-height: 0; overflow-y: auto;
   -webkit-overflow-scrolling: touch; }
+
+/* The signature hint: what the line being typed is, and what its parameters do.
+   Never shown with the completion popup — see the note in ui/complete.ts. */
+.gc-hint {
+  position: fixed; z-index: 200; display: none;
+  max-width: min(520px, 92vw); pointer-events: none;
+  background: var(--bg-panel); border: 1px solid var(--border-strong);
+  border-radius: var(--radius); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+  padding: 6px 9px; font-size: 12px;
+}
+.gc-hint-head { display: flex; gap: 8px; align-items: baseline; }
+.gc-hint-head strong { flex: none; font-family: var(--mono); color: var(--accent); }
+.gc-hint-head span { flex: 1 1 auto; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.gc-hint-params { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.gc-hint-chip { flex: none; font-family: var(--mono); font-size: 11px;
+  padding: 1px 5px; border-radius: 3px; background: var(--bg-raised);
+  color: var(--text-dim); }
+/* Filled in already — still shown, because what is left is the useful part. */
+.gc-hint-chip.used { opacity: 0.45; text-decoration: line-through; }
+.gc-hint-chip.on { background: var(--accent); color: #fff; }
+.gc-hint-detail { margin-top: 5px; color: var(--text-dim); }

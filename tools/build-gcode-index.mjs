@@ -190,9 +190,29 @@ function parseParam(line) {
   if (!cleaned) return null;
   const match = /^([A-Za-z][^\s]*)\s+(.*)$/.exec(cleaned);
   if (!match) return null;
+  // Only a real parameter, not a sentence that happens to start a bullet.
+  //
+  // The Parameters list on these pages mixes the two: G1's begins "Not all
+  // parameters need to be used…", G29's has one starting "If…", and several
+  // start with the word RepRapFirmware. Taken at face value they became
+  // parameters called Not, If and RepRapFirmware — 116 of 918 across the page,
+  // which is noise in the reference and a wrong suggestion in the editor.
+  //
+  // A parameter is a letter and, at most, a placeholder for its value: Xnnn,
+  // Tnn, R1, S, P"pin_name", E[0]. A second English word means prose.
+  // Trailing punctuation is the docs' own, not the parameter's: several are
+  // written "Pnn:" or "Xnnn," and dropping them for it would lose real ones.
+  const head = match[1].replace(/[,:]+$/, '');
+  const isParam =
+    /^[A-Za-z]"/.test(match[1]) ||
+    // A letter, then only placeholders — n, digits, brackets, punctuation. A
+    // second English letter after the first means it is a word, not a code.
+    (!/^[GgMmTt]\d/.test(head) && !/[a-mo-zA-MO-Z]/.test(head.slice(1)));
+  if (!isParam) return null;
+
   const required = /\(required\)/i.test(match[2]);
   return {
-    letter: match[1],
+    letter: head,
     text: match[2].replace(/^\(required\)\s*/i, '').trim(),
     required,
   };

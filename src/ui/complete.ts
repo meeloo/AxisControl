@@ -19,7 +19,7 @@
 // console's history handler would see ArrowUp before we could stop it. One
 // listener above the target, stopping propagation, is what actually wins.
 
-import { suggest, applySuggestion, type Suggestion } from '../docs/complete.js';
+import { suggest, applySuggestion, paramLetter, signature, type Suggestion } from '../docs/complete.js';
 import { loadIndex, peekIndex } from '../docs/load.js';
 
 type Box = HTMLInputElement | HTMLTextAreaElement;
@@ -34,6 +34,7 @@ interface Open {
 
 const enabled = new WeakSet<Box>();
 let popup: HTMLDivElement | null = null;
+let hint: HTMLDivElement | null = null;
 let open: Open | null = null;
 let listening = false;
 
@@ -48,6 +49,16 @@ export function enableGcodeComplete(box: Box): void {
 
   box.addEventListener('input', () => refresh(box));
   box.addEventListener('click', () => refresh(box));
+  // Moving the caret without changing the text still changes which parameter
+  // you are on, and the hint has to keep up with it.
+  //
+  // Not while the popup is open: the arrows belong to it then, and recomputing
+  // here threw away the item just highlighted — so Enter fell through to the
+  // console and sent the half-typed line instead of completing it.
+  box.addEventListener('keyup', (e) => {
+    if (open) return;
+    if (/^(Arrow|Home|End|Page)/.test((e as KeyboardEvent).key)) refresh(box);
+  });
   box.addEventListener('blur', () => close());
   box.addEventListener('scroll', () => close());
 
@@ -75,7 +86,11 @@ function refresh(box: Box): void {
   const line = box.value.slice(start, lineEnd === -1 ? undefined : lineEnd);
 
   const found = suggest(index.codes, line, caret - start);
-  if (!found.items.length) return close();
+  if (!found.items.length) {
+    open = null;
+    if (popup) popup.style.display = 'none';
+    return drawHint(box, line, caret - start, start);
+  }
 
   open = {
     box,
@@ -83,12 +98,14 @@ function refresh(box: Box): void {
     range: { from: found.from + start, to: found.to + start },
     active: -1,
   };
+  hideHint();
   draw();
 }
 
 function close(): void {
   open = null;
   if (popup) popup.style.display = 'none';
+  hideHint();
 }
 
 function onKeyDown(e: KeyboardEvent): void {
@@ -147,9 +164,93 @@ function accept(which: number): void {
   box.dispatchEvent(new Event('input', { bubbles: true }));
 
   close();
-  // A command accepted is a question about its parameters, so offer them
-  // straight away rather than making the operator type a space to ask.
-  if (item.kind === 'code') refresh(box);
+
+  // A command accepted is a question about its parameters. Type the space for
+  // them and show the list — having to press space to be told what M574 takes
+  // is one keystroke of ceremony in the exact place the help was wanted.
+  if (item.kind === 'code') {
+    const at = box.selectionStart ?? 0;
+    if (box.value[at] !== ' ') {
+      box.value = `${box.value.slice(0, at)} ${box.value.slice(at)}`;
+      box.setSelectionRange(at + 1, at + 1);
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+    } else {
+      box.setSelectionRange(at + 1, at + 1);
+    }
+  }
+  refresh(box);
+}
+
+/**
+ * The hint at the caret: what command this line is, and what its parameters do.
+ *
+ * The half the popup cannot give you. Once you have picked M574 and are typing
+ * values the list is gone, and nothing on screen says whether the pin goes in P
+ * or S, or which parameters you have not filled in yet — which is exactly the
+ * moment people open a browser. It follows the caret, dims what already has a
+ * value, and shows the description of the one being typed.
+ *
+ * Never at the same time as the popup. Two floating boxes fighting over the
+ * same few pixels below the caret is worse than either alone, and while the
+ * popup is open its own detail column is saying the same thing.
+ */
+function drawHint(box: Box, line: string, cursor: number, lineStart: number): void {
+  const index = peekIndex();
+  const sig = index ? signature(index.codes, line, cursor) : null;
+  if (!sig) return hideHint();
+
+  const el = ensureHint();
+  el.replaceChildren();
+
+  const head = document.createElement('div');
+  head.className = 'gc-hint-head';
+  const code = document.createElement('strong');
+  code.textContent = sig.entry.code;
+  const title = document.createElement('span');
+  title.textContent = sig.entry.title;
+  head.append(code, title);
+  el.appendChild(head);
+
+  if (sig.entry.params.length) {
+    const row = document.createElement('div');
+    row.className = 'gc-hint-params';
+    const seen = new Set<string>();
+    for (const param of sig.entry.params) {
+      const letter = paramLetter(param.letter);
+      if (seen.has(letter)) continue;
+      seen.add(letter);
+      const chip = document.createElement('span');
+      const active = sig.active === param;
+      chip.className = `gc-hint-chip${active ? ' on' : ''}${sig.used.has(letter) && !active ? ' used' : ''}`;
+      chip.textContent = param.letter;
+      row.appendChild(chip);
+    }
+    el.appendChild(row);
+  }
+
+  // The description of the parameter being typed, which is the sentence that
+  // sends someone to the browser when it is not here.
+  const detail = document.createElement('div');
+  detail.className = 'gc-hint-detail';
+  detail.textContent = sig.active
+    ? `${sig.active.letter} — ${sig.active.text}`
+    : sig.entry.support ?? 'Type a parameter letter for its description.';
+  el.appendChild(detail);
+
+  el.style.display = 'block';
+  place(el, box, lineStart + cursor);
+}
+
+function ensureHint(): HTMLDivElement {
+  if (hint) return hint;
+  hint = document.createElement('div');
+  hint.className = 'gc-hint';
+  document.body.appendChild(hint);
+  return hint;
+}
+
+function hideHint(): void {
+  if (hint) hint.style.display = 'none';
 }
 
 function ensurePopup(): HTMLDivElement {
