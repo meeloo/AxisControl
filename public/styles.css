@@ -31,6 +31,11 @@
   --code-number: #1a7f4b;
   --code-string: #9a5c00;
   --code-boolean: #0a63c9;
+  --code-comment: #7b8794;
+  --code-command: #0a63c9;
+  --code-param: #8b2fb8;
+  --code-keyword: #b02a5b;
+  --code-expr: #0b6e83;
 
   --radius: 6px;
   --tap: 40px;
@@ -67,6 +72,11 @@
   --code-number: #a5d6a7;
   --code-string: #ffcc80;
   --code-boolean: #90caf9;
+  --code-comment: #71808f;
+  --code-command: #90caf9;
+  --code-param: #dfa8f5;
+  --code-keyword: #f48fb1;
+  --code-expr: #7fd8e0;
 
   color-scheme: dark;
 }
@@ -740,8 +750,40 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
   border-bottom: 1px solid var(--border); }
 .editor-path { flex: 1; font-family: var(--mono); font-size: 12px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.editor-text { flex: 1; resize: none; border: 0; border-radius: 0;
-  font-family: var(--mono); font-size: 12px; line-height: 1.5; tab-size: 2; }
+/* The editor is two layers: a <pre> holding the colour, and the real textarea
+   over it with transparent text and a visible caret. A textarea cannot be
+   coloured, and this is the only way that keeps the browser's own editing —
+   selection, undo, IME, spellcheck — instead of reimplementing it.
+
+   Everything that decides where a glyph lands has to match on both layers, or
+   the colour drifts away from the text as you go down the file. */
+.editor-body { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+.editor-text, .editor-hl {
+  position: absolute; inset: 0; margin: 0;
+  padding: 8px 10px; border: 0; border-radius: 0;
+  font-family: var(--mono); font-size: 12px; line-height: 1.5; tab-size: 2;
+  white-space: pre-wrap; word-wrap: break-word; overflow-wrap: break-word;
+  letter-spacing: normal;
+}
+.editor-text { resize: none; overflow: auto; -webkit-overflow-scrolling: touch;
+  background: transparent; }
+.editor-hl { overflow: hidden; pointer-events: none; background: var(--bg-input);
+  color: var(--text); }
+/* Transparent text, opaque caret: the glyphs you read are the ones underneath.
+   -webkit-text-fill-color because WebKit ignores `color` on a textarea's own
+   text in some states and would draw it over the colour layer. */
+.editor-body.colour .editor-text { color: transparent; -webkit-text-fill-color: transparent;
+  caret-color: var(--text); }
+.editor-body.colour .editor-text::selection { background: var(--tint-accent); }
+
+.hl-cm { color: var(--code-comment); font-style: italic; }
+.hl-st { color: var(--code-string); }
+.hl-ex { color: var(--code-expr); }
+.hl-cmd { color: var(--code-command); font-weight: 700; }
+.hl-par { color: var(--code-param); font-weight: 600; }
+.hl-kw { color: var(--code-keyword); font-weight: 600; }
+.hl-num { color: var(--code-number); }
+.hl-bool { color: var(--code-boolean); }
 
 /* ---------- Object model ---------- */
 

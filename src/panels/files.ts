@@ -13,12 +13,21 @@ import { actions, activeDriver, appendLog, capabilities, connected, run } from '
 import { basename, formatBytes, parentPath } from '../core/util.js';
 import type { FileEntry } from '../machine/types.js';
 import { enableGcodeComplete } from '../ui/complete.js';
+import { paintGcode } from '../ui/gcode-color.js';
 
 const TEXT_EXTENSIONS = /\.(g|gcode|nc|txt|json|csv|md|cfg|conf|ini|log)$/i;
 /** Which of those are G-code, and so get completion and colour. */
 const GCODE_EXTENSIONS = /\.(g|gcode|nc|tap)$/i;
 /** Refuse to open anything big enough to lock up the editor. */
 const MAX_EDIT_BYTES = 512 * 1024;
+/**
+ * Above this, the file opens but stays black and white.
+ *
+ * The highlight is rebuilt on every keystroke, and a posted job of a few
+ * hundred kilobytes would turn typing into a slideshow. Config files — what
+ * this editor is for — are a couple of kilobytes.
+ */
+const MAX_COLOUR_BYTES = 128 * 1024;
 
 export class FilesPanel extends PanelElement {
   private cwd = '/sys';
@@ -30,6 +39,8 @@ export class FilesPanel extends PanelElement {
   private content = '';
   private original = '';
   private saving = false;
+  /** The textarea whose scrolling is already wired to the colour layer. */
+  private scrolling: HTMLTextAreaElement | null = null;
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -50,12 +61,41 @@ export class FilesPanel extends PanelElement {
     });
   }
 
+  /**
+   * Whether this file is G-code, and so gets completion and colour.
+   *
+   * Neither belongs in a JSON file or a log: completing M-codes into one would
+   * be noise, and colouring it would be wrong rather than merely unhelpful.
+   */
+  private get isGcode(): boolean {
+    return !!this.openPath && GCODE_EXTENSIONS.test(this.openPath);
+  }
+
+  private get colourised(): boolean {
+    return this.isGcode && this.content.length <= MAX_COLOUR_BYTES;
+  }
+
   protected override updated(): void {
-    // Only for files that are G-code. Completing M-codes into a JSON file would
-    // be noise, and the editor opens plenty that are not machine instructions.
-    if (!this.openPath || !GCODE_EXTENSIONS.test(this.openPath)) return;
     const box = this.querySelector<HTMLTextAreaElement>('.editor-text');
-    if (box) enableGcodeComplete(box);
+    if (!box) return;
+    if (this.isGcode) enableGcodeComplete(box);
+
+    const layer = this.querySelector<HTMLElement>('.editor-hl');
+    if (!layer) return;
+
+    // The textarea is transparent and the colour is painted on the layer under
+    // it, so the two have to agree on every pixel: same font, same padding,
+    // same wrapping (see the stylesheet), and the same scroll offset.
+    paintGcode(layer, this.content);
+    if (this.scrolling !== box) {
+      this.scrolling = box;
+      box.addEventListener('scroll', () => {
+        layer.scrollTop = box.scrollTop;
+        layer.scrollLeft = box.scrollLeft;
+      });
+    }
+    layer.scrollTop = box.scrollTop;
+    layer.scrollLeft = box.scrollLeft;
   }
 
   private get dirty(): boolean {
@@ -257,16 +297,21 @@ export class FilesPanel extends PanelElement {
           </button>
           <button class="ghost" @click=${() => this.closeEditor()}>Close</button>
         </div>
-        <textarea
-          class="editor-text"
-          spellcheck="false"
-          .value=${this.content}
-          ?readonly=${!caps.fileWrite}
-          @input=${(e: Event) => {
-            this.content = (e.target as HTMLTextAreaElement).value;
-            this.requestUpdate();
-          }}
-        ></textarea>
+        <div class="editor-body ${this.colourised ? 'colour' : ''}">
+          ${this.colourised
+            ? html`<pre class="editor-hl" aria-hidden="true"></pre>`
+            : nothing}
+          <textarea
+            class="editor-text"
+            spellcheck="false"
+            .value=${this.content}
+            ?readonly=${!caps.fileWrite}
+            @input=${(e: Event) => {
+              this.content = (e.target as HTMLTextAreaElement).value;
+              this.requestUpdate();
+            }}
+          ></textarea>
+        </div>
       </div>
     `;
   }
