@@ -11,9 +11,13 @@
 // <polygon> identically, and getCTM() folds in every nested <g transform>. The
 // output is dense, so it goes straight through the simplifier.
 //
-// The price is that this needs a live DOM: the geometry methods return zeroes
-// on a document that was parsed but never attached. The element is therefore
-// attached hidden and removed in a finally block.
+// The price is paid twice. It needs a live DOM — the geometry methods return
+// zeroes on a document that was parsed but never attached, so the element is
+// attached hidden and removed in a finally block — and it flattens the one
+// distinction the DOM does not expose through this interface: a <path> holding
+// several subpaths walks as if it were one, because the gaps between them have
+// no arc length. That is put back below, from the walk itself rather than from
+// the `d` attribute.
 
 import { simplify } from './geometry.js';
 import type { ImportedDrawing, Point, Polyline } from './types.js';
@@ -130,26 +134,53 @@ export function importSvg(text: string, opts: SvgOptions): ImportedDrawing {
 
       const matrix = geom.getCTM();
       const count = Math.max(2, Math.ceil(total / step) + 1);
-      const points: Point[] = [];
+      const spacing = total / (count - 1);
+
+      // One <path> can hold several subpaths, and getTotalLength() adds them up
+      // as if they were one — the gaps between them have no length, so walking
+      // the total steps straight from the end of one subpath to the start of
+      // the next. Join those two samples with a line, as every consumer here
+      // does, and the drawing gains a segment that is in no `d` attribute: the
+      // stray diagonal across an "@" from the end of its outer stroke to the
+      // start of its inner one.
+      //
+      // The split is exact rather than a guess. Sampling is by arc length, so
+      // two consecutive samples can never be further apart in a straight line
+      // than the arc between them — a gap wider than the spacing is not a
+      // steep curve, it is the walk teleporting to another subpath.
+      const runs: Point[][] = [];
+      let run: Point[] = [];
+      let previous: { x: number; y: number } | null = null;
       for (let i = 0; i < count; i++) {
+        // Compared before the transform, because `spacing` is in the element's
+        // own units and a <g transform> would otherwise scale one and not the
+        // other.
         const p = geom.getPointAtLength((total * i) / (count - 1));
-        points.push(matrix ? [matrix.a * p.x + matrix.c * p.y + matrix.e, matrix.b * p.x + matrix.d * p.y + matrix.f] : [p.x, p.y]);
+        if (previous && Math.hypot(p.x - previous.x, p.y - previous.y) > spacing * 1.5) {
+          if (run.length >= 2) runs.push(run);
+          run = [];
+        }
+        run.push(matrix ? [matrix.a * p.x + matrix.c * p.y + matrix.e, matrix.b * p.x + matrix.d * p.y + matrix.f] : [p.x, p.y]);
+        previous = p;
       }
+      if (run.length >= 2) runs.push(run);
 
-      // A shape whose ends meet is closed even though nothing in the DOM says
-      // so — that is how a `Z`-terminated path and a <rect> both arrive.
-      const first = points[0];
-      const last = points[points.length - 1];
-      const closed = Math.hypot(last[0] - first[0], last[1] - first[1]) <= step;
-      if (closed) points.pop();
+      for (const points of runs) {
+        // A shape whose ends meet is closed even though nothing in the DOM says
+        // so — that is how a `Z`-terminated path and a <rect> both arrive.
+        const first = points[0];
+        const last = points[points.length - 1];
+        const closed = Math.hypot(last[0] - first[0], last[1] - first[1]) <= step;
+        if (closed) points.pop();
 
-      const simplified = simplify(points, opts.tolerance / mmPerUnit);
-      if (simplified.length >= 2) {
-        paths.push({
-          points: simplified,
-          closed,
-          layer: el.getAttribute('id') ?? el.getAttribute('class') ?? undefined,
-        });
+        const simplified = simplify(points, opts.tolerance / mmPerUnit);
+        if (simplified.length >= 2) {
+          paths.push({
+            points: simplified,
+            closed,
+            layer: el.getAttribute('id') ?? el.getAttribute('class') ?? undefined,
+          });
+        }
       }
     }
 
