@@ -243,9 +243,47 @@ function parseIndex(html) {
   );
 }
 
+// --- Looking at the page ----------------------------------------------------
+
+/**
+ * Describe the document's shape instead of parsing it.
+ *
+ * For when the parser returns nothing and the page cannot be read from where
+ * the parser is being written. Prints enough structure to rewrite the selectors
+ * against, and nothing that would need a file to be sent anywhere.
+ */
+function inspect(html) {
+  const count = (re) => (html.match(re) ?? []).length;
+  console.log(`\n--- ${html.length} bytes ---`);
+  console.log(`h1..h6 tags        : ${count(/<h[1-6][\s>]/gi)}`);
+  console.log(`<li>               : ${count(/<li[\s>]/gi)}`);
+  console.log(`<pre>              : ${count(/<pre[\s>]/gi)}`);
+  console.log(`<table>            : ${count(/<table[\s>]/gi)}`);
+  console.log(`"M581" occurrences : ${count(/M581/g)}`);
+  console.log(`looks JS-rendered  : ${/<div id="app"|window\.__(NUXT|INITIAL)/.test(html) ? 'yes — content may be in a script tag' : 'no'}`);
+
+  const heads = [...html.matchAll(/<h([1-6])\b[^>]*>([\s\S]{0,200}?)<\/h\1>/gi)];
+  console.log(`\n--- first 6 headings, raw ---`);
+  for (const h of heads.slice(0, 6)) console.log(JSON.stringify(h[0].slice(0, 220)));
+
+  const m581 = html.indexOf('M581.1');
+  if (m581 >= 0) {
+    console.log(`\n--- 700 bytes around the first "M581.1" ---`);
+    console.log(html.slice(Math.max(0, m581 - 260), m581 + 440));
+  }
+  console.log('');
+}
+
 // --- Go ---------------------------------------------------------------------
 
-const codes = parseIndex(await loadPage());
+const page = await loadPage();
+
+if (flag('--inspect')) {
+  inspect(page);
+  process.exit(0);
+}
+
+const codes = parseIndex(page);
 
 const withParams = codes.filter((c) => c.params.length).length;
 const withExamples = codes.filter((c) => c.examples.length).length;
