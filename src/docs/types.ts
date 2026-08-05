@@ -25,7 +25,12 @@ export interface GcodeEntry {
   /** Canonical form, including any fraction: "M581.1". */
   code: string;
   letter: string;
-  number: number;
+  /**
+   * The command number, or null for T — whose number is the tool to select
+   * rather than part of the command's identity, so the docs give it no number
+   * at all.
+   */
+  number: number | null;
   /** Sub-code after the dot, or null. M581 and M581.1 are separate entries. */
   fraction: number | null;
   /** The heading, without the code itself: "Configure external trigger on expression". */
@@ -86,7 +91,7 @@ export function searchCodes(codes: GcodeEntry[], query: string, limit = 60): Gco
   for (const entry of codes) {
     let score = 0;
 
-    if (asCode && entry.number === asCode.number && (!asCode.letter || entry.letter === asCode.letter)) {
+    if (asCode && entry.number !== null && entry.number === asCode.number && (!asCode.letter || entry.letter === asCode.letter)) {
       // "M581" should list M581 first and M581.1 just under it, not bury the
       // plain one among its own sub-codes.
       score = asCode.fraction === entry.fraction ? 1000 : 900 - (entry.fraction ?? 0);
@@ -112,7 +117,7 @@ export function searchCodes(codes: GcodeEntry[], query: string, limit = 60): Gco
     (a, b) =>
       b.score - a.score ||
       a.entry.letter.localeCompare(b.entry.letter) ||
-      a.entry.number - b.entry.number ||
+      (a.entry.number ?? -1) - (b.entry.number ?? -1) ||
       (a.entry.fraction ?? -1) - (b.entry.fraction ?? -1),
   );
   return scored.slice(0, limit).map((s) => s.entry);

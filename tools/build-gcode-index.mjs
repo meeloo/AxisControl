@@ -116,7 +116,13 @@ function block(html) {
  * with the documentation of the other.
  */
 function headingCode(heading) {
-  const match = /^\s*([GMT])\s*(\d+)(?:\.(\d+))?\s*(?::|\s[-–—])\s*(.+)$/.exec(heading);
+  // T is one command whose number is the tool to select, so the page documents
+  // it as "T: Select Tool" with no number — unlike G and M, where the number
+  // *is* the command. Requiring digits dropped it entirely.
+  const bare = /^\s*T\s*(?::|\s[-–—])\s*(.+)$/.exec(heading);
+  if (bare) return { letter: 'T', number: null, fraction: null, title: bare[1].trim() };
+
+  const match = /^\s*([GM])\s*(\d+)(?:\.(\d+))?\s*(?::|\s[-–—])\s*(.+)$/.exec(heading);
   if (!match) return null;
   return {
     letter: match[1].toUpperCase(),
@@ -227,7 +233,7 @@ function parseIndex(rawHtml) {
     })();
 
     entries.push({
-      code: `${code.letter}${code.number}${code.fraction !== null ? `.${code.fraction}` : ''}`,
+      code: `${code.letter}${code.number ?? ''}${code.fraction !== null ? `.${code.fraction}` : ''}`,
       letter: code.letter,
       number: code.number,
       fraction: code.fraction,
@@ -236,7 +242,7 @@ function parseIndex(rawHtml) {
       params,
       examples: [...new Set(examples)],
       notes,
-      url: `${SOURCE}#${code.letter.toLowerCase()}${code.number}${code.fraction !== null ? `-${code.fraction}` : ''}`,
+      url: `${SOURCE}#${code.letter.toLowerCase()}${code.number ?? ''}${code.fraction !== null ? `-${code.fraction}` : ''}`,
     });
   }
 
@@ -250,7 +256,10 @@ function parseIndex(rawHtml) {
     }
   }
   return [...byCode.values()].sort(
-    (a, b) => a.letter.localeCompare(b.letter) || a.number - b.number || (a.fraction ?? -1) - (b.fraction ?? -1),
+    (a, b) =>
+      a.letter.localeCompare(b.letter) ||
+      (a.number ?? -1) - (b.number ?? -1) ||
+      (a.fraction ?? -1) - (b.fraction ?? -1),
   );
 }
 
