@@ -122,6 +122,15 @@ export interface OmRange {
   max?: number;
 }
 
+/** Where the firmware keeps each kind of file, as it reports them. */
+export interface OmDirectories {
+  firmware?: string;
+  gCodes?: string;
+  macros?: string;
+  system?: string;
+  web?: string;
+}
+
 export interface OmBoard {
   shortName?: string;
   name?: string;
@@ -130,6 +139,17 @@ export interface OmBoard {
   firmwareDate?: string;
   uniqueId?: string;
   canAddress?: number;
+  /**
+   * The names the board itself asks to be flashed from. Never guessed: the
+   * firmware states what it will look for, and an update built from a guess is
+   * how a board gets written with the wrong image.
+   */
+  firmwareFileName?: string;
+  /** In-application programmer, SD-card variant — what does the actual write. */
+  iapFileNameSD?: string;
+  iapFileNameSBC?: string;
+  bootloaderFileName?: string;
+  wifiFirmwareFileName?: string;
   /** Never-used RAM, bytes. */
   freeRam?: number;
   /** min/max here are the extremes *observed*, not permitted limits. */
@@ -192,6 +212,9 @@ export interface OmSeqs {
 
 export interface ObjectModel {
   boards?: OmBoard[];
+  directories?: OmDirectories;
+  /** Present only when a Single Board Computer is running the show. */
+  sbc?: Record<string, unknown> | null;
   global?: Record<string, unknown>;
   job?: OmJob;
   move?: OmMove;
@@ -207,6 +230,7 @@ export interface ObjectModel {
 /** Top-level keys we re-fetch in full when their sequence number advances. */
 export const TRACKED_KEYS = [
   'boards',
+  'directories',
   'global',
   'job',
   'move',

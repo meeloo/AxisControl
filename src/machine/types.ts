@@ -128,6 +128,34 @@ export interface SurfaceCompensation {
   deviation: number | null;
 }
 
+/**
+ * What the controller says about updating its own firmware.
+ *
+ * Every filename here comes from the board rather than from a table in this
+ * app. RepRapFirmware states the exact name it will look for when told to
+ * flash itself, and that is the only trustworthy source: the same release
+ * carries images for a dozen boards, and picking the wrong one writes the
+ * wrong image to flash.
+ */
+export interface FirmwareInfo {
+  /** e.g. "MB6HC". */
+  board: string;
+  /** e.g. "Duet 3 MB6HC". */
+  boardName: string;
+  /** e.g. "3.6.0". */
+  version: string;
+  /** CAN address; 0 is the main board. */
+  canAddress: number;
+  /** The image the board flashes from, e.g. "Duet3Firmware_MB6HC.uf2". */
+  firmwareFile: string | null;
+  /** The in-application programmer that does the writing, SD-card variant. */
+  iapFile: string | null;
+  /** Where firmware files are uploaded, e.g. "0:/firmware/". */
+  directory: string | null;
+  /** True when a Single Board Computer runs the show and updates go via it. */
+  sbc: boolean;
+}
+
 export interface MachineState {
   status: MachineStatus;
   /** Human-readable controller identity, e.g. "Duet 3 MB6HC / RRF 3.6.0". */
@@ -151,6 +179,8 @@ export interface MachineState {
   feedMultiplier: number;
   /** Free-form key/value state the driver wants surfaced but the model doesn't name. */
   extras: Record<string, unknown>;
+  /** Main board first, then anything on the CAN bus. Empty when unknown. */
+  firmware: FirmwareInfo[];
 }
 
 export function emptyMachineState(): MachineState {
@@ -169,6 +199,7 @@ export function emptyMachineState(): MachineState {
     feedRate: null,
     feedMultiplier: 1,
     extras: {},
+    firmware: [],
   };
 }
 

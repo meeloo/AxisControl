@@ -22,3 +22,4 @@ import './resume.js';
 import './overrides.js';
 import './atc.js';
 import './install.js';
+import './firmware.js';

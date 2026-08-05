@@ -9,6 +9,7 @@ import {
   type DiagnosticItem,
   type DiagnosticSection,
   type FileEntry,
+  type FirmwareInfo,
   type LogLine,
   type MachineState,
 } from '../../types.js';
@@ -286,6 +287,20 @@ export class RrfDriver implements MachineDriver {
 
     const box = m.state?.messageBox;
 
+    // Every board on the bus, main first — each states its own image and its
+    // own programmer, which is what makes flashing possible without a table of
+    // board names in this app.
+    const firmware: FirmwareInfo[] = (m.boards ?? []).filter(Boolean).map((b) => ({
+      board: b.shortName ?? '',
+      boardName: b.name ?? b.shortName ?? 'Duet',
+      version: b.firmwareVersion ?? '',
+      canAddress: b.canAddress ?? 0,
+      firmwareFile: b.firmwareFileName ?? null,
+      iapFile: b.iapFileNameSD ?? null,
+      directory: m.directories?.firmware ?? null,
+      sbc: m.sbc != null,
+    }));
+
     this.state = {
       status: mapStatus(m.state?.status),
       identity: board
@@ -361,6 +376,7 @@ export class RrfDriver implements MachineDriver {
       // The ATC and dust shoe state in this machine's config lives entirely in
       // RRF globals, and globals are part of the object model — so panels get
       // real machine state here rather than shadow bookkeeping.
+      firmware,
       extras: { global: m.global ?? {} },
     };
 

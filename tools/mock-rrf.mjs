@@ -407,19 +407,31 @@ function pushReply(text) {
   seqs.reply = replySeq;
 }
 
+/** The board, as one object, so M997 and the object model cannot disagree. */
+const BOARD = {
+  shortName: 'MB6HC',
+  name: 'Duet 3 MB6HC',
+  firmwareName: 'RepRapFirmware for Duet 3 MB6HC',
+  firmwareVersion: '3.6.0',
+  firmwareDate: '2025-04-01',
+  uniqueId: '0JD0M-9P6M2-NW4SD-6JKF6-3S46L-TB1UA',
+  canAddress: 0,
+  // What the board says it will flash from. Anything updating firmware has to
+  // take these rather than guess: one release carries images for a dozen
+  // boards, and the wrong one written to flash is a board that does not boot.
+  firmwareFileName: 'Duet3Firmware_MB6HC.uf2',
+  iapFileNameSD: 'Duet3_SDiap32_MB6HC.bin',
+  iapFileNameSBC: 'Duet3_SBCiap32_MB6HC.bin',
+  bootloaderFileName: '',
+};
+
 // --- Object model assembly ----------------------------------------------
 
 function buildModel(liveOnly) {
   const model = {
     boards: [
       {
-        shortName: 'MB6HC',
-        name: 'Duet 3 MB6HC',
-        firmwareName: 'RepRapFirmware for Duet 3 MB6HC',
-        firmwareVersion: '3.6.0',
-        firmwareDate: '2025-04-01',
-        uniqueId: '0JD0M-9P6M2-NW4SD-6JKF6-3S46L-TB1UA',
-        canAddress: 0,
+        ...BOARD,
         freeRam: 47320,
         // min/max are the extremes observed since boot, exactly as the firmware
         // reports them — not permitted limits.
@@ -428,6 +440,13 @@ function buildModel(liveOnly) {
         mcuTemp: { current: round(41.2 + Math.sin(t * 0.11) * 3), min: 24.6, max: 48.1 },
       },
     ],
+    directories: {
+      firmware: '0:/firmware/',
+      gCodes: '0:/gcodes/',
+      macros: '0:/macros/',
+      system: '0:/sys/',
+      web: '0:/www/',
+    },
     global: globals,
     job: { ...job },
     move: {
@@ -640,6 +659,13 @@ const server = createServer(async (req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify(Object.keys(FILE_CONTENT).sort()));
   }
+  // What the last M997 did, so a test can tell "the firmware accepted it"
+  // from "the button was pressed".
+  if (path === '/_m997') {
+    cors(res);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify(state.m997 ?? null));
+  }
   if (path === '/_wipe') {
     const dir = url.searchParams.get('dir') ?? '';
     for (const key of Object.keys(FILE_CONTENT)) {
@@ -661,6 +687,20 @@ const server = createServer(async (req, res) => {
   // the plain files would work here and be slow on the real board — while one
   // that uploaded only the .gz files would work on the board and 404 against a
   // mock that did not do this.
+  // Static: serve dist/ so same-origin can be tested too. First, because this
+  // is the mock standing in for the app's own dev server — on a real machine
+  // /index.html IS /www/index.html, but here it has to be the build under test.
+  const file = join(DIST, path === '/' ? 'index.html' : path.replace(/^\/+/, ''));
+  try {
+    await stat(file);
+    const body = await readFile(file);
+    cors(res);
+    res.writeHead(200, { 'Content-Type': MIME[extname(file)] ?? 'application/octet-stream' });
+    return res.end(body);
+  } catch {
+    // Not part of the build; fall through to what is on the card.
+  }
+
   // A file under /www, resolved the way the firmware resolves one.
   //
   // Exact names only. RRF does NOT turn `/AxisControl/` into
@@ -670,7 +710,7 @@ const server = createServer(async (req, res) => {
   //
   // The .gz preference IS the firmware's: it answers a request for `cnc.js`
   // with `cnc.js.gz` and Content-Encoding set.
-  const wwwPath = `/www${path === '/' ? '/index.html' : path}`;
+  const wwwPath = `/www${path}`;
   const accepts = /\bgzip\b/.test(req.headers['accept-encoding'] ?? '');
   const zipped = FILE_CONTENT[`${wwwPath}.gz`];
   const plain = FILE_CONTENT[wwwPath];
@@ -689,31 +729,21 @@ const server = createServer(async (req, res) => {
     return res.end(body);
   }
 
-  // Static: serve dist/ so same-origin can be tested too.
-  const file = join(DIST, path === '/' ? 'index.html' : path.replace(/^\/+/, ''));
-  try {
-    await stat(file);
-    const body = await readFile(file);
+  // What the firmware does with a path it cannot resolve: serve /www's own
+  // index page, so a single-page app can route it client-side. On a real
+  // machine that page is DWC — which is why a request for /AxisControl comes
+  // back as DWC's "404 page not found" rather than as an HTTP 404, and why
+  // that symptom means "the request never reached your files".
+  const spa = FILE_CONTENT['/www/index.html'];
+  if (spa !== undefined) {
+    const body = Buffer.isBuffer(spa) ? spa : Buffer.from(String(spa), 'utf8');
     cors(res);
-    res.writeHead(200, { 'Content-Type': MIME[extname(file)] ?? 'application/octet-stream' });
-    res.end(body);
-  } catch {
-    // What the firmware does with a path it cannot resolve: serve /www's own
-    // index page, so a single-page app can route it client-side. On a real
-    // machine that page is DWC — which is why a request for /AxisControl comes
-    // back as DWC's "404 page not found" rather than as an HTTP 404, and why
-    // that symptom means "the request never reached your files".
-    const spa = FILE_CONTENT['/www/index.html'];
-    if (spa !== undefined) {
-      const body = Buffer.isBuffer(spa) ? spa : Buffer.from(String(spa), 'utf8');
-      cors(res);
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': body.length });
-      return res.end(body);
-    }
-    cors(res);
-    res.writeHead(404);
-    res.end('not found');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': body.length });
+    return res.end(body);
   }
+  cors(res);
+  res.writeHead(404);
+  res.end('not found');
 });
 
 function handleGcode(gcode) {
@@ -721,7 +751,27 @@ function handleGcode(gcode) {
   for (const cmd of cmds) {
     const upper = cmd.toUpperCase();
 
-    if (upper.startsWith('M112')) {
+    if (upper.startsWith('M997')) {
+      // The firmware refuses to flash unless the files it named are actually
+      // on the card — which is the whole safety property, so the mock enforces
+      // it rather than accepting anything and reporting success.
+      const board = BOARD;
+      const dir = '0:/firmware/';
+      const wanted = [board.firmwareFileName, board.iapFileNameSD];
+      const missing = wanted.filter((f) => FILE_CONTENT[`${dir}${f}`] === undefined
+        && FILE_CONTENT[`/firmware/${f}`] === undefined);
+      if (missing.length) {
+        pushReply(`Error: M997: firmware file ${missing[0]} not found`);
+        state.m997 = { ok: false, missing };
+      } else {
+        state.m997 = { ok: true, command: cmd };
+        state.status = 'updating';
+        pushReply('Updating main firmware');
+        // A real board reboots; the mock comes back so a test can carry on.
+        setTimeout(() => { state.status = 'idle'; bumpSeq('state'); }, 3000);
+      }
+      bumpSeq('state');
+    } else if (upper.startsWith('M112')) {
       state.status = 'halted';
       spindle.state = 'stopped';
       spindle.active = spindle.current = 0;
