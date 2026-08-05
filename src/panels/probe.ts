@@ -8,7 +8,7 @@
 import { html, nothing, type TemplateResult } from 'lit';
 import { PanelElement, registerPanel } from '../ui/panel.js';
 import { capabilities, connected, machine } from '../core/store.js';
-import { checkField, numberField, selectField } from '../ui/widgets.js';
+import { checkField, numberField, pointField, selectField } from '../ui/widgets.js';
 import { fromAxis } from '../ui/capture.js';
 import { preview, saveAndRun } from '../ui/program.js';
 import {
@@ -283,8 +283,10 @@ export class ProbePanel extends PanelElement {
             { value: '-1', label: `−${this.skewEdgeAxis}` },
           ], (v) => ((this.skewTravel = Number(v) as 1 | -1), this.requestUpdate()))}
           ${numberField('Span', this.skewSpan, (v) => ((this.skewSpan = v), this.requestUpdate()), { suffix: 'mm', min: 1, title: 'Distance between the two touch points. Longer is more accurate — angle error falls off as 1/span.' })}
-          ${numberField('Pivot X', this.skewCentreX, (v) => ((this.skewCentreX = v), this.requestUpdate()), { suffix: 'mm', title: 'Rotation centre in work coordinates. Leave at 0,0 to pivot about the work origin.', capture: fromAxis('X', 'work') })}
-          ${numberField('Pivot Y', this.skewCentreY, (v) => ((this.skewCentreY = v), this.requestUpdate()), { suffix: 'mm', capture: fromAxis('Y', 'work') })}
+          ${pointField('Pivot XY', [
+            { letter: 'X', value: this.skewCentreX, onChange: (v) => ((this.skewCentreX = v), this.requestUpdate()) },
+            { letter: 'Y', value: this.skewCentreY, onChange: (v) => ((this.skewCentreY = v), this.requestUpdate()) },
+          ], { suffix: 'mm', title: 'Rotation centre in work coordinates. Leave at 0,0 to pivot about the work origin.' })}
           ${numberField('Abort above', this.skewMaxAngle, (v) => ((this.skewMaxAngle = v), this.requestUpdate()), { suffix: '\u00b0', title: 'A missed touch reads as a huge angle. Above this the macro aborts instead of rotating.' })}
           ${shared}
           <div class="param-note">

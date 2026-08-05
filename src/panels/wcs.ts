@@ -18,8 +18,7 @@ import { html, nothing, type TemplateResult } from 'lit';
 import { PanelElement, registerPanel } from '../ui/panel.js';
 import { actions, capabilities, connected, machine } from '../core/store.js';
 import { fixed } from '../core/util.js';
-import { empty, numberField } from '../ui/widgets.js';
-import { fromAxis } from '../ui/capture.js';
+import { empty, numberField, pointField } from '../ui/widgets.js';
 import { loadWcsNames, saveWcsNames, wcsCode, type WcsNames } from '../wcs/names.js';
 
 export class WcsPanel extends PanelElement {
@@ -202,20 +201,14 @@ export class WcsPanel extends PanelElement {
               </p>
             `}
         <div class="wcs-rot-form">
-          <label class="param">
-            <span class="param-label">Angle</span>
-            <span class="param-input">
-              <input
-                type="number"
-                step="0.0001"
-                .value=${String(this.rotAngle)}
-                @change=${(e: Event) => (this.rotAngle = Number((e.target as HTMLInputElement).value))}
-              />
-              <em>° ccw</em>
-            </span>
-          </label>
-          ${numberField('Pivot X', this.rotCentreX, (v) => ((this.rotCentreX = v), this.requestUpdate()), { suffix: 'mm', capture: fromAxis('X', 'work') })}
-          ${numberField('Pivot Y', this.rotCentreY, (v) => ((this.rotCentreY = v), this.requestUpdate()), { suffix: 'mm', capture: fromAxis('Y', 'work') })}
+          ${numberField('Angle', this.rotAngle, (v) => ((this.rotAngle = v), this.requestUpdate()), {
+            step: 0.0001,
+            suffix: '° ccw',
+          })}
+          ${pointField('Pivot XY', [
+            { letter: 'X', value: this.rotCentreX, onChange: (v) => ((this.rotCentreX = v), this.requestUpdate()) },
+            { letter: 'Y', value: this.rotCentreY, onChange: (v) => ((this.rotCentreY = v), this.requestUpdate()) },
+          ], { suffix: 'mm', title: 'Rotation centre, in work coordinates.' })}
         </div>
         <div class="wcs-foot">
           <button

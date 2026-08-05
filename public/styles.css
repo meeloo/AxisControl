@@ -6,6 +6,13 @@
 /* Light is the default — this lives on a shop floor, usually in daylight.
    Dark is opt-in via data-theme="dark" on <html>. */
 :root {
+  /* Width of the control column in every parameter row, everywhere in the app.
+     One number, not one per panel or per group of rows: a panel's groups sit
+     directly above one another, so a control column that was 136px in one and
+     176px in the next reads as crooked even though each group is internally
+     straight. Wide enough for the two boxes of an XY point, which is what
+     decides it — a lone input keeps its own 92px inside the column. */
+  --pc: 168px;
   --bg: #eef1f5;
   --bg-panel: #ffffff;
   --bg-raised: #f4f6f9;
@@ -490,8 +497,11 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .wcs-foot select { min-height: 28px; padding: 3px 6px; font-size: 12px; }
 .wcs-rotation { display: flex; flex-direction: column; gap: 7px; padding-top: 10px;
   border-top: 1px solid var(--border); }
-.wcs-rot-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 6px 14px; }
+/* Same minimum as .param-grid, and for the same reason: a column narrower than
+   a row needs takes it out of the label, and "Pivot XY" ellipsised to "P…" is
+   not a label. */
+.wcs-rot-form { display: grid; gap: 6px 14px;
+  grid-template-columns: repeat(auto-fit, minmax(calc(154px + var(--pc)), 1fr)); }
 
 /* ---------- Diagnostics ---------- */
 
@@ -896,7 +906,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
    nobody notices in a screenshot and everybody notices when "mm/min" reads as
    "mm/mi". */
 .param-grid {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(calc(154px + var(--pc)), 1fr));
   gap: 6px 12px; padding: 10px 12px; overflow: auto;
 }
 /* min-width:0 on both the row and the input, because a grid or flex item
@@ -912,7 +922,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
    took whatever was left, so a row holding a narrow select started its control
    25px right of the row above it holding a wide one — aligned in the markup and
    visibly crooked on screen. */
-.param { display: grid; grid-template-columns: minmax(0, 1fr) 28px 136px;
+.param { display: grid; grid-template-columns: minmax(0, 1fr) 28px var(--pc, 136px);
   align-items: center; gap: 8px; min-width: 0; }
 .param-cap { display: flex; align-items: center; justify-content: center; }
 /* 290px above, not 220: a row needs its label, a 28px button column and a
@@ -929,12 +939,20 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 /* min-width:0 so the input yields first when a row is tight: a number field
    that has shrunk is still readable, a unit that has been pushed out of the
    column is not. */
-.param-input input, .param-input select { min-height: 30px; padding: 4px 8px; width: 92px;
+/* The control fills its column rather than sizing to a fixed 92px, so the unit
+   after it lands on the same x whether the row holds one box or the two of an
+   XY point. With a fixed width the pair ran 50px wider than everything else and
+   dragged its "mm" out of the column with it. */
+.param-input input, .param-input select { min-height: 30px; padding: 4px 8px; width: 100%;
   min-width: 0; font-family: var(--mono); font-size: 12px; }
 .param-input select { width: auto; min-width: 0; max-width: 100%; font-family: var(--sans);
   text-overflow: ellipsis; }
 .param-input em { color: var(--text-faint); font-size: 11px; font-style: normal;
   flex: none; white-space: nowrap; }
+/* The boxes of a point share the control column rather than each claiming the
+   92px a lone input gets, so a pair takes the same width as any other row's
+   control and the unit after them stays in the same place. */
+.param.point .param-input input { flex: 1 1 0; width: auto; }
 /* The "use where the machine is standing" button, in every parameter row that
    holds a position. Deliberately quiet — it sits beside dozens of fields, and a
    row of accent-coloured buttons would read as the important thing on the

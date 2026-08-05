@@ -3,7 +3,7 @@
 
 import { html, nothing, type TemplateResult } from 'lit';
 import type { MachineStatus } from '../machine/types.js';
-import { captureButton, type Capture } from './capture.js';
+import { captureButton, pointCaptureButton, type Capture, type Frame } from './capture.js';
 
 export function statusLabel(status: MachineStatus): string {
   switch (status) {
@@ -158,6 +158,84 @@ export function numberField(
       ${opts.suffix ? html`<em>${opts.suffix}</em>` : nothing}
     `,
     { capture: opts.capture ? captureButton(opts.capture, onChange) : nothing, title: opts.title },
+  );
+}
+
+/** One axis of a point field: which letter it is, what it holds, where it goes. */
+export interface PointAxis {
+  letter: string;
+  value: number;
+  onChange: (v: number) => void;
+}
+
+/**
+ * A point — one row, one crosshair, one input per axis.
+ *
+ * Two rows of "Centre X" and "Centre Y" were two rows too many. They read as
+ * unrelated numbers, they took twice the height, and each had its own capture
+ * button — which invited taking the X now and the Y after the next jog, giving
+ * a centre the machine was never at. Here the button takes the whole point at
+ * once, which is the only capture that means anything for a position.
+ *
+ * The label carries the letters ("Centre XY"), and each input repeats its own
+ * letter in its tooltip and aria-label, since the boxes are otherwise
+ * indistinguishable to anyone not counting from the left.
+ */
+export function pointField(
+  label: string,
+  axes: PointAxis[],
+  opts: {
+    frame?: Frame;
+    step?: number;
+    suffix?: string;
+    title?: string;
+    capture?: boolean;
+    /**
+     * Write the whole point in one go, instead of calling each axis in turn.
+     *
+     * Needed wherever the setter rebuilds a record from a value captured in the
+     * closure — `apply({ ...probe, x: v })` — since the second call would spread
+     * the record as it was before the first and quietly undo it.
+     */
+    onPoint?: (values: number[]) => void;
+  } = {},
+): TemplateResult {
+  const frame = opts.frame ?? 'work';
+  const letters = axes.map((a) => a.letter);
+  const withCapture = opts.capture !== false;
+
+  return paramRow(
+    label,
+    html`
+      ${axes.map(
+        (a) => html`
+          <input
+            type="number"
+            title=${a.letter}
+            aria-label=${`${label} ${a.letter}`}
+            .value=${String(a.value)}
+            step=${opts.step ?? 'any'}
+            @change=${(e: Event) => {
+              const v = Number((e.target as HTMLInputElement).value);
+              if (isFinite(v)) a.onChange(v);
+            }}
+          />
+        `,
+      )}
+      ${opts.suffix ? html`<em>${opts.suffix}</em>` : nothing}
+    `,
+    {
+      capture: withCapture
+        ? pointCaptureButton(letters, frame, (values) => {
+            // Every axis, or none: a half-applied point is the failure this
+            // whole widget exists to prevent.
+            if (opts.onPoint) opts.onPoint(values);
+            else axes.forEach((a, i) => a.onChange(values[i]!));
+          })
+        : nothing,
+      title: opts.title,
+      cls: `point point-${axes.length}`,
+    },
   );
 }
 

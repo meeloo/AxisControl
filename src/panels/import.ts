@@ -15,7 +15,7 @@ import { html, nothing, type TemplateResult } from 'lit';
 import { PanelElement, registerPanel } from '../ui/panel.js';
 import { connected, machine } from '../core/store.js';
 import { theme } from '../core/theme.js';
-import { checkField, numberField, selectField } from '../ui/widgets.js';
+import { checkField, numberField, pointField, selectField } from '../ui/widgets.js';
 import { fromAxis, fromDepthBelow } from '../ui/capture.js';
 import { preview, saveAndRun } from '../ui/program.js';
 import { applyTool, toolPicker, type Filled } from '../ui/toolpick.js';
@@ -629,8 +629,10 @@ export class ImportPanel extends PanelElement {
           { value: 'centre', label: 'Centred on origin' },
           { value: 'as-drawn', label: 'As drawn' },
         ], (v) => ((this.anchor = v), this.requestUpdate()))}
-        ${numberField('Origin X', this.originX, (v) => ((this.originX = v), this.requestUpdate()), { suffix: 'mm', capture: fromAxis('X', 'work') })}
-        ${numberField('Origin Y', this.originY, (v) => ((this.originY = v), this.requestUpdate()), { suffix: 'mm', capture: fromAxis('Y', 'work') })}
+        ${pointField('Origin XY', [
+          { letter: 'X', value: this.originX, onChange: (v) => ((this.originX = v), this.requestUpdate()) },
+          { letter: 'Y', value: this.originY, onChange: (v) => ((this.originY = v), this.requestUpdate()) },
+        ], { suffix: 'mm', title: 'Where the drawing is placed, in work coordinates.' })}
         ${numberField('Curve tolerance', this.curveTolerance, (v) => ((this.curveTolerance = v), this.requestUpdate()), { suffix: 'mm', step: 0.005, title: 'How far a flattened curve may stray from the true one.' })}
         ${numberField('Join gap', this.joinTolerance, (v) => ((this.joinTolerance = v), this.rechain(), this.requestUpdate()), { suffix: 'mm', step: 0.01, title: 'Segment ends this close are treated as joined. A DXF rectangle is four separate lines and needs this to become one loop. Changing it renumbers the paths, so anything left out of the cut comes back.' })}
       </div>

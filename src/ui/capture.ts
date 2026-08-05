@@ -62,7 +62,7 @@ export function axisPosition(letter: string, frame: Frame): number | null {
  * Returned as a sentence rather than a boolean because "the button is greyed
  * out and I do not know why" is its own kind of broken.
  */
-export function captureBlocked(capture: Capture): string | null {
+export function captureBlocked(capture: Pick<Capture, 'axes'>): string | null {
   if (!connected.peek()) return 'Not connected to the machine.';
   const axes = machine.peek().axes;
   for (const letter of capture.axes) {
@@ -112,12 +112,7 @@ const CROSSHAIR = html`
  * you can see what you are about to set before setting it, and see that it is
  * the value you expect rather than one from before the last jog.
  */
-export function captureButton(capture: Capture, onValue: (v: number) => void): TemplateResult {
-  const blocked = captureBlocked(capture);
-  const value = blocked ? null : captureValue(capture);
-  const title =
-    blocked ?? `${capture.label} in ${frameName(capture.frame)}${value === null ? '' : ` — ${value} mm`}`;
-
+function crosshair(title: string, blocked: string | null, take: () => void): TemplateResult {
   return html`
     <button
       type="button"
@@ -129,13 +124,60 @@ export function captureButton(capture: Capture, onValue: (v: number) => void): T
         // Inside a <label>, so stop the click being forwarded to the input.
         e.preventDefault();
         e.stopPropagation();
-        const v = captureValue(capture);
-        if (v !== null) onValue(v);
+        take();
       }}
     >
       ${CROSSHAIR}
     </button>
   `;
+}
+
+export function captureButton(capture: Capture, onValue: (v: number) => void): TemplateResult {
+  const blocked = captureBlocked(capture);
+  const value = blocked ? null : captureValue(capture);
+  const title =
+    blocked ?? `${capture.label} in ${frameName(capture.frame)}${value === null ? '' : ` — ${value} mm`}`;
+
+  return crosshair(title, blocked, () => {
+    const v = captureValue(capture);
+    if (v !== null) onValue(v);
+  });
+}
+
+// --- Points -----------------------------------------------------------------
+//
+// A point is not two numbers that happen to sit next to each other. Capturing
+// only the X of a pocket centre would leave the field describing a place the
+// machine has never been — half of where it is standing now, half of where it
+// was standing when somebody last pressed the other button — and nothing on
+// screen would say so. So a point has one button, and it takes every axis at
+// the same instant.
+
+/** Live position of each axis, or null if any of them cannot be read. */
+export function pointValues(axes: string[], frame: Frame): number[] | null {
+  if (captureBlocked({ axes })) return null;
+  const out = axes.map((letter) => axisPosition(letter, frame) ?? 0);
+  return out.every((v) => Number.isFinite(v)) ? out : null;
+}
+
+/** The crosshair for a whole point: all of its axes, or none of them. */
+export function pointCaptureButton(
+  axes: string[],
+  frame: Frame,
+  onValues: (values: number[]) => void,
+): TemplateResult {
+  const blocked = captureBlocked({ axes });
+  const values = blocked ? null : pointValues(axes, frame);
+  const letters = axes.join('');
+  const title = blocked
+    ? blocked
+    : `Use the current ${letters} in ${frameName(frame)}` +
+      (values ? ` — ${axes.map((a, i) => `${a}${values[i]}`).join(' ')}` : '');
+
+  return crosshair(title, blocked, () => {
+    const v = pointValues(axes, frame);
+    if (v) onValues(v);
+  });
 }
 
 // --- Shorthands for the common cases ---------------------------------------

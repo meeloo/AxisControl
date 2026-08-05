@@ -37,7 +37,7 @@ import {
   run,
   saveSetting,
 } from '../core/store.js';
-import { checkField, numberField, selectField, textField } from '../ui/widgets.js';
+import { checkField, numberField, pointField, selectField, textField } from '../ui/widgets.js';
 import { fromAxis } from '../ui/capture.js';
 import { formatBytes } from '../core/util.js';
 import {
@@ -400,8 +400,16 @@ export class AtcPanel extends PanelElement {
             )}
           `
         : html`
-            ${numberField('Setter X', probe.x, (v) => apply({ ...probe, x: v }), { suffix: 'mm', step: 0.1, capture: fromAxis('X', 'machine') })}
-            ${numberField('Setter Y', probe.y, (v) => apply({ ...probe, y: v }), { suffix: 'mm', step: 0.1, capture: fromAxis('Y', 'machine') })}
+            ${pointField('Setter XY', [
+              { letter: 'X', value: probe.x, onChange: (v) => apply({ ...probe, x: v }) },
+              { letter: 'Y', value: probe.y, onChange: (v) => apply({ ...probe, y: v }) },
+            ], {
+              frame: 'machine',
+              step: 0.1,
+              suffix: 'mm',
+              title: 'Machine coordinate the spindle goes to before probing down onto the setter.',
+              onPoint: ([x, y]) => apply({ ...probe, x: x!, y: y! }),
+            })}
           `}
       ${numberField('Trigger Z', probe.z, (v) => apply({ ...probe, z: v }), { suffix: 'mm', step: 0.01, title: 'Machine Z at which the setter triggers. Every tool offset is measured against this one number.', capture: fromAxis('Z', 'machine') })}
       ${numberField('Probe input', probe.index, (v) => apply({ ...probe, index: Math.max(0, Math.round(v)) }), { min: 0, step: 1, title: 'The K number from the setter’s M558. On a machine with a workpiece probe as well, this is what keeps them apart.' })}
@@ -447,8 +455,16 @@ export class AtcPanel extends PanelElement {
               ],
               (v) => this.patchBank({ direction: Number(v) < 0 ? -1 : 1 }),
             )}
-            ${numberField('Pocket 1 X', b.originX, (v) => this.patchBank({ originX: v }), { suffix: 'mm', step: 0.1, title: 'Machine coordinate of the centre of the first pocket.', capture: fromAxis('X', 'machine') })}
-            ${numberField('Pocket 1 Y', b.originY, (v) => this.patchBank({ originY: v }), { suffix: 'mm', step: 0.1, capture: fromAxis('Y', 'machine') })}
+            ${pointField('Pocket 1 XY', [
+              { letter: 'X', value: b.originX, onChange: (v) => this.patchBank({ originX: v }) },
+              { letter: 'Y', value: b.originY, onChange: (v) => this.patchBank({ originY: v }) },
+            ], {
+              frame: 'machine',
+              step: 0.1,
+              suffix: 'mm',
+              title: 'Machine coordinate of the centre of the first pocket. Jog a tool over it and press the crosshair.',
+              onPoint: ([x, y]) => this.patchBank({ originX: x!, originY: y! }),
+            })}
           `,
         )}
 

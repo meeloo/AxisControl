@@ -9,7 +9,7 @@ import { PanelElement, registerPanel } from '../ui/panel.js';
 import { applyTool, toolPicker, type Filled } from '../ui/toolpick.js';
 import type { ToolInfo } from '../tools/table.js';
 import { connected, machine } from '../core/store.js';
-import { checkField, numberField, selectField } from '../ui/widgets.js';
+import { checkField, numberField, pointField, selectField } from '../ui/widgets.js';
 import { fromAxis, fromDepthBelow, fromRadiusAround } from '../ui/capture.js';
 import { preview, saveAndRun } from '../ui/program.js';
 import {
@@ -222,10 +222,14 @@ export class MachiningPanel extends PanelElement {
     `;
 
     const rect = html`
-      ${numberField('X0', this.x0, (v) => ((this.x0 = v), this.requestUpdate()), { suffix: 'mm', capture: fromAxis('X', 'work') })}
-      ${numberField('Y0', this.y0, (v) => ((this.y0 = v), this.requestUpdate()), { suffix: 'mm', capture: fromAxis('Y', 'work') })}
-      ${numberField('X1', this.x1, (v) => ((this.x1 = v), this.requestUpdate()), { suffix: 'mm', capture: fromAxis('X', 'work') })}
-      ${numberField('Y1', this.y1, (v) => ((this.y1 = v), this.requestUpdate()), { suffix: 'mm', capture: fromAxis('Y', 'work') })}
+      ${pointField('Corner 1 XY', [
+        { letter: 'X', value: this.x0, onChange: (v) => ((this.x0 = v), this.requestUpdate()) },
+        { letter: 'Y', value: this.y0, onChange: (v) => ((this.y0 = v), this.requestUpdate()) },
+      ], { suffix: 'mm', title: 'One corner of the rectangle, in work coordinates.' })}
+      ${pointField('Corner 2 XY', [
+        { letter: 'X', value: this.x1, onChange: (v) => ((this.x1 = v), this.requestUpdate()) },
+        { letter: 'Y', value: this.y1, onChange: (v) => ((this.y1 = v), this.requestUpdate()) },
+      ], { suffix: 'mm', title: 'The opposite corner. Either order — the pass is worked out from the two.' })}
     `;
 
     const tabsForm = html`
@@ -275,8 +279,10 @@ export class MachiningPanel extends PanelElement {
         `;
       case 'circle':
         return html`
-          ${numberField('Centre X', this.cx, (v) => ((this.cx = v), this.requestUpdate()), { suffix: 'mm', capture: fromAxis('X', 'work') })}
-          ${numberField('Centre Y', this.cy, (v) => ((this.cy = v), this.requestUpdate()), { suffix: 'mm', capture: fromAxis('Y', 'work') })}
+          ${pointField('Centre XY', [
+            { letter: 'X', value: this.cx, onChange: (v) => ((this.cx = v), this.requestUpdate()) },
+            { letter: 'Y', value: this.cy, onChange: (v) => ((this.cy = v), this.requestUpdate()) },
+          ], { suffix: 'mm', title: 'Centre of the circle, in work coordinates.' })}
           ${numberField('Diameter', this.diameter, (v) => ((this.diameter = v), this.requestUpdate()), { suffix: 'mm', title: 'The crosshair measures out from the centre above, so you can jog to the edge and take the diameter from there.', capture: fromRadiusAround(() => ({ x: this.cx, y: this.cy })) })}
           ${checkField('Clear the pocket', this.pocket, (v) => ((this.pocket = v), this.requestUpdate()))}
           ${this.pocket
@@ -297,8 +303,14 @@ export class MachiningPanel extends PanelElement {
             { value: 'line', label: 'Line' },
             { value: 'bolt', label: 'Bolt circle' },
           ], (v) => ((this.drillPatternId = v), this.requestUpdate()))}
-          ${numberField(this.drillPatternId === 'bolt' ? 'Centre X' : 'X0', this.x0, (v) => ((this.x0 = v), this.requestUpdate()), { suffix: 'mm', capture: fromAxis('X', 'work') })}
-          ${numberField(this.drillPatternId === 'bolt' ? 'Centre Y' : 'Y0', this.y0, (v) => ((this.y0 = v), this.requestUpdate()), { suffix: 'mm', capture: fromAxis('Y', 'work') })}
+          ${pointField(
+            this.drillPatternId === 'bolt' ? 'Centre XY' : 'First hole XY',
+            [
+              { letter: 'X', value: this.x0, onChange: (v) => ((this.x0 = v), this.requestUpdate()) },
+              { letter: 'Y', value: this.y0, onChange: (v) => ((this.y0 = v), this.requestUpdate()) },
+            ],
+            { suffix: 'mm' },
+          )}
           ${this.drillPatternId === 'grid'
             ? html`
                 ${numberField('Columns', this.countX, (v) => ((this.countX = v), this.requestUpdate()), { min: 1, step: 1 })}
@@ -309,8 +321,10 @@ export class MachiningPanel extends PanelElement {
             : nothing}
           ${this.drillPatternId === 'line'
             ? html`
-                ${numberField('X1', this.x1, (v) => ((this.x1 = v), this.requestUpdate()), { suffix: 'mm', capture: fromAxis('X', 'work') })}
-                ${numberField('Y1', this.y1, (v) => ((this.y1 = v), this.requestUpdate()), { suffix: 'mm', capture: fromAxis('Y', 'work') })}
+                ${pointField('Last hole XY', [
+                  { letter: 'X', value: this.x1, onChange: (v) => ((this.x1 = v), this.requestUpdate()) },
+                  { letter: 'Y', value: this.y1, onChange: (v) => ((this.y1 = v), this.requestUpdate()) },
+                ], { suffix: 'mm' })}
                 ${numberField('Holes', this.holeCount, (v) => ((this.holeCount = v), this.requestUpdate()), { min: 1, step: 1, title: 'Including both ends.' })}
               `
             : nothing}
