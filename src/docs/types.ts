@@ -85,9 +85,13 @@ export function parseCodeQuery(query: string): { letter: string | null; number: 
  * what makes the other direction work — typing "endstop" to find out that
  * M574 is the code you wanted.
  */
-export function searchCodes(codes: GcodeEntry[], query: string, limit = 60): GcodeEntry[] {
+export function searchCodes(codes: GcodeEntry[], query: string, limit?: number): GcodeEntry[] {
   const trimmed = query.trim();
-  if (!trimmed) return codes.slice(0, limit);
+  // Everything, when nothing was asked for. This used to slice to the caller's
+  // limit, so the reference opened showing the first 80 of 278 and the rest
+  // could only be reached by searching for them — a dictionary you can only
+  // read if you already know the word.
+  if (!trimmed) return codes;
 
   const asCode = parseCodeQuery(trimmed);
   const needle = trimmed.toLowerCase();
@@ -125,5 +129,5 @@ export function searchCodes(codes: GcodeEntry[], query: string, limit = 60): Gco
       (a.entry.number ?? -1) - (b.entry.number ?? -1) ||
       (a.entry.fraction ?? -1) - (b.entry.fraction ?? -1),
   );
-  return scored.slice(0, limit).map((s) => s.entry);
+  return (limit === undefined ? scored : scored.slice(0, limit)).map((s) => s.entry);
 }

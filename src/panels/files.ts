@@ -72,8 +72,20 @@ export class FilesPanel extends PanelElement {
     return !!this.openPath && GCODE_EXTENSIONS.test(this.openPath);
   }
 
+  /**
+   * Whether the editor gets its second layer at all.
+   *
+   * The layer carries the colour, but it also carries the line numbers — one
+   * element per line is what lets a number sit against a line that wraps onto
+   * three rows. So it is built for any file small enough, and only G-code gets
+   * coloured.
+   */
+  private get layered(): boolean {
+    return this.content.length <= MAX_COLOUR_BYTES;
+  }
+
   private get colourised(): boolean {
-    return this.isGcode && this.content.length <= MAX_COLOUR_BYTES;
+    return this.isGcode && this.layered;
   }
 
   protected override updated(): void {
@@ -87,7 +99,12 @@ export class FilesPanel extends PanelElement {
     // The textarea is transparent and the colour is painted on the layer under
     // it, so the two have to agree on every pixel: same font, same padding,
     // same wrapping (see the stylesheet), and the same scroll offset.
-    paintGcode(layer, this.content);
+    paintGcode(layer, this.content, this.colourised);
+
+    // Room for the widest number this file will show. Measured in ch so it
+    // tracks the monospace font rather than a guess at its size.
+    const digits = String(this.content.split('\n').length).length;
+    layer.parentElement?.style.setProperty('--gutter', `${digits + 1.5}ch`);
     if (this.scrolling !== box) {
       this.scrolling = box;
       box.addEventListener('scroll', () => {
@@ -320,10 +337,8 @@ export class FilesPanel extends PanelElement {
           </button>
           <button class="ghost" @click=${() => this.closeEditor()}>Close</button>
         </div>
-        <div class="editor-body ${this.colourised ? 'colour' : ''}">
-          ${this.colourised
-            ? html`<pre class="editor-hl" aria-hidden="true"></pre>`
-            : nothing}
+        <div class="editor-body ${this.colourised ? 'colour' : ''} ${this.layered ? 'numbered' : ''}">
+          ${this.layered ? html`<pre class="editor-hl" aria-hidden="true"></pre>` : nothing}
           <textarea
             class="editor-text"
             spellcheck="false"

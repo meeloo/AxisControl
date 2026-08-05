@@ -163,8 +163,14 @@ export function highlightGcode(text: string): string {
  * zero-width space is there: an empty div collapses, and one collapsed line
  * puts every line below it out of step with the text above the layer.
  */
-export function paintGcode(layer: HTMLElement, text: string): void {
+export function paintGcode(layer: HTMLElement, text: string, colour = true): void {
   const lines = text.split('\n');
+  // A change of mode rewrites every line; without this a file opened as G-code
+  // and then as plain text would keep the colour it no longer deserves.
+  if (layer.dataset.colour !== String(colour)) {
+    layer.dataset.colour = String(colour);
+    layer.replaceChildren();
+  }
 
   for (let i = 0; i < lines.length; i++) {
     let el = layer.children[i] as HTMLElement | undefined;
@@ -174,7 +180,9 @@ export function paintGcode(layer: HTMLElement, text: string): void {
     }
     if (el.dataset.src === lines[i]) continue;
     el.dataset.src = lines[i];
-    el.innerHTML = highlightLine(lines[i]) || '&#8203;';
+    // Plain files still get a line per div — that is what the numbers count.
+    if (colour) el.innerHTML = highlightLine(lines[i]) || '&#8203;';
+    else el.textContent = lines[i] || '\u200b';
   }
 
   while (layer.children.length > lines.length) layer.lastElementChild!.remove();

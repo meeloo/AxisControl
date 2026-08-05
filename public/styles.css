@@ -1578,3 +1578,37 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 /* A blinking button is worse than a still one for anyone who finds motion
    painful, and the colour alone still says it. */
 @media (prefers-reduced-motion: reduce) { .restart.urgent { animation: none; } }
+
+/* Line numbers.
+   Drawn by a counter on the colour layer's line divs rather than as a separate
+   column, because a line that wraps onto three rows must still show one number
+   against its first row — and those divs are the only thing that already knows
+   where a line begins and ends. A parallel gutter would have to re-measure the
+   wrapping and would drift the moment the panel was resized. */
+.editor-body.numbered .editor-hl { counter-reset: line; }
+.editor-body.numbered .editor-hl > div { position: relative; }
+.editor-body.numbered .editor-hl > div::before {
+  counter-increment: line;
+  content: counter(line);
+  position: absolute;
+  left: calc(0px - var(--gutter, 4ch));
+  width: calc(var(--gutter, 4ch) - 0.75ch);
+  text-align: right;
+  color: var(--text-faint);
+  /* Not selectable and not searchable: they are furniture, and copying a
+     block of the file should give the file, not the file with numbers in it. */
+  -webkit-user-select: none;
+  user-select: none;
+}
+/* Room for them on both layers, or the caret and the colour disagree. */
+.editor-body.numbered .editor-text,
+.editor-body.numbered .editor-hl { padding-left: calc(10px + var(--gutter, 4ch)); }
+/* A tint rather than a rule: the textarea over it is transparent, so a border
+   would be drawn across the text it is meant to sit beside. */
+.editor-body.numbered .editor-hl {
+  background-image: linear-gradient(
+    to right,
+    var(--bg-raised) 0 calc(4px + var(--gutter, 4ch)),
+    transparent calc(4px + var(--gutter, 4ch))
+  );
+}

@@ -31,7 +31,9 @@ export class GcodePanel extends PanelElement {
   }
 
   private get results(): GcodeEntry[] {
-    return this.index ? searchCodes(this.index.codes, this.query, 80) : [];
+    // No cap. 278 rows is a scroll, not a problem, and a hidden one is a code
+    // the operator is told does not exist.
+    return this.index ? searchCodes(this.index.codes, this.query) : [];
   }
 
   /**
