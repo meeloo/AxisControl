@@ -43,6 +43,16 @@ export class FirmwarePanel extends PanelElement {
   private note: string | null = null;
   /** Downloaded and uploaded, waiting for the operator to say go. */
   private staged: { release: GhRelease; plan: FirmwarePlan } | null = null;
+  /**
+   * The tag an M997 was sent for, until the board comes back reporting it.
+   *
+   * The message shown while a board is rewriting its flash is written in the
+   * future tense, and the board reboots and reconnects without anything on this
+   * page being told. Left alone it goes on promising a reboot that already
+   * happened — so the running version is what retires it, which is also the
+   * only evidence that the update actually took.
+   */
+  private awaiting: string | null = null;
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -91,6 +101,10 @@ export class FirmwarePanel extends PanelElement {
     this.busy = label;
     this.error = null;
     this.note = null;
+    // Retired here as well as by the board coming back: otherwise "the board
+    // came back running X" is true for ever and quietly shadows whatever the
+    // next thing to happen has to say.
+    this.awaiting = null;
     this.progress = null;
     this.requestUpdate();
     try {
@@ -192,6 +206,7 @@ export class FirmwarePanel extends PanelElement {
       }
 
       this.staged = null;
+      this.awaiting = staged.release.tag;
       this.note =
         'The board is rewriting its flash and will reboot. Reconnect in a minute — if the page does not come back on its own, reload it.';
       appendLog({ level: 'info', text: 'Firmware update started', time: new Date() });
@@ -272,6 +287,11 @@ export class FirmwarePanel extends PanelElement {
     const main = this.main;
     const staged = this.staged;
 
+    // Computed, not stored: the board coming back on the new version is a
+    // change in the machine state, and the panel re-renders on that anyway.
+    const landed =
+      this.awaiting && main?.version && main.version === this.awaiting.replace(/^v/i, '');
+
     return html`
       <div class="pack fw">
         <div class="pack-blurb">
@@ -311,7 +331,14 @@ export class FirmwarePanel extends PanelElement {
           : nothing}
 
         ${this.error ? html`<div class="warn-banner bad">${this.error}</div>` : nothing}
-        ${this.note ? html`<div class="pack-note good">${this.note}</div>` : nothing}
+        ${landed
+          ? html`<div class="pack-note good">
+              The board came back running ${main?.version}. Check that it still homes and that
+              config.g did not want anything new before cutting.
+            </div>`
+          : this.note
+            ? html`<div class="pack-note good">${this.note}</div>`
+            : nothing}
 
         ${staged
           ? html`<div class="warn-banner fw-armed">

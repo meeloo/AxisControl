@@ -771,11 +771,29 @@ function handleGcode(gcode) {
         pushReply(`Error: M997: firmware file ${missing[0]} not found`);
         state.m997 = { ok: false, missing };
       } else {
+        // Which version the staged image is, taken out of the image itself —
+        // the same thing a real board does by flashing it and then reporting
+        // what it now runs.
+        const staged = FILE_CONTENT[`${dir}${board.firmwareFileName}`]
+          ?? FILE_CONTENT[`/firmware/${board.firmwareFileName}`];
+        const stamped = /(\d+\.\d+\.\d+(?:[-.][\w.]+)?)/.exec(String(staged ?? ''));
+        state.pendingVersion = stamped ? stamped[1] : null;
         state.m997 = { ok: true, command: cmd };
         state.status = 'updating';
         pushReply('Updating main firmware');
-        // A real board reboots; the mock comes back so a test can carry on.
-        setTimeout(() => { state.status = 'idle'; bumpSeq('state'); }, 3000);
+        // A real board reboots and comes back reporting the version it was
+        // just given. The mock does the same, because "the running version
+        // changed" is the only evidence an update actually took — and the
+        // panel's finished message hangs off exactly that.
+        setTimeout(() => {
+          if (state.pendingVersion) {
+            BOARD.firmwareVersion = state.pendingVersion;
+            state.pendingVersion = null;
+            bumpSeq('boards');
+          }
+          state.status = 'idle';
+          bumpSeq('state');
+        }, 3000);
       }
       bumpSeq('state');
     } else if (upper.startsWith('M112')) {
