@@ -103,6 +103,7 @@ function join(dir: string, name: string): string {
 async function candidates(
   release: GhRelease,
   need: string[],
+  searchArchives: boolean,
   onProgress?: (what: string, loaded: number, total: number | null) => void,
 ): Promise<Map<string, Uint8Array>> {
   const found = new Map<string, Uint8Array>();
@@ -120,11 +121,17 @@ async function candidates(
       await fetchAsset(asset.url, asset.size || null, (l, t) => onProgress?.(asset.name, l, t)),
     );
   }
-  if (!outstanding().length) return found;
+  if (!searchArchives || !outstanding().length) return found;
 
-  // Anything still missing may be inside a combined archive. Only download one
-  // if something is actually missing — these run to tens of megabytes.
-  for (const asset of release.assets.filter((a) => /\.zip$/i.test(a.name))) {
+  // Anything still missing may be inside a combined archive. These run to
+  // seventeen megabytes, so this only happens when the caller has decided the
+  // download is worth it — see planUpdate.
+  const archives = release.assets.filter(
+    // DuetWebControl-SD.zip is in every release and holds the web interface,
+    // never firmware. Downloading it to look for a board image is pure waste.
+    (a) => /\.zip$/i.test(a.name) && !/DuetWebControl/i.test(a.name),
+  );
+  for (const asset of archives) {
     if (!outstanding().length) break;
     onProgress?.(asset.name, 0, asset.size || null);
     const bytes = await fetchAsset(asset.url, asset.size || null, (l, t) =>
@@ -155,8 +162,13 @@ async function candidates(
 export async function planUpdate(
   release: GhRelease,
   boards: FirmwareInfo[],
-  onProgress?: (what: string, loaded: number, total: number | null) => void,
+  opts: {
+    /** Filenames already sitting in the firmware directory on the card. */
+    present?: Set<string>;
+    onProgress?: (what: string, loaded: number, total: number | null) => void;
+  } = {},
 ): Promise<FirmwarePlan> {
+  const { present = new Set<string>(), onProgress } = opts;
   const main = boards.find((b) => b.canAddress === 0) ?? boards[0];
   if (!main) throw new FirmwareError('The controller has not said what board it is.');
   if (main.sbc) {
@@ -176,7 +188,16 @@ export async function planUpdate(
   }
 
   const need = [main.firmwareFile, ...(main.iapFile ? [main.iapFile] : [])];
-  const fetched = await candidates(release, need, onProgress);
+
+  // Whether to pay for the combined archive.
+  //
+  // Duet3D do not publish the IAP as a loose asset — 3.6.1 carries it only
+  // inside a seventeen-megabyte Duet2and3Firmware zip, and 3.7.0-beta.2 does
+  // not ship one at all. The archive is worth downloading to get the *image*,
+  // and not worth downloading to get a programmer the board already has.
+  const iapOnCard = !main.iapFile || present.has(main.iapFile);
+  const imageIsLoose = release.assets.some((a) => matchesBoardFile(main.firmwareFile!, a.name));
+  const fetched = await candidates(release, need, !imageIsLoose || !iapOnCard, onProgress);
 
   const image = fetched.get(main.firmwareFile);
   if (!image) {
@@ -184,10 +205,21 @@ export async function planUpdate(
       `${release.tag} contains no ${main.firmwareFile}. That release may not cover this board — check it on GitHub before going further.`,
     );
   }
-  if (main.iapFile && !fetched.get(main.iapFile)) {
-    throw new FirmwareError(
-      `${release.tag} contains no ${main.iapFile}. That is the programmer the board uses to rewrite its own flash, and M997 without it fails partway.`,
-    );
+
+  // The IAP is a precondition of flashing, not of the release.
+  //
+  // It changes rarely, so most releases do not carry it, and the copy already
+  // on the card from a previous update is the one RepRapFirmware will use.
+  // Refusing because *this* release lacks one would make nearly every real
+  // release uninstallable, which is exactly what it did.
+  const notes: string[] = [];
+  if (main.iapFile && !fetched.has(main.iapFile)) {
+    if (!present.has(main.iapFile)) {
+      throw new FirmwareError(
+        `${release.tag} contains no ${main.iapFile}, and there is none on the card either. That is the programmer the board uses to rewrite its own flash, and M997 without it fails partway. Install a release that ships one first — the combined Duet2and3Firmware zip usually does.`,
+      );
+    }
+    notes.push(`reusing the ${main.iapFile} already on the card — this release does not ship one`);
   }
 
   // Saved under the name the board stated, not the name it was downloaded as.
@@ -199,6 +231,7 @@ export async function planUpdate(
     files.set(join(main.directory, wanted), bytes);
     found.push(`${wanted} (${Math.round(bytes.length / 1024)}KB)`);
   }
+  found.push(...notes);
 
   // DWC's order: every expansion board first, each awaited, then the main
   // board — whose update reboots it, ending anything queued behind it.

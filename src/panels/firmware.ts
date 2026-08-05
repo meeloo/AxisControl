@@ -114,9 +114,27 @@ export class FirmwarePanel extends PanelElement {
         throw new Error(`The machine is ${machine.peek().status}. Firmware files are not written to the card mid-job.`);
       }
 
-      const plan = await planUpdate(release, this.boards, (what, loaded, total) => {
-        this.progress = { what, loaded, total };
-        this.requestUpdate();
+      // What is already in the firmware directory. The programmer in
+      // particular: Duet3D ship it rarely, so the one from the last update is
+      // usually the one that will do the work, and a release without it is not
+      // a release that cannot be installed.
+      const present = new Set<string>();
+      const dir = this.main?.directory;
+      if (dir) {
+        try {
+          for (const entry of await driver.listFiles(dir)) present.add(entry.name);
+        } catch {
+          // No such directory yet, most likely. Then nothing is present, which
+          // is the safe reading.
+        }
+      }
+
+      const plan = await planUpdate(release, this.boards, {
+        present,
+        onProgress: (what, loaded, total) => {
+          this.progress = { what, loaded, total };
+          this.requestUpdate();
+        },
       });
 
       let done = 0;

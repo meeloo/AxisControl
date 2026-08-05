@@ -419,7 +419,7 @@ const BOARD = {
   // What the board says it will flash from. Anything updating firmware has to
   // take these rather than guess: one release carries images for a dozen
   // boards, and the wrong one written to flash is a board that does not boot.
-  firmwareFileName: 'Duet3Firmware_MB6HC.uf2',
+  firmwareFileName: 'Duet3Firmware_MB6HC.bin',
   iapFileNameSD: 'Duet3_SDiap32_MB6HC.bin',
   iapFileNameSBC: 'Duet3_SBCiap32_MB6HC.bin',
   bootloaderFileName: '',
@@ -669,7 +669,14 @@ const server = createServer(async (req, res) => {
   if (path === '/_wipe') {
     const dir = url.searchParams.get('dir') ?? '';
     for (const key of Object.keys(FILE_CONTENT)) {
-      if (dir && key.startsWith(`${dir}/`)) delete FILE_CONTENT[key];
+      if (dir && key.startsWith(`${dir}/`)) {
+        delete FILE_CONTENT[key];
+        // And out of the directory listing. Deleting the content but leaving
+        // the name listed is a card that reports files it cannot open — which
+        // is not a state a real one can be in, and it quietly defeats any test
+        // that asks "what is already on the card?".
+        removeFromListing(key);
+      }
     }
     cors(res);
     res.writeHead(200);
