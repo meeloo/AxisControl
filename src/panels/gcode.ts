@@ -34,12 +34,27 @@ export class GcodePanel extends PanelElement {
     return this.index ? searchCodes(this.index.codes, this.query, 80) : [];
   }
 
+  /**
+   * Keys, from anywhere in the panel.
+   *
+   * Bound to the whole panel rather than to the search box, because clicking a
+   * result moves focus onto that button and the arrows would stop working the
+   * moment you used the mouse — which is exactly when you want to keep reading
+   * down the list.
+   */
   private onKey(e: KeyboardEvent): void {
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
     const results = this.results;
+
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
       const next = this.cursor + (e.key === 'ArrowDown' ? 1 : -1);
       this.cursor = Math.max(0, Math.min(results.length - 1, next));
+      // Show it, rather than only highlighting it. Browsing the reference is
+      // reading one code after another; making Enter mandatory turned every
+      // step into two keys for no gain.
+      const hit = results[this.cursor];
+      if (hit) this.selected = hit;
       this.requestUpdate();
       // Follow the cursor, or arrowing past the fold moves a highlight nobody
       // can see.
@@ -52,6 +67,7 @@ export class GcodePanel extends PanelElement {
       this.query = '';
       this.cursor = 0;
       this.requestUpdate();
+      this.querySelector<HTMLInputElement>('.gc-search')?.focus();
     }
   }
 
@@ -117,7 +133,7 @@ export class GcodePanel extends PanelElement {
 
     const results = this.results;
     return html`
-      <div class="pack gc">
+      <div class="pack gc" @keydown=${(e: KeyboardEvent) => this.onKey(e)}>
         <input
           class="gc-search"
           type="search"
@@ -128,7 +144,6 @@ export class GcodePanel extends PanelElement {
             this.cursor = 0;
             this.requestUpdate();
           }}
-          @keydown=${(e: KeyboardEvent) => this.onKey(e)}
         />
         <div class="gc-body">
           <div class="gc-hits">

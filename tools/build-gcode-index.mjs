@@ -212,11 +212,24 @@ function parseIndex(rawHtml) {
 
   // Headings carry the code; everything until the next heading of the same or
   // higher level belongs to it.
-  const headingRe = /<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi;
+  const headingRe = /<h([1-6])\b([^>]*)>([\s\S]*?)<\/h\1>/gi;
   const found = [];
   let match;
   while ((match = headingRe.exec(html)) !== null) {
-    found.push({ level: Number(match[1]), title: text(match[2]), at: match.index, end: headingRe.lastIndex });
+    // The heading's own id, which is the anchor the page scrolls to. Taken
+    // rather than derived: wiki.js slugs the whole heading, so M581.1 is
+    // "#m5811-configure-external-trigger-on-expression" and no rule you would
+    // guess from the code alone produces that. Deriving it gave a link that
+    // opened a 400-code page at the top — which is the thing the reference
+    // exists to avoid.
+    const id = /\bid="([^"]*)"/i.exec(match[2]);
+    found.push({
+      level: Number(match[1]),
+      title: text(match[3]),
+      id: id ? id[1] : null,
+      at: match.index,
+      end: headingRe.lastIndex,
+    });
   }
 
   const entries = [];
@@ -287,7 +300,7 @@ function parseIndex(rawHtml) {
       params,
       examples: [...new Set(examples)],
       notes,
-      url: `${SOURCE}#${code.letter.toLowerCase()}${code.number ?? ''}${code.fraction !== null ? `-${code.fraction}` : ''}`,
+      url: found[i].id ? `${SOURCE}#${found[i].id}` : SOURCE,
     });
   }
 
@@ -343,10 +356,16 @@ function inspect(html) {
 
 const fetched = await loadPage();
 
+// A change to this file changes the index even when the page has not moved, so
+// it counts as an input. Without it, fixing the parser and rebuilding prints
+// "unchanged" and quietly ships the old output — which is exactly what happened
+// when the deep links turned out to be wrong.
+const parserHash = sha(readFileSync(fileURLToPath(import.meta.url), 'utf8'));
+
 // The server says it has not changed since the index was built. Nothing to do,
 // and nothing written — rewriting an identical file on every build would put a
 // diff in front of anyone running `git status` for no reason at all.
-if (fetched.unchanged) {
+if (fetched.unchanged && previous()?.parserHash === parserHash) {
   if (!quiet) console.log('[gcode-index] unchanged since the index was built (HTTP 304)');
   process.exit(0);
 }
@@ -361,7 +380,7 @@ if (flag('--inspect')) {
 // unchanged rather than "the server felt like telling us".
 const pageHash = sha(fetched.html);
 const before = previous();
-if (before?.pageHash === pageHash && currentIndex()) {
+if (before?.pageHash === pageHash && before?.parserHash === parserHash && currentIndex()) {
   if (!quiet) console.log(`[gcode-index] unchanged since the index was built (same ${pageHash})`);
   process.exit(0);
 }
@@ -395,7 +414,7 @@ const body = `${JSON.stringify({ source: SOURCE, codes })}\n`;
 mkdirSync(dirname(cacheFile), { recursive: true });
 writeFileSync(
   cacheFile,
-  `${JSON.stringify({ pageHash, etag: fetched.etag ?? null, lastModified: fetched.lastModified ?? null, builtAt: new Date().toISOString() }, null, 2)}\n`,
+  `${JSON.stringify({ pageHash, parserHash, etag: fetched.etag ?? null, lastModified: fetched.lastModified ?? null, builtAt: new Date().toISOString() }, null, 2)}\n`,
 );
 
 if (currentIndex() === body) {
