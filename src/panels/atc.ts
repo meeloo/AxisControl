@@ -6,10 +6,12 @@
 // is why it works at all on a machine that has no tool-changer hardware, and
 // why the entire installation is a handful of macros plus a set of coordinates.
 //
-// Three tabs, in the order the job is actually done:
+// Three tabs, in the order they are actually wanted — which is not the order
+// the job is first done in. Pockets change as tools move around the rail, the
+// setup is a few numbers a year, and installing is close to a one-off:
 //
-//   Setup    the numbers
-//   Pockets  where those numbers put every pocket, in machine coordinates
+//   Pockets  where the settings put every pocket, in machine coordinates
+//   Setup    the numbers behind them
 //   Install  exactly what will be written, and the button that writes it
 //
 // The Pockets tab is not decoration. Every value on the Setup tab ends up in a
@@ -52,14 +54,21 @@ import {
 import { atcFiles, type AtcFile } from '../atc/files.js';
 import { checkAtc, effectiveRetractZ, slotInEnvelope } from '../atc/check.js';
 
-type Tab = 'setup' | 'pockets' | 'install';
+type Tab = 'pockets' | 'setup' | 'install';
 
 /** The call that has to be in config.g for any of this to load. */
 const CONFIG_CALL = 'M98 P"atcConfig.g"';
 
 export class AtcPanel extends PanelElement {
   private config: AtcConfig = adoptAtcConfig(loadSetting('atcConfig', {}));
-  private tab: Tab = 'setup';
+  /**
+   * Pockets first, because it is what gets looked at most.
+   *
+   * Ordered by how often each is needed rather than by the order they are done
+   * in once: the pockets are what change as tools move around the rail, the
+   * setup is a few numbers a year, and installing is close to a one-off.
+   */
+  private tab: Tab = 'pockets';
   /** Which bank the Setup tab is editing. */
   private bankIndex = 0;
 
@@ -704,8 +713,8 @@ export class AtcPanel extends PanelElement {
 
     const pockets = this.config.banks.reduce((n, b) => n + b.count, 0);
     const tabs: Array<[Tab, string]> = [
-      ['setup', 'Setup'],
       ['pockets', `Pockets (${pockets})`],
+      ['setup', 'Setup'],
       ['install', `Install (${files.length})`],
     ];
 
@@ -737,10 +746,10 @@ export class AtcPanel extends PanelElement {
             `
           : nothing}
 
-        ${this.tab === 'setup'
-          ? this.renderSetup()
-          : this.tab === 'pockets'
-            ? this.renderPockets()
+        ${this.tab === 'pockets'
+          ? this.renderPockets()
+          : this.tab === 'setup'
+            ? this.renderSetup()
             : this.renderInstall(files, blocking)}
 
         ${this.tab !== 'install'
