@@ -59,6 +59,14 @@ const LIMITED_USER = process.env.MOCK_LIMITED_USER === '1';
 const NO_ZOOM_POS = process.env.MOCK_NO_ZOOM_POS === '1';
 
 /**
+ * Pretend to be a camera with a fixed-focus lens.
+ *
+ * Plenty are: a motorised zoom does not imply a motorised focus, and one that
+ * answers GetAutoFocus with "not support" must leave no checkbox behind.
+ */
+const NO_AUTOFOCUS = process.env.MOCK_NO_AUTOFOCUS === '1';
+
+/**
  * Commands to refuse, comma separated: MOCK_REFUSE=SetWhiteLed,SetIrLights
  *
  * Real cameras refuse things — a command this model does not implement, a
@@ -67,9 +75,13 @@ const NO_ZOOM_POS = process.env.MOCK_NO_ZOOM_POS === '1';
  */
 const REFUSE = new Set((process.env.MOCK_REFUSE ?? '').split(',').filter(Boolean));
 
-/** What the lens can do, in the camera's own units — Reolink reports a range. */
+/** What the lens can do, in the camera's own units — Reolink reports a range.
+ *  Focus travels much further than zoom, which is why nothing may assume the
+ *  two share a scale. */
 const ZOOM_MIN = 0;
 const ZOOM_MAX = 32;
+const FOCUS_MIN = 0;
+const FOCUS_MAX = 248;
 
 /**
  * A real H.264 FLV, served the way the camera serves one.
@@ -96,6 +108,9 @@ const state = {
   pan: 0,
   tilt: 0,
   zoom: 0, // ZOOM_MIN..ZOOM_MAX
+  focus: 12, // FOCUS_MIN..FOCUS_MAX
+  /** The camera reports `disable`, so 0 means autofocus is ON. */
+  autoFocusDisable: 1,
   moving: 'Stop',
   ir: 'Auto',
   whiteLed: { state: 0, mode: 1, bright: 100 },
@@ -257,6 +272,8 @@ function handleCommand(entry) {
       else if (op === 'RightDown') (state.pan += step), (state.tilt += step);
       else if (op === 'ZoomInc') state.zoom = Math.min(ZOOM_MAX, state.zoom + 4);
       else if (op === 'ZoomDec') state.zoom = Math.max(ZOOM_MIN, state.zoom - 4);
+      else if (op === 'FocusInc') state.focus = Math.min(FOCUS_MAX, state.focus + 6);
+      else if (op === 'FocusDec') state.focus = Math.max(FOCUS_MIN, state.focus - 6);
       else if (op === 'ToPos') (state.pan = (param.id ?? 0) * 10), (state.tilt = 0);
       state.moving = op;
       return { cmd, code: 0, value: { rspCode: 200 } };
@@ -282,14 +299,30 @@ function handleCommand(entry) {
       return {
         cmd,
         code: 0,
-        value: { ZoomFocus: { channel: 0, zoom: { pos: state.zoom }, focus: { pos: 12 } } },
+        value: {
+          ZoomFocus: { channel: 0, zoom: { pos: state.zoom }, focus: { pos: state.focus } },
+        },
         range: {
           ZoomFocus: {
             zoom: { pos: { min: ZOOM_MIN, max: ZOOM_MAX } },
-            focus: { pos: { min: 0, max: 64 } },
+            focus: { pos: { min: FOCUS_MIN, max: FOCUS_MAX } },
           },
         },
       };
+
+    case 'GetAutoFocus':
+      if (NO_AUTOFOCUS) break;
+      return { cmd, code: 0, value: { AutoFocus: { channel: 0, disable: state.autoFocusDisable } } };
+
+    case 'SetAutoFocus': {
+      if (NO_AUTOFOCUS) break;
+      const af = param.AutoFocus ?? {};
+      if (af.disable !== 0 && af.disable !== 1) {
+        return { cmd, code: 1, error: { detail: 'set config failed', rspCode: -13 } };
+      }
+      state.autoFocusDisable = af.disable;
+      return { cmd, code: 0, value: { rspCode: 200 } };
+    }
 
     case 'StartZoomFocus': {
       if (NO_ZOOM_POS) break;
@@ -300,6 +333,12 @@ function handleCommand(entry) {
       const zf = param.ZoomFocus ?? {};
       if (zf.op === 'ZoomPos' && typeof zf.pos === 'number') {
         state.zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round(zf.pos)));
+      } else if (zf.op === 'FocusPos' && typeof zf.pos === 'number') {
+        // A lens the camera is focusing itself will not be positioned by hand.
+        if (!NO_AUTOFOCUS && state.autoFocusDisable === 0) {
+          return { cmd, code: 1, error: { detail: 'ability error', rspCode: -26 } };
+        }
+        state.focus = Math.max(FOCUS_MIN, Math.min(FOCUS_MAX, Math.round(zf.pos)));
       }
       return { cmd, code: 0, value: { rspCode: 200 } };
     }

@@ -26,8 +26,38 @@ import {
   IMAGE_FIELDS,
   type CameraProbe,
   type ImageSettings,
+  type LensAxis,
   type ZoomState,
 } from '../camera/types.js';
+
+/**
+ * Why an axis has no slider, so the panel can say rather than just omit it.
+ * A control that is silently absent reads as a broken app.
+ */
+type LensWhy = 'unknown' | 'ok' | 'blind' | 'unsupported' | 'refused';
+
+/** One motorised lens axis, as this panel is tracking it. */
+interface LensTrack {
+  /** Position and travel as the camera reports them, or null for no slider. */
+  state: ZoomState | null;
+  /** Knob position while dragging, before the camera has confirmed it. */
+  wanted: number | null;
+  sending: boolean;
+  why: LensWhy;
+}
+
+const newTrack = (why: LensWhy = 'unknown'): LensTrack => ({
+  state: null,
+  wanted: null,
+  sending: false,
+  why,
+});
+
+/** How each lens axis is labelled and driven. */
+const LENS: Record<LensAxis, { label: string; inc: PtzOp; dec: PtzOp; more: string; less: string }> = {
+  zoom: { label: 'Zoom', inc: 'ZoomInc', dec: 'ZoomDec', more: 'Zoom in', less: 'Zoom out' },
+  focus: { label: 'Focus', inc: 'FocusInc', dec: 'FocusDec', more: 'Focus further', less: 'Focus nearer' },
+};
 
 /** Pad layout, matching the jog rose's compass sense: north is up-screen. */
 const PAD: Array<{ op: PtzOp; label: string; title: string } | null> = [
@@ -111,19 +141,20 @@ export class CameraPanel extends PanelElement {
   private speed = 16;
 
   /**
-   * Absolute zoom, when the camera has it. Null keeps the ＋/－ buttons alone,
-   * which is the right answer for a camera that can only be told to zoom and
-   * not asked where it is.
+   * The two lens motors. A null `state` keeps the ＋/－ buttons alone, which is
+   * the right answer for a motor that can be told to run but not asked where it
+   * is.
+   *
+   * Tracked separately per axis, and not merged: a camera can perfectly well
+   * report a focus position and refuse to be sent to one while zoom works, and
+   * withdrawing both because one said no would take away a control that works.
    */
-  private zoom: ZoomState | null = null;
-  /** Slider position while dragging, before the camera has confirmed it. */
-  private zoomWanted: number | null = null;
-  private zoomSending = false;
+  private lens: Record<LensAxis, LensTrack> = { zoom: newTrack(), focus: newTrack() };
   /**
-   * Why there is no zoom slider, so the panel can say rather than just omit it.
-   * A control that is silently absent reads as a broken app.
+   * Whether the camera focuses itself. Null means it does not say — no
+   * GetAutoFocus, or no readable replies — and then there is no checkbox.
    */
-  private zoomWhy: 'unknown' | 'ok' | 'blind' | 'unsupported' | 'refused' = 'unknown';
+  private autoFocus: boolean | null = null;
 
   /** Where the last aim-click landed, for the marker. Element coordinates. */
   private aim: { x: number; y: number } | null = null;
@@ -184,8 +215,9 @@ export class CameraPanel extends PanelElement {
         const client = new ReolinkClient(this.config, this.creds);
         client.readable = probe.readable;
         this.client = client;
-        this.zoom = null;
-        this.zoomWhy = probe.readable ? 'unknown' : 'blind';
+        const why: LensWhy = probe.readable ? 'unknown' : 'blind';
+        this.lens = { zoom: newTrack(why), focus: newTrack(why) };
+        this.autoFocus = null;
         if (probe.readable) await this.refreshState();
       } else {
         this.client = null;
@@ -218,13 +250,12 @@ export class CameraPanel extends PanelElement {
       this.statusLed = state.statusLed;
       if (this.controls.image) this.image = await this.client.readImage();
       if (this.controls.presets) this.presets = await this.client.presets();
-      // Not once the camera has refused to be sent to a position: reading the
-      // lens would succeed and put the slider straight back, which is how a
-      // control that has just been withdrawn returns a moment later and fails
-      // again on the next touch.
-      if (this.controls.zoom && this.zoomWhy !== 'refused') {
-        this.zoom = await this.client.zoomState();
-        this.zoomWhy = this.zoom ? 'ok' : 'unsupported';
+      if (this.controls.zoom) {
+        await this.refreshLens();
+        // Asked once, when the camera is first read: whether the lens focuses
+        // itself is a setting, not a reading, and nothing but this panel and
+        // the Reolink app changes it.
+        this.autoFocus = await this.client.autoFocus();
       }
     } catch {
       // Readable a moment ago, not now. The picture is the important part.
@@ -556,7 +587,9 @@ export class CameraPanel extends PanelElement {
     // The buttons and the slider drive the same lens, so the slider has to
     // follow them. Read it back after the motor has had a moment to stop,
     // otherwise the answer is where it was rather than where it ended up.
-    if (this.zoom) window.setTimeout(() => void this.refreshZoom(), 400);
+    if (this.lens.zoom.state || this.lens.focus.state) {
+      window.setTimeout(() => void this.refreshLens(), 400);
+    }
   }
 
   // --- Aiming by clicking the picture -------------------------------------
@@ -711,13 +744,14 @@ export class CameraPanel extends PanelElement {
     // asked, and the Reolink app may have moved it since — stepping from a
     // stale number either overshoots or, if the stale number was the maximum,
     // does nothing at all while the lens sits wide open.
-    if (this.zoom) await this.refreshZoom();
-    if (this.zoom) {
-      const step = Math.max(1, Math.round((this.zoom.max - this.zoom.min) * 0.25));
-      const target = Math.min(this.zoom.max, this.zoom.pos + step);
-      if (target === this.zoom.pos) return;
-      this.zoomWanted = target;
-      await this.pushZoom();
+    const track = this.lens.zoom;
+    if (track.state) await this.refreshLens();
+    if (track.state) {
+      const step = Math.max(1, Math.round((track.state.max - track.state.min) * 0.25));
+      const target = Math.min(track.state.max, track.state.pos + step);
+      if (target === track.state.pos) return;
+      track.wanted = target;
+      await this.pushLens('zoom');
       return;
     }
     await this.command('zoom', async () => {
@@ -725,37 +759,54 @@ export class CameraPanel extends PanelElement {
     });
   }
 
-  private async refreshZoom(): Promise<void> {
-    if (!this.client?.readable || !this.controls.zoom || this.zoomWhy === 'refused') return;
+  /**
+   * Read both lens motors back.
+   *
+   * One request for the pair: GetZoomFocus answers about both, so a focus
+   * readout costs nothing on top of the zoom one that was already happening.
+   */
+  private async refreshLens(): Promise<void> {
+    if (!this.client?.readable || !this.controls.zoom) return;
     try {
-      const state = await this.client.zoomState();
-      if (state) {
-        this.zoom = state;
-        this.zoomWanted = null;
-        this.requestUpdate();
+      const state = await this.client.lensState();
+      for (const axis of ['zoom', 'focus'] as LensAxis[]) {
+        const track = this.lens[axis];
+        // Not once the camera has refused to be sent to a position: reading it
+        // would succeed and put the slider straight back, which is how a
+        // control that has just been withdrawn returns a moment later and fails
+        // again on the next touch.
+        if (track.why === 'refused') continue;
+        // Nor while a drag is in flight, or the knob jumps back to where the
+        // lens was when the request left.
+        if (track.sending) continue;
+        track.state = state[axis];
+        track.wanted = null;
+        track.why = track.state ? 'ok' : 'unsupported';
       }
+      this.requestUpdate();
     } catch {
       // The picture matters more than the readout.
     }
   }
 
   /**
-   * Zoom while the slider is being dragged.
+   * Send one lens motor where the slider was left.
    *
    * Coalesced rather than throttled on a timer: one request is in flight at a
    * time and the newest wanted position is sent when it lands. A slider can
    * produce sixty events a second, and a camera answering each of them a beat
    * late turns a drag into a queue that keeps moving after you let go.
    */
-  private async pushZoom(): Promise<void> {
-    if (this.zoomSending || !this.client || this.zoomWanted === null) return;
-    this.zoomSending = true;
+  private async pushLens(axis: LensAxis): Promise<void> {
+    const track = this.lens[axis];
+    if (track.sending || !this.client || track.wanted === null) return;
+    track.sending = true;
     try {
-      while (this.zoomWanted !== null && this.zoomWanted !== this.zoom?.pos) {
-        const target: number = this.zoomWanted;
-        await this.command('zoom', async () => {
+      while (track.wanted !== null && track.wanted !== track.state?.pos) {
+        const target: number = track.wanted;
+        await this.command(axis, async () => {
           try {
-            await this.client!.setZoom(target);
+            await this.client!.setLens(axis, target);
           } catch (err) {
             const message = (err as Error).message;
             // Only a refusal tells us anything about the camera. A network
@@ -771,7 +822,7 @@ export class CameraPanel extends PanelElement {
             if (/rspCode -26/.test(message)) {
               await new Promise((resolve) => window.setTimeout(resolve, 1400));
               try {
-                await this.client!.setZoom(target);
+                await this.client!.setLens(axis, target);
                 return;
               } catch {
                 // Falls through to withdrawing the slider.
@@ -782,17 +833,17 @@ export class CameraPanel extends PanelElement {
             // accept it from this account. Either way the slider is a promise
             // the camera does not keep, so take it away and say so rather than
             // leave a control that fails every time it is touched.
-            this.zoom = null;
-            this.zoomWanted = null;
-            this.zoomWhy = 'refused';
+            track.state = null;
+            track.wanted = null;
+            track.why = 'refused';
             throw err;
           }
         });
-        if (this.zoom) this.zoom = { ...this.zoom, pos: target };
-        if (this.zoomWanted === target) this.zoomWanted = null;
+        if (track.state) track.state = { ...track.state, pos: target };
+        if (track.wanted === target) track.wanted = null;
       }
     } finally {
-      this.zoomSending = false;
+      track.sending = false;
       this.requestUpdate();
       // Confirm rather than assume. The knob has been showing where it was
       // asked to go; a camera that clamped the request, or refused it, is only
@@ -800,7 +851,7 @@ export class CameraPanel extends PanelElement {
       // Long enough for the lens to have finished travelling. Reading too soon
       // catches it mid-move and snaps the knob to a position it is only
       // passing through.
-      window.setTimeout(() => void this.refreshZoom(), 1500);
+      window.setTimeout(() => void this.refreshLens(), 1500);
     }
   }
 
@@ -1022,71 +1073,152 @@ export class CameraPanel extends PanelElement {
   }
 
   /**
-   * Absolute zoom, shown only when the camera reports one.
+   * The lens: zoom, then focus, then whether the camera focuses itself.
    *
-   * A slider whose knob does not correspond to anything is worse than no
-   * slider: it invites you to set a position and then sits wherever you left
-   * it while the lens is somewhere else. So this appears only when the camera
-   * answered GetZoomFocus with both a position and its limits — otherwise the
-   * ＋/－ buttons stand alone, which is honest about a camera that can only be
-   * nudged.
+   * Each axis is one row — step out, slider, step in — because the buttons and
+   * the slider drive the same motor and putting them anywhere else makes them
+   * look like different controls. The buttons are always there: holding a motor
+   * needs no reply from the camera, so they work in blind mode and on cameras
+   * that will not report a position. The slider only appears when the camera
+   * answered GetZoomFocus with both a position and its limits — a knob that
+   * corresponds to nothing is worse than no knob, since it invites you to set a
+   * position and then sits where you left it while the lens is elsewhere.
    */
-  private renderZoomSlider(): TemplateResult | typeof nothing {
-    const zoom = this.zoom;
-    if (!zoom) {
-      // Say why. An absent control is indistinguishable from a broken one, and
-      // the two reasons here have completely different answers: one is the
-      // camera, the other is where this page is served from.
-      if (this.zoomWhy === 'unsupported') {
-        return html`<div class="cam-zoom-note">
-          This camera does not report a lens position, so there is nothing for a slider to
-          follow. The buttons step it.
-        </div>`;
-      }
-      if (this.zoomWhy === 'refused') {
-        return html`<div class="cam-zoom-note">
-          This camera reports where its lens is but will not be sent to a position — it refused
-          twice, which is not a lens that was merely busy. The ＋ and − buttons still work.
-        </div>`;
-      }
-      if (this.zoomWhy === 'blind') {
-        return html`<div class="cam-zoom-note">
-          No slider: this page cannot read the camera's replies, so where the lens is standing is
-          unknowable. Serve the app from the same origin as the camera, or put a proxy that adds
-          CORS headers in front of it.
-        </div>`;
-      }
-      return nothing;
+  private renderLens(): TemplateResult {
+    // One note, not two: the reasons an axis has no slider are properties of
+    // the camera and of this page, so they are the same reason twice.
+    const why = this.lens.zoom.state ? this.lens.focus.why : this.lens.zoom.why;
+    return html`
+      <div class="cam-lens">
+        ${this.renderLensAxis('zoom')}
+        ${this.controls.zoom && (this.lens.focus.state || this.autoFocus !== null)
+          ? this.renderLensAxis('focus')
+          : nothing}
+        ${this.renderAutoFocus()}
+        ${this.lens.zoom.state && this.lens.focus.state ? nothing : this.renderLensNote(why)}
+      </div>
+    `;
+  }
+
+  private renderLensNote(why: LensWhy): TemplateResult | typeof nothing {
+    // Say why. An absent control is indistinguishable from a broken one, and
+    // the reasons here have completely different answers: one is the camera,
+    // one is the account, one is where this page is served from.
+    if (why === 'unsupported') {
+      return html`<div class="cam-zoom-note">
+        This camera does not report a lens position, so there is nothing for a slider to follow.
+        The buttons step it.
+      </div>`;
     }
-    const at = this.zoomWanted ?? zoom.pos;
-    const span = zoom.max - zoom.min;
-    const percent = Math.round(((at - zoom.min) / span) * 100);
+    if (why === 'refused') {
+      return html`<div class="cam-zoom-note">
+        The camera would not be sent to a lens position — refused twice, which is not a motor that
+        was merely busy. Either the account this panel uses is not an administrator, or this model
+        will not take one; an E1 Outdoor Pro takes it from an administrator and refuses it from an
+        ordinary user. The ＋ and − buttons work either way.
+      </div>`;
+    }
+    if (why === 'blind') {
+      return html`<div class="cam-zoom-note">
+        No sliders: this page cannot read the camera's replies, so where the lens is standing is
+        unknowable. Serve the app from the same origin as the camera, or put a proxy that adds
+        CORS headers in front of it.
+      </div>`;
+    }
+    return nothing;
+  }
+
+  private renderLensAxis(axis: LensAxis): TemplateResult {
+    const spec = LENS[axis];
+    const track = this.lens[axis];
+    const state = track.state;
+    // Autofocus owns the focus motor. Driving it by hand while the camera is
+    // also driving it means the camera wins a second later, which reads as a
+    // control that does nothing.
+    const held = axis === 'focus' && this.autoFocus === true;
+    const at = track.wanted ?? state?.pos ?? 0;
+    const percent = state ? Math.round(((at - state.min) / (state.max - state.min)) * 100) : null;
 
     return html`
-      <label class="cam-zoom-slider" title="Zoom to a position. The camera reports ${zoom.min}…${zoom.max}.">
-        <span>Zoom</span>
+      <div class="cam-lens-row" title=${held ? 'Autofocus is on — switch it off to set the focus by hand' : nothing}>
+        <span>${spec.label}</span>
+        <button
+          title=${spec.less}
+          ?disabled=${held}
+          @pointerdown=${() => !held && this.hold(spec.dec)}
+          @pointerup=${() => this.release()}
+          @pointerleave=${() => this.release()}
+        >
+          －
+        </button>
+        ${state
+          ? html`<input
+              type="range"
+              min=${state.min}
+              max=${state.max}
+              step="1"
+              ?disabled=${held}
+              .value=${String(at)}
+              @input=${(e: Event) => {
+                // Move the knob and the readout, and send nothing. A drag is
+                // dozens of events and this is a motor: asked to go somewhere
+                // while it is still going somewhere else, the camera refuses
+                // with "ability error" — so the first step of a drag lands and
+                // the rest are rejected, which reads as "it moved once and then
+                // complained".
+                track.wanted = Number((e.target as HTMLInputElement).value);
+                this.requestUpdate();
+              }}
+              @change=${(e: Event) => {
+                // Let go, then go. One command per gesture.
+                track.wanted = Number((e.target as HTMLInputElement).value);
+                void this.pushLens(axis);
+              }}
+            />`
+          : html`<span class="cam-lens-gap"></span>`}
+        <button
+          title=${spec.more}
+          ?disabled=${held}
+          @pointerdown=${() => !held && this.hold(spec.inc)}
+          @pointerup=${() => this.release()}
+          @pointerleave=${() => this.release()}
+        >
+          ＋
+        </button>
+        <em>${percent === null ? '' : `${percent}%`}</em>
+      </div>
+    `;
+  }
+
+  /**
+   * Autofocus, when the camera has it.
+   *
+   * Worth having on a machine: the spindle and the table are at different
+   * distances, so a lens focused on one is soft on the other, and letting the
+   * camera sort that out beats focusing by hand every time the view moves.
+   * Worth being able to switch off too — autofocus hunts on a moving cutter,
+   * and a fixed focus on the work is steadier than one chasing chips.
+   */
+  private renderAutoFocus(): TemplateResult | typeof nothing {
+    if (this.autoFocus === null) return nothing;
+    return html`
+      <label class="check cam-autofocus" title="Let the camera focus itself. Off leaves the focus where you set it.">
         <input
-          type="range"
-          min=${zoom.min}
-          max=${zoom.max}
-          step="1"
-          .value=${String(at)}
-          @input=${(e: Event) => {
-            // Move the knob and the readout, and send nothing. A drag is dozens
-            // of events and the lens is a motor: asked to go somewhere while it
-            // is still going somewhere else, this camera refuses with "ability
-            // error" — so the first step of a drag lands and the rest are
-            // rejected, which reads as "it zoomed once and then complained".
-            this.zoomWanted = Number((e.target as HTMLInputElement).value);
-            this.requestUpdate();
-          }}
+          type="checkbox"
+          .checked=${this.autoFocus}
           @change=${(e: Event) => {
-            // Let go, then go. One command per gesture.
-            this.zoomWanted = Number((e.target as HTMLInputElement).value);
-            void this.pushZoom();
+            const on = (e.target as HTMLInputElement).checked;
+            void this.command('autofocus', async () => {
+              await this.client!.setAutoFocus(on);
+              this.autoFocus = on;
+              // Switching it off leaves the lens wherever autofocus last put
+              // it, and switching it on moves it: either way the slider is
+              // stale until the camera is asked again.
+              window.setTimeout(() => void this.refreshLens(), 1200);
+            });
           }}
         />
-        <em>${percent}%</em>
+        Autofocus
       </label>
     `;
   }
@@ -1176,29 +1308,7 @@ export class CameraPanel extends PanelElement {
                       @input=${(e: Event) => (this.speed = Number((e.target as HTMLInputElement).value))}
                     />
                   </label>
-                  ${c.zoom
-                    ? html`
-                        <div class="cam-zoom">
-                          <button
-                            title="Zoom in"
-                            @pointerdown=${() => this.hold('ZoomInc')}
-                            @pointerup=${() => this.release()}
-                            @pointerleave=${() => this.release()}
-                          >
-                            ＋
-                          </button>
-                          <button
-                            title="Zoom out"
-                            @pointerdown=${() => this.hold('ZoomDec')}
-                            @pointerup=${() => this.release()}
-                            @pointerleave=${() => this.release()}
-                          >
-                            －
-                          </button>
-                        </div>
-                        ${this.renderZoomSlider()}
-                      `
-                    : nothing}
+                  ${c.zoom ? this.renderLens() : nothing}
                 </div>
               </div>
             `

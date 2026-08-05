@@ -1122,18 +1122,26 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .cam-motion-side { display: flex; flex-direction: column; gap: 8px; flex: 1; min-width: 0; }
 .cam-speed { display: flex; align-items: center; gap: 8px; font-size: 11px;
   color: var(--text-dim); }
-/* Same label width as the zoom row below, so the two tracks line up. */
-.cam-speed span, .cam-zoom-slider span { width: 36px; flex: none; }
+/* Same label width as the lens rows below, so every track lines up. */
+.cam-speed span, .cam-lens-row span { width: 36px; flex: none; }
 .cam-speed input { flex: 1; min-width: 0; }
-.cam-zoom { display: flex; gap: 4px; }
-.cam-zoom button { min-height: 30px; padding: 2px 12px; }
-/* Same row shape as the speed slider above it, so the two read as a pair
-   rather than as two unrelated controls that happen to be sliders. */
-.cam-zoom-slider { display: flex; align-items: center; gap: 8px; font-size: 11px;
+
+/* The lens: one row per motor, stepped by the buttons at either end and set
+   by the slider between them. Same row shape as the speed slider above, so
+   they read as a stack of tracks rather than unrelated controls. The buttons
+   flank the slider because they drive the same motor — put them anywhere else
+   and they look like a separate feature. */
+.cam-lens { display: flex; flex-direction: column; gap: 6px; }
+.cam-lens-row { display: flex; align-items: center; gap: 6px; font-size: 11px;
   color: var(--text-dim); }
-.cam-zoom-slider input { flex: 1; min-width: 0; }
-.cam-zoom-slider em { font-style: normal; font-family: var(--mono); font-size: 11px;
-  color: var(--text-faint); width: 34px; text-align: right; }
+.cam-lens-row input[type="range"] { flex: 1; min-width: 0; }
+/* Holds the slider's place on a camera that reports no position, so the two
+   buttons stay where they are on the rows that do have one. */
+.cam-lens-row .cam-lens-gap { flex: 1 1 auto; width: auto; min-width: 0; }
+.cam-lens-row button { min-height: 28px; min-width: 34px; padding: 2px 8px; flex: none; }
+.cam-lens-row em { font-style: normal; font-family: var(--mono); font-size: 11px;
+  color: var(--text-faint); width: 34px; text-align: right; flex: none; }
+.cam-autofocus { font-size: 11px; }
 .cam-zoom-note { font-size: 11px; line-height: 1.5; color: var(--text-faint); }
 .cam-mode .cam-sub { font-style: normal; font-family: var(--mono); font-size: 11px;
   color: var(--text-faint); width: 30px; text-align: right; }

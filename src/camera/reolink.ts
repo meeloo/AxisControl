@@ -35,6 +35,8 @@ import {
   type CameraControls,
   type ImageField,
   type ImageSettings,
+  type LensAxis,
+  type LensState,
   type ZoomState,
 } from './types.js';
 
@@ -50,6 +52,8 @@ export type PtzOp =
   | 'RightDown'
   | 'ZoomInc'
   | 'ZoomDec'
+  | 'FocusInc'
+  | 'FocusDec'
   | 'Auto';
 
 /** Reolink's own spotlight modes. */
@@ -353,31 +357,72 @@ export class ReolinkClient {
   // has GetZoomFocus, and only from an origin allowed to read the answer.
 
   /**
-   * Where the lens is now and how far it travels, or null if that is not
-   * knowable — no such command, no readable replies, or a camera that reports a
-   * position without saying what the limits are. Null means "keep the buttons,
-   * skip the slider" rather than "guess a range".
+   * Where both lens motors are and how far they travel, or null for either that
+   * is not knowable — no such command, no readable replies, or a camera that
+   * reports a position without saying what the limits are. Null means "keep the
+   * buttons, skip the slider" rather than "guess a range".
+   *
+   * One request for both: GetZoomFocus answers about zoom and focus together,
+   * and asking twice would be two round trips to say the same thing.
    */
-  async zoomState(): Promise<ZoomState | null> {
+  async lensState(): Promise<LensState> {
     const replies = await this.send([
       { cmd: 'GetZoomFocus', action: 1, param: { channel: this.config.channel } },
     ]);
     const reply = replies?.find((r) => r.cmd === 'GetZoomFocus' && r.code === 0);
-    if (!reply) return null;
+    if (!reply) return { zoom: null, focus: null };
 
-    const pos = num(dig(reply.value, 'ZoomFocus', 'zoom', 'pos'));
-    const min = num(dig(reply.range, 'ZoomFocus', 'zoom', 'pos', 'min'));
-    const max = num(dig(reply.range, 'ZoomFocus', 'zoom', 'pos', 'max'));
-    if (pos === null || min === null || max === null || max <= min) return null;
-    return { pos: Math.min(max, Math.max(min, pos)), min, max };
+    /** `action: 1` is what makes the camera state the travel as well as the position. */
+    const axis = (name: 'zoom' | 'focus'): ZoomState | null => {
+      const pos = num(dig(reply.value, 'ZoomFocus', name, 'pos'));
+      const min = num(dig(reply.range, 'ZoomFocus', name, 'pos', 'min'));
+      const max = num(dig(reply.range, 'ZoomFocus', name, 'pos', 'max'));
+      if (pos === null || min === null || max === null || max <= min) return null;
+      return { pos: Math.min(max, Math.max(min, pos)), min, max };
+    };
+    return { zoom: axis('zoom'), focus: axis('focus') };
   }
 
-  async setZoom(pos: number): Promise<void> {
+  /** Send one lens motor to a position. Same command for both, different `op`. */
+  async setLens(axis: LensAxis, pos: number): Promise<void> {
     await this.sendChecked([
       {
         cmd: 'StartZoomFocus',
         action: 0,
-        param: { ZoomFocus: { channel: this.config.channel, op: 'ZoomPos', pos: Math.round(pos) } },
+        param: {
+          ZoomFocus: {
+            channel: this.config.channel,
+            op: axis === 'zoom' ? 'ZoomPos' : 'FocusPos',
+            pos: Math.round(pos),
+          },
+        },
+      },
+    ]);
+  }
+
+  /**
+   * Whether the camera is focusing itself, or null if it will not say.
+   *
+   * Note the inverted sense in the wire format: the camera reports `disable`,
+   * so `disable: 0` is autofocus **on**. Reading it the obvious way round gets
+   * you a checkbox that means the opposite of what it says.
+   */
+  async autoFocus(): Promise<boolean | null> {
+    const replies = await this.send([
+      { cmd: 'GetAutoFocus', action: 0, param: { channel: this.config.channel } },
+    ]);
+    const reply = replies?.find((r) => r.cmd === 'GetAutoFocus' && r.code === 0);
+    if (!reply) return null;
+    const disable = num(dig(reply.value, 'AutoFocus', 'disable'));
+    return disable === null ? null : disable === 0;
+  }
+
+  async setAutoFocus(on: boolean): Promise<void> {
+    await this.sendChecked([
+      {
+        cmd: 'SetAutoFocus',
+        action: 0,
+        param: { AutoFocus: { channel: this.config.channel, disable: on ? 0 : 1 } },
       },
     ]);
   }

@@ -130,6 +130,15 @@ export interface ZoomState {
   max: number;
 }
 
+/** The two motors in the lens. They behave identically, so they share the code. */
+export type LensAxis = 'zoom' | 'focus';
+
+/** Both axes as one camera reported them, either or both possibly unknowable. */
+export interface LensState {
+  zoom: ZoomState | null;
+  focus: ZoomState | null;
+}
+
 /** The picture adjustments, in the camera's own units. */
 export const IMAGE_FIELDS = ['bright', 'contrast', 'saturation', 'sharpen'] as const;
 export type ImageField = (typeof IMAGE_FIELDS)[number];
