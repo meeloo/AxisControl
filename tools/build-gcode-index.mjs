@@ -41,6 +41,16 @@ const SOURCE = flag('--url') ?? 'https://docs.duet3d.com/User_manual/Reference/G
 const from = flag('--from');
 const quiet = !!flag('--quiet');
 const out = resolve(root, flag('--out') ?? 'public/gcodes.json');
+/**
+ * Where the request bookkeeping lives — deliberately NOT in the index.
+ *
+ * The index is committed, so it has to be a pure function of the page: two
+ * people building from the same documentation must produce byte-identical
+ * files, or every pull collides on a generated artefact nobody edited. A build
+ * timestamp and an ETag are properties of the fetch, not of the reference, and
+ * putting them in the shipped file is what made it churn on every build.
+ */
+const cacheFile = `${out.replace(/\.json$/, '')}.fetch.json`;
 /** Below this many codes, assume the parse failed rather than the page shrank. */
 const EXPECTED_MINIMUM = Number(flag('--min') ?? 200);
 
@@ -48,9 +58,19 @@ const EXPECTED_MINIMUM = Number(flag('--min') ?? 200);
 
 /** What was built last time, so an unchanged page can be recognised. */
 function previous() {
+  if (!existsSync(cacheFile)) return null;
+  try {
+    return JSON.parse(readFileSync(cacheFile, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/** The index as it stands, to compare a fresh parse against. */
+function currentIndex() {
   if (!existsSync(out)) return null;
   try {
-    return JSON.parse(readFileSync(out, 'utf8'));
+    return readFileSync(out, 'utf8');
   } catch {
     return null;
   }
@@ -341,7 +361,7 @@ if (flag('--inspect')) {
 // unchanged rather than "the server felt like telling us".
 const pageHash = sha(fetched.html);
 const before = previous();
-if (before?.pageHash === pageHash && before.codes?.length) {
+if (before?.pageHash === pageHash && currentIndex()) {
   if (!quiet) console.log(`[gcode-index] unchanged since the index was built (same ${pageHash})`);
   process.exit(0);
 }
@@ -366,17 +386,22 @@ if (codes.length < EXPECTED_MINIMUM) {
 }
 
 mkdirSync(dirname(out), { recursive: true });
+// Source and codes only: everything here comes from the page, so the same
+// documentation gives the same bytes on anyone's machine.
+const body = `${JSON.stringify({ source: SOURCE, codes })}\n`;
+
+// The bookkeeping goes beside it, gitignored. Written even when the index did
+// not change, so the next build can still send a conditional request.
+mkdirSync(dirname(cacheFile), { recursive: true });
 writeFileSync(
-  out,
-  `${JSON.stringify({
-    builtAt: new Date().toISOString(),
-    source: SOURCE,
-    // Kept so the next build can ask the server whether it is worth fetching,
-    // and can tell for itself if the server answers 200 regardless.
-    pageHash,
-    etag: fetched.etag ?? null,
-    lastModified: fetched.lastModified ?? null,
-    codes,
-  })}\n`,
+  cacheFile,
+  `${JSON.stringify({ pageHash, etag: fetched.etag ?? null, lastModified: fetched.lastModified ?? null, builtAt: new Date().toISOString() }, null, 2)}\n`,
 );
+
+if (currentIndex() === body) {
+  if (!quiet) console.log('[gcode-index] the page moved but the reference did not — nothing rewritten');
+  process.exit(0);
+}
+
+writeFileSync(out, body);
 console.log(`[gcode-index] wrote ${out.replace(`${root}/`, '')}`);

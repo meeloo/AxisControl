@@ -47,8 +47,13 @@ export interface GcodeEntry {
 }
 
 export interface GcodeIndex {
-  builtAt: string;
-  /** Where it was read from, for the "this may be out of date" line. */
+  /**
+   * Where it was read from, for the "this may be out of date" line.
+   *
+   * Deliberately the only field besides the codes. The index is committed, so
+   * it has to be a pure function of the page — a build timestamp in here meant
+   * every build produced a different file and every pull collided on it.
+   */
   source: string;
   codes: GcodeEntry[];
 }
