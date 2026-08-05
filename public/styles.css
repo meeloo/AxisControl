@@ -500,6 +500,15 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .surf-stats td { padding: 2px 14px 2px 0; font-family: var(--mono);
   font-variant-numeric: tabular-nums; }
 
+/* Picking a tool for a machining job. Above the parameters, because it sets
+   several of them — reading it after the numbers it filled in would be
+   backwards. */
+.tool-pick { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px;
+  padding: 0 12px; }
+.tool-pick .param { margin: 0; }
+.tool-pick-note { flex: 1 1 200px; min-width: 0; }
+.tool-pick-warn { flex: 1 1 100%; margin: 2px 0 0; }
+
 /* ---------- Import ---------- */
 
 .import { gap: 10px; }

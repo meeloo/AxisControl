@@ -18,6 +18,8 @@ import { theme } from '../core/theme.js';
 import { checkField, numberField, selectField } from '../ui/widgets.js';
 import { fromAxis, fromDepthBelow } from '../ui/capture.js';
 import { preview, saveAndRun } from '../ui/program.js';
+import { applyTool, toolPicker, type Filled } from '../ui/toolpick.js';
+import type { ToolInfo } from '../tools/table.js';
 import { importSvg } from '../import/svg.js';
 import { importDxf } from '../import/dxf.js';
 import { chain, place } from '../import/geometry.js';
@@ -128,6 +130,11 @@ export class ImportPanel extends PanelElement {
   private tabCount = 4;
   private tabWidth = 6;
   private tabHeight = 1.5;
+
+  /** Tool from the library this job is set up for, or null for by hand. */
+  private toolNumber: number | null = null;
+  /** What that tool filled in, for the note under the picker. */
+  private toolFilled: Filled | null = null;
 
   // Preview
   private canvas: HTMLCanvasElement | null = null;
@@ -316,6 +323,7 @@ export class ImportPanel extends PanelElement {
       spindleDwell: this.spindleDwell,
       tabs: { count: this.tabCount, width: this.tabWidth, height: this.tabHeight },
       rampLength: this.rampLength,
+      tool: this.toolNumber,
       sourceNote:
         `from ${drawing.name}` +
         (size ? `, ${size.w.toFixed(1)} x ${size.h.toFixed(1)}mm, ${this.side} of line` : ''),
@@ -667,8 +675,29 @@ export class ImportPanel extends PanelElement {
     `;
   }
 
+  /** Take the diameter, feeds and speeds from a tool in the library. */
+  private pickTool(info: ToolInfo | null): void {
+    this.toolNumber = info?.number ?? null;
+    this.toolFilled = info
+      ? applyTool(info, {
+          diameter: (v) => (this.toolDiameter = v),
+          feedRate: (v) => (this.feedRate = v),
+          plungeFeed: (v) => (this.plungeFeed = v),
+          rpm: (v) => (this.rpm = v),
+          depthPerPass: (v) => (this.depthPerPass = v),
+        })
+      : null;
+    this.requestUpdate();
+  }
+
   private renderCutting(): TemplateResult {
     return html`
+      ${toolPicker({
+        selected: this.toolNumber,
+        onPick: (info) => this.pickTool(info),
+        filled: this.toolFilled,
+        note: 'the program starts by changing to it',
+      })}
       <div class="param-grid">
         ${selectField('Side', this.side, [
           { value: 'outside', label: 'Outside the line' },

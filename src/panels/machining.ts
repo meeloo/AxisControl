@@ -6,6 +6,8 @@
 
 import { html, nothing, type TemplateResult } from 'lit';
 import { PanelElement, registerPanel } from '../ui/panel.js';
+import { applyTool, toolPicker, type Filled } from '../ui/toolpick.js';
+import type { ToolInfo } from '../tools/table.js';
 import { connected, machine } from '../core/store.js';
 import { checkField, numberField, selectField } from '../ui/widgets.js';
 import { fromAxis, fromDepthBelow, fromRadiusAround } from '../ui/capture.js';
@@ -51,6 +53,11 @@ export class MachiningPanel extends PanelElement {
   private x1 = 300;
   private y1 = 300;
   private stepover = 0.6;
+
+  /** Tool from the library this operation is set up for, or null for by hand. */
+  private toolNumber: number | null = null;
+  /** What that tool filled in, for the note under the picker. */
+  private toolFilled: Filled | null = null;
   private along: 'x' | 'y' = 'y';
 
   // Contour
@@ -103,7 +110,31 @@ export class MachiningPanel extends PanelElement {
       rpm: this.rpm,
       safeZ: this.safeZ,
       spindleDwell: this.spindleDwell,
+      tool: this.toolNumber,
     };
+  }
+
+  /**
+   * Take the diameter, feeds and speeds from a tool in the library.
+   *
+   * Stepover comes across too here, which it does not on the Import panel:
+   * these operations clear area, and how much of the cutter is buried is the
+   * number that decides whether a facing pass sounds right or sounds like a
+   * problem.
+   */
+  private pickTool(info: ToolInfo | null): void {
+    this.toolNumber = info?.number ?? null;
+    this.toolFilled = info
+      ? applyTool(info, {
+          diameter: (v) => (this.toolDiameter = v),
+          feedRate: (v) => (this.feedRate = v),
+          plungeFeed: (v) => (this.plungeFeed = v),
+          rpm: (v) => (this.rpm = v),
+          depthPerPass: (v) => (this.depthPerPass = v),
+          stepover: (v) => (this.stepover = v),
+        })
+      : null;
+    this.requestUpdate();
   }
 
   private get tabs() {
@@ -329,6 +360,12 @@ export class MachiningPanel extends PanelElement {
         </div>
 
         <div class="pack-blurb">${info.blurb}</div>
+        ${toolPicker({
+          selected: this.toolNumber,
+          onPick: (t) => this.pickTool(t),
+          filled: this.toolFilled,
+          note: 'the program starts by changing to it',
+        })}
         <div class="param-grid">${this.renderParams()}</div>
 
         <div class="pack-note">${program.summary}</div>

@@ -82,6 +82,23 @@ export class Gcode {
     return this;
   }
 
+  /**
+   * Put a tool in the spindle.
+   *
+   * A bare `T<n>` is the whole tool change: RepRapFirmware runs tfree, tpre and
+   * tpost around it, which on this machine is the ATC and the length probe. No
+   * M6 — RRF does not use one, and emitting it would either be ignored or, on a
+   * controller that does, run the change twice.
+   *
+   * Omitted rather than defaulted when no tool was chosen: `T0` is a real tool
+   * on some setups and "drop whatever is in the spindle" on others, and a
+   * program that guesses wrong there empties the spindle before a cut.
+   */
+  toolChange(tool: number | null): this {
+    if (tool === null || !isFinite(tool) || tool < 0) return this;
+    return this.raw(`T${Math.round(tool)}`);
+  }
+
   spindleOn(rpm: number, dwellSeconds = 3): this {
     this.raw(`M3 S${Math.round(rpm)}`);
     if (dwellSeconds > 0) this.raw(`G4 S${n(dwellSeconds, 1)}`);

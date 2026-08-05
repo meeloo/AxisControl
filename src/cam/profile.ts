@@ -19,6 +19,13 @@ export interface ProfileParams {
   plungeFeed: number;
   rpm: number;
   safeZ: number;
+  /**
+   * Tool to change to before cutting, or null to use whatever is loaded.
+   *
+   * Null is the honest default: a panel where no tool was chosen has no idea
+   * what is in the spindle, and a guessed tool change is worse than none.
+   */
+  tool?: number | null;
   spindleDwell: number;
   tabs: TabSpec;
   /** Length of the descending entry along each loop, mm. 0 plunges. */
@@ -60,6 +67,7 @@ export function profile(loops: Polyline[], p: ProfileParams): GeneratedProgram {
     describeTabs(p.tabs, tabZ),
   ]);
   g.blank();
+  g.toolChange(p.tool ?? null);
   g.spindleOn(p.rpm, p.spindleDwell);
   g.rapid({ z: p.safeZ });
 

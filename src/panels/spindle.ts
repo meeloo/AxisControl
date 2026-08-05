@@ -16,6 +16,7 @@ import {
   deleteLibrary,
   describeTool,
   duplicateLibrary,
+  emptyCutting,
   emptyGeometry,
   getTool,
   loadLibraries,
@@ -24,6 +25,7 @@ import {
   saveTools,
   setActiveLibrary,
   type LibraryState,
+  type ToolCutting,
   type ToolGeometry,
   type ToolInfo,
   type ToolType,
@@ -88,6 +90,11 @@ export class SpindlePanel extends PanelElement {
   private updateGeometry(number: number, patch: Partial<ToolGeometry>): void {
     const current = getTool(this.tools, number).geometry ?? emptyGeometry();
     this.updateTool(number, { geometry: { ...current, ...patch } });
+  }
+
+  private updateCutting(number: number, patch: Partial<ToolCutting>): void {
+    const current = getTool(this.tools, number).cutting ?? emptyCutting();
+    this.updateTool(number, { cutting: { ...current, ...patch } });
   }
 
   // --- Libraries ----------------------------------------------------------
@@ -455,6 +462,33 @@ export class SpindlePanel extends PanelElement {
       ${dim('Overall length', g.length, 'mm', (v) => this.updateGeometry(n, { length: v }))}
       ${dim('Corner radius', g.cornerRadius, 'mm', (v) => this.updateGeometry(n, { cornerRadius: v }))}
       ${dim('Tip angle', g.tipAngle, '°', (v) => this.updateGeometry(n, { tipAngle: v }), 1)}
+
+      ${this.renderCutting(n, info, dim)}
+    `;
+  }
+
+  /**
+   * What the machining panels fill themselves in from.
+   *
+   * A Fusion library states all of this and it arrives with the import; these
+   * boxes are for the tools that were typed in from the side of the packet,
+   * which on most machines is most of them. Blank stays blank — the panels
+   * treat "not stated" as "leave whatever is set", so a half-filled tool is
+   * more useful than a guessed one.
+   */
+  private renderCutting(
+    n: number,
+    info: ToolInfo,
+    dim: (label: string, value: number, unit: string, apply: (v: number) => void, step?: number) => TemplateResult,
+  ): TemplateResult {
+    const c = info.cutting ?? emptyCutting();
+    return html`
+      <div class="tool-geom-head">Feeds and speeds — for the machining panels</div>
+      ${dim('Feed', c.feedRate, 'mm/min', (v) => this.updateCutting(n, { feedRate: v }), 10)}
+      ${dim('Plunge', c.plungeFeed, 'mm/min', (v) => this.updateCutting(n, { plungeFeed: v }), 10)}
+      ${dim('Spindle', c.rpm, 'rpm', (v) => this.updateCutting(n, { rpm: v }), 100)}
+      ${dim('Per pass', c.depthPerPass, 'mm', (v) => this.updateCutting(n, { depthPerPass: v }))}
+      ${dim('Stepover', c.stepover, 'mm', (v) => this.updateCutting(n, { stepover: v }))}
     `;
   }
 

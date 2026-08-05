@@ -25,6 +25,13 @@ export interface CommonParams {
   safeZ: number;
   /** Seconds to wait after starting the spindle. */
   spindleDwell: number;
+  /**
+   * Tool to change to before cutting, or null to use whatever is loaded.
+   *
+   * Null is the honest default: a panel where no tool was chosen has no idea
+   * what is in the spindle, and a guessed tool change is worse than none.
+   */
+  tool?: number | null;
 }
 
 export interface FacingParams extends CommonParams {
@@ -88,6 +95,7 @@ export function facing(p: FacingParams): GeneratedProgram {
     `${levels.length} depth pass(es) to ${p.depth}mm, ${passes} pass(es) across`,
   ]);
   g.blank();
+  g.toolChange(p.tool ?? null);
   g.spindleOn(p.rpm, p.spindleDwell);
   g.rapid({ z: p.safeZ });
 
@@ -172,6 +180,7 @@ export function rectContour(p: RectContourParams): GeneratedProgram {
     describeTabs(p.tabs, tabZ),
   ]);
   g.blank();
+  g.toolChange(p.tool ?? null);
   g.spindleOn(p.rpm, p.spindleDwell);
   g.rapid({ z: p.safeZ });
 
@@ -273,6 +282,7 @@ export function circle(p: CircleParams): GeneratedProgram {
     ...(p.pocket ? [] : [describeTabs(p.tabs, tabZ)]),
   ]);
   g.blank();
+  g.toolChange(p.tool ?? null);
   g.spindleOn(p.rpm, p.spindleDwell);
   g.rapid({ z: p.safeZ });
 
@@ -425,6 +435,7 @@ export function rectPocket(p: RectPocketParams): GeneratedProgram {
     inset > 0 ? `${inset}mm finish allowance, cleaned up by a final wall loop` : 'no finish allowance',
   ]);
   g.blank();
+  g.toolChange(p.tool ?? null);
   g.spindleOn(p.rpm, p.spindleDwell);
   g.rapid({ z: p.safeZ });
 
@@ -585,6 +596,7 @@ export function drillPattern(p: DrillParams): GeneratedProgram {
     `retract to Z${n(p.retract)} between pecks`,
   ]);
   g.blank();
+  g.toolChange(p.tool ?? null);
   g.spindleOn(p.rpm, p.spindleDwell);
   g.rapid({ z: p.safeZ });
 

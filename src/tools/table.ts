@@ -56,6 +56,30 @@ export interface ToolGeometry {
   tipDiameter: number;
 }
 
+/**
+ * What the tool wants to be run at.
+ *
+ * Same rule as the geometry above: optional as a whole, and 0 field-by-field
+ * means "not known". A Fusion library states all of it, a tool typed in from
+ * the side of the box states none of it, and both have to be usable.
+ *
+ * Stepover is a distance rather than a fraction of the diameter, because that
+ * is what a library states and because a fraction silently becomes wrong if
+ * the diameter is corrected later. The panels divide by the diameter
+ * themselves.
+ */
+export interface ToolCutting {
+  /** Along the path, mm/min. */
+  feedRate: number;
+  /** Straight down, mm/min. */
+  plungeFeed: number;
+  rpm: number;
+  /** Axial depth of cut — how deep one pass goes, mm. */
+  depthPerPass: number;
+  /** Radial engagement — how much of the diameter is buried, mm. */
+  stepover: number;
+}
+
 export interface ToolInfo {
   number: number;
   name: string;
@@ -66,6 +90,8 @@ export interface ToolInfo {
   notes: string;
   /** Absent on every tool entered before the 3D view wanted a shape. */
   geometry?: ToolGeometry;
+  /** Absent on every tool entered before the machining panels could use it. */
+  cutting?: ToolCutting;
 }
 
 export function emptyTool(number: number): ToolInfo {
@@ -74,6 +100,19 @@ export function emptyTool(number: number): ToolInfo {
 
 export function emptyGeometry(): ToolGeometry {
   return { shank: 0, flute: 0, length: 0, cornerRadius: 0, tipAngle: 0, tipDiameter: 0 };
+}
+
+export function emptyCutting(): ToolCutting {
+  return { feedRate: 0, plungeFeed: 0, rpm: 0, depthPerPass: 0, stepover: 0 };
+}
+
+/** True when the tool can fill in at least one field on a machining panel. */
+export function hasCuttingData(info: ToolInfo): boolean {
+  const c = info.cutting;
+  return (
+    info.diameter > 0 ||
+    !!c && (c.feedRate > 0 || c.plungeFeed > 0 || c.rpm > 0 || c.depthPerPass > 0 || c.stepover > 0)
+  );
 }
 
 export type Table = Record<number, ToolInfo>;

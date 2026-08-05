@@ -26,7 +26,7 @@
 //     next to a metric one, and reading one as the other is a 25.4x error.
 
 import { looksLikeZip, unzip } from '../core/zip.js';
-import { emptyTool, type ToolInfo, type ToolType } from './table.js';
+import { emptyCutting, emptyTool, type ToolCutting, type ToolInfo, type ToolType } from './table.js';
 
 export interface ImportedTool {
   info: ToolInfo;
@@ -185,9 +185,60 @@ function convert(
       // drawing does not try to truncate a cone that isn't there.
       tipDiameter: tipDiameter > 0 && tipDiameter < diameter - 1e-6 ? tipDiameter : 0,
     },
+    cutting: cuttingFrom(entry, scale),
   };
 
   return { info, sourceType: String(entry.type ?? 'unknown'), note };
+}
+
+/**
+ * Feeds and speeds, as numbers rather than as a sentence.
+ *
+ * These were already being read and then flattened into the notes line, which
+ * is fine for reading and useless for anything that wants to fill in a
+ * machining panel. Same preset either way, so the notes and the fields can
+ * never disagree.
+ *
+ * `n` is unitless; everything else is a distance, or a distance per minute,
+ * and takes the tool's own unit scale — the imperial bit sitting next to a
+ * metric one in the same library is the whole reason `scale` is per tool.
+ *
+ * The key names are not guessable and are worth stating, because two of them
+ * are nearly right in a way that reads as working:
+ *
+ *   v_f          cutting feed          v_f_plunge  plunging feed
+ *   n            spindle speed         stepdown    axial depth of cut
+ *   stepover     radial engagement
+ *
+ * `v_fz` is the version-1 spelling of the plunge feed and still turns up in
+ * old libraries, so both are accepted.
+ */
+function cuttingFrom(entry: Record<string, unknown>, scale: number): ToolCutting {
+  const preset = firstPreset(entry['start-values']);
+  if (!preset) return emptyCutting();
+  const dist = (value: unknown, places = 3): number => {
+    const v = num(value);
+    return v == null || v <= 0 ? 0 : round(v * scale, places);
+  };
+  /**
+   * Depth and stepover are guarded by their own flags, and the values behind a
+   * false flag are stale rather than absent — a preset that was switched to
+   * feed-and-speed-only keeps whatever was last typed into the box. Reading
+   * them anyway is how a tool ends up carrying a depth of cut nobody chose.
+   */
+  const enabled = (flag: unknown, value: unknown): unknown => (flag === false ? null : value);
+
+  const rpm = num(preset.n);
+  return {
+    feedRate: dist(preset.v_f, 1),
+    // A library that states no plunge feed is not saying "plunge at the
+    // cutting feed" — it is saying nothing, and 0 leaves the panel's own
+    // default alone rather than quietly speeding up every descent.
+    plungeFeed: dist(preset.v_f_plunge ?? preset.v_fz, 1),
+    rpm: rpm != null && rpm > 0 ? Math.round(rpm) : 0,
+    depthPerPass: dist(enabled(preset['use-stepdown'], preset.stepdown)),
+    stepover: dist(enabled(preset['use-stepover'], preset.stepover)),
+  };
 }
 
 /**
