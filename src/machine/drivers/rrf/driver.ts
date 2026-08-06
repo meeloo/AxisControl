@@ -456,6 +456,13 @@ export class RrfDriver implements MachineDriver {
     // One G1 for every axis, so a diagonal is interpolated rather than stepped.
     // G91 relative, move, then back — RRF has no continuous-jog code, so
     // hold-to-jog is built from repeated discrete moves at the UI layer.
+    //
+    // G1 and not G0, which is the one that looks wrong. A jog is a rapid, so
+    // G0 is the instinctive choice — but in CNC and Laser mode RRF runs G0 at
+    // the maximum feed rate from M203 and ignores the F word entirely, to
+    // comply with the NIST standard. This machine is in CNC mode, so a G0 jog
+    // would discard the speed the operator set and take every axis at its
+    // limit. The speed slider has to mean something, so: G1.
     const prefix = opts.machineCoords ? 'G53 ' : '';
     await this.send(`M120\nG91\n${prefix}G1 ${words} F${opts.feedRate}\nM121`);
   }

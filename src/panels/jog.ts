@@ -449,6 +449,11 @@ export class JogPanel extends PanelElement {
    * M120/M121 around it so the machine is left in whatever distance mode it was
    * in; jog moves are relative, and leaving G90 set behind would make the next
    * one absolute.
+   *
+   * G0 here and G1 for jogging, which is not an inconsistency. In CNC mode RRF
+   * runs G0 at the M203 maximum and ignores any F, so G0 means "as fast as this
+   * machine goes" — right for a button whose whole job is to get back to the
+   * origin, wrong for a jog, where the speed slider has to be obeyed.
    */
   private goWorkZero(withZ: boolean): void {
     const z = machine.get().axes.find((a) => a.letter === 'Z');
