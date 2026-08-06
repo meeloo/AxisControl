@@ -1792,8 +1792,11 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .cfg-param.edit { display: inline-flex; align-items: baseline; gap: 1px; }
 /* No spinners: they cost 20px of a value that is already narrow, and the pair
    of arrows invites nudging a motor current by one milliamp at a time. */
+/* The width is set per input, from the text it holds: these boxes show the
+   file's own text, and "2000.00" clipped to "2000." reads as a different
+   number. */
 .cfg-param.edit input {
-  width: 6.5ch; min-height: 22px; padding: 1px 4px; font-family: var(--mono); font-size: 12px;
+  min-width: 5ch; min-height: 22px; padding: 1px 4px; font-family: var(--mono); font-size: 12px;
   font-weight: 600; background: var(--bg-input); border-color: var(--border);
   appearance: textfield; -moz-appearance: textfield;
 }
@@ -1814,3 +1817,5 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .cfg-apply-row strong { font-size: 12px; }
 .cfg-apply-note { font-size: 11px; color: var(--text-dim); margin-top: 5px; line-height: 1.45; }
 .cfg-apply-note.bad { color: var(--bad); font-weight: 600; }
+.cfg-apply-note.ok { color: var(--good); font-weight: 600; }
+.cfg-apply-note code { font-size: 11px; color: inherit; }

@@ -363,6 +363,13 @@ for (const entries of Object.values(FILES)) {
   }
 }
 
+// What the card held before any test touched it, for /__reset_files. The mock
+// outlives a test run, so a test that writes to /sys leaves the next run
+// starting from its output — which has twice now produced a pass that only
+// meant "the previous run already did this".
+const PRISTINE_CONTENT = { ...FILE_CONTENT };
+const PRISTINE_LISTING = JSON.stringify(FILES);
+
 /** A simple raster surfacing pass — exercises rapids, feeds and long paths. */
 function generateSurfacingProgram() {
   const out = ['(spoilboard surfacing)', 'G21 G90', 'G17', 'T1 M6', 'M3 S18000', 'G0 Z5'];
@@ -668,6 +675,16 @@ const server = createServer(async (req, res) => {
       const files = FILES[key] ?? null;
       if (!files) return sendJson(res, { dir, first: 0, files: [], next: 0, err: 2 });
       return sendJson(res, { dir, first: 0, files, next: 0, err: 0 });
+    }
+
+    // Not a firmware route. Puts the SD card back to how it started so a test
+    // that writes files can be run twice and mean the same thing both times.
+    case '/__reset_files': {
+      for (const k of Object.keys(FILE_CONTENT)) delete FILE_CONTENT[k];
+      Object.assign(FILE_CONTENT, PRISTINE_CONTENT);
+      for (const k of Object.keys(FILES)) delete FILES[k];
+      Object.assign(FILES, JSON.parse(PRISTINE_LISTING));
+      return sendJson(res, { err: 0 });
     }
 
     case '/rr_download': {

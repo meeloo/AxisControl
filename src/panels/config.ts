@@ -1,7 +1,7 @@
 // The machine's configuration, read and explained.
 //
-// Read-only, on purpose and for now. Everything here is about answering three
-// questions that config.g cannot answer about itself:
+// Everything here is about answering three questions that config.g cannot
+// answer about itself:
 //
 //   What does this line do?          — the reference is already in the app
 //   Is it actually in force?         — compare it against the object model
@@ -19,10 +19,14 @@
 //   What if it were 3000 instead?  — send it and find out
 //
 // Values on the whitelist can be edited here and applied to the machine
-// directly. Nothing is written to /sys: the edit lives in the running firmware
-// until it is saved or until a restart forgets it. That is what collapses the
-// edit / restart / feel it / edit again loop into seconds, and it is safe to
-// play with precisely because M999 undoes all of it.
+// directly. Applying writes nothing: the edit lives in the running firmware
+// until a restart forgets it. That is what collapses the edit / restart / feel
+// it / edit again loop into seconds, and it is safe to play with precisely
+// because M999 undoes all of it.
+//
+// Saving is the deliberate second step, and only for a value that has been
+// applied — what goes into config.g is a number that has been felt, not one
+// that has been typed. It edits the line in place; see config/save.ts.
 
 import { html, nothing, type TemplateResult } from 'lit';
 import { PanelElement, registerPanel } from '../ui/panel.js';
@@ -32,7 +36,8 @@ import { loadConfig, type LoadedConfig } from '../config/load.js';
 import { checkConfig, type Finding } from '../config/check.js';
 import { comparable, compareLine, describe, type LiveValue } from '../config/live.js';
 import { blockedBy, caution, commandFor, editKey, liveAppliable } from '../config/apply.js';
-import { editable, type ConfigLine } from '../config/parse.js';
+import { saveFile, type LineEdit, type SaveReport } from '../config/save.js';
+import { editable, type ConfigFile, type ConfigLine } from '../config/parse.js';
 import { actions } from '../core/store.js';
 import { loadIndex } from '../docs/load.js';
 import type { GcodeIndex } from '../docs/types.js';
@@ -48,10 +53,23 @@ export class ConfigPanel extends PanelElement {
   private verbose = false;
   /** Values typed here but not yet sent, keyed by file:line:letter. */
   private edits = new Map<string, string>();
-  /** Values sent to the machine and not saved to any file. */
-  private applied = new Map<string, string>();
+  /**
+   * Values sent to the machine and not saved to any file.
+   *
+   * Each remembers the line it was applied to as it read at the time. A key is
+   * only a path and a line number, and both of those mean something different
+   * once somebody inserts a line above — so the text is what makes the entry
+   * verifiable rather than merely plausible.
+   */
+  private applied = new Map<string, { value: string; raw: string }>();
+  /** Each loaded file's text as last read, to notice one changing underneath. */
+  private signatures = new Map<string, string>();
   private applying = false;
   private applyError: string | null = null;
+  private saving = false;
+  private saveError: string | null = null;
+  /** What the last save actually did, so the panel can say it rather than imply it. */
+  private saved: SaveReport[] = [];
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -103,7 +121,7 @@ export class ConfigPanel extends PanelElement {
         for (const p of line.params) {
           const key = editKey(path, line, p.letter);
           const value = this.edits.get(key);
-          if (value !== undefined) this.applied.set(key, value);
+          if (value !== undefined) this.applied.set(key, { value, raw: line.raw });
         }
       }
       this.edits.clear();
@@ -140,6 +158,72 @@ export class ConfigPanel extends PanelElement {
     }
   }
 
+  /**
+   * The values running on the machine because of this panel, grouped by file.
+   *
+   * Deliberately built from `applied` and not from `edits`: what gets written
+   * into config.g is a number that has been tried, not one that has been typed.
+   * The two never overlap — applying moves a value from one map to the other.
+   */
+  private settled(): Array<{ file: ConfigFile; edits: LineEdit[] }> {
+    const out: Array<{ file: ConfigFile; edits: LineEdit[] }> = [];
+    for (const file of this.loaded?.files ?? []) {
+      const edits: LineEdit[] = [];
+      for (const line of file.lines) {
+        if (!this.canEdit(line)) continue;
+        const values = new Map<string, string>();
+        for (const p of line.params) {
+          const v = this.applied.get(editKey(file.path, line, p.letter));
+          if (v !== undefined) values.set(p.letter, v.value);
+        }
+        if (values.size) edits.push({ line, values });
+      }
+      if (edits.length) out.push({ file, edits });
+    }
+    return out;
+  }
+
+  /**
+   * Write the settled values into the files they came from.
+   *
+   * One file at a time, and a failure stops the rest: if config-axes.g would not
+   * verify, the operator needs to look at that before anything else is written.
+   * Whatever did get written stays written and is reported by name — a save that
+   * silently rolled part of itself back would be worse than one that stopped.
+   */
+  private async saveSettled(): Promise<void> {
+    const driver = activeDriver();
+    const groups = this.settled();
+    if (!driver || !groups.length || this.saving) return;
+    const blocked = blockedBy(machine.peek().status);
+    if (blocked) {
+      this.saveError = blocked;
+      this.requestUpdate();
+      return;
+    }
+    this.saving = true;
+    this.saveError = null;
+    this.saved = [];
+    this.requestUpdate();
+    try {
+      for (const { file, edits } of groups) {
+        this.saved.push(await saveFile(driver, file, edits));
+        // Only the lines that made it to disk stop being "applied, not saved".
+        for (const { line, values } of edits) {
+          for (const letter of values.keys()) this.applied.delete(editKey(file.path, line, letter));
+        }
+      }
+    } catch (err) {
+      this.saveError = (err as Error).message;
+    } finally {
+      this.saving = false;
+      // Re-read either way. On success the file has changed underneath the
+      // parsed copy; on failure the most useful thing to show is what the file
+      // says now, which is how a refusal gets explained.
+      await this.reload();
+    }
+  }
+
   private async reload(): Promise<void> {
     const driver = activeDriver();
     if (!driver || this.loading) return;
@@ -148,12 +232,40 @@ export class ConfigPanel extends PanelElement {
     this.requestUpdate();
     try {
       this.loaded = await loadConfig(driver);
+      this.forgetChangedFiles();
     } catch (err) {
       this.error = (err as Error).message;
     } finally {
       this.loading = false;
       this.requestUpdate();
     }
+  }
+
+  /**
+   * Drop what this panel was tracking in any file whose text has changed.
+   *
+   * Both maps are keyed by file and line number, and a line number stops
+   * meaning the same thing the moment somebody inserts a line above it. Keeping
+   * the entries would put an "applied, not saved" badge on a line that never
+   * had one, and — much worse — offer to save a value into it. Whole file at a
+   * time rather than line by line, because a shifted line still matches itself
+   * and there is no way to tell the two apart from here.
+   */
+  private forgetChangedFiles(): void {
+    const now = new Map<string, string>();
+    for (const file of this.loaded?.files ?? []) {
+      now.set(file.path, file.lines.map((l) => l.raw).join('\n'));
+    }
+    for (const [path, was] of this.signatures) {
+      if (now.get(path) === was) continue;
+      for (const key of [...this.edits.keys()]) {
+        if (key.startsWith(`${path}:`)) this.edits.delete(key);
+      }
+      for (const key of [...this.applied.keys()]) {
+        if (key.startsWith(`${path}:`)) this.applied.delete(key);
+      }
+    }
+    this.signatures = now;
   }
 
   private get findings(): Finding[] {
@@ -202,13 +314,14 @@ export class ConfigPanel extends PanelElement {
     const key = editKey(path, line, p.letter);
     const pending = this.edits.get(key);
     const applied = this.applied.get(key);
-    const shown = pending ?? applied ?? p.text;
+    const shown = pending ?? applied?.value ?? p.text;
     return html`<code
       class="cfg-param edit ${pending !== undefined ? 'pending' : applied !== undefined ? 'applied' : ''}"
       title=${help}
       >${p.letter}<input
         type="number"
         step="any"
+        style=${`width:${Math.min(12, Math.max(5, shown.length + 1.5))}ch`}
         .value=${shown}
         @wheel=${(e: WheelEvent) => {
           // A wheel over a focused number input changes it. Scrolling down a
@@ -320,10 +433,12 @@ export class ConfigPanel extends PanelElement {
     const appliedCount = new Set(
       [...this.applied.keys()].map((k) => k.slice(0, k.lastIndexOf(':'))),
     ).size;
-    if (!pending.length && !appliedCount && !this.applyError) return nothing;
+    if (!pending.length && !appliedCount && !this.applyError && !this.saveError && !this.saved.length)
+      return nothing;
 
     const cautions = [...new Set(pending.map((p) => caution(p.line.command)).filter(Boolean))];
     const blocked = blockedBy(machine.get().status);
+    const saveFiles = this.settled().map((g) => g.file.path);
 
     return html`
       <div class="cfg-apply">
@@ -353,22 +468,43 @@ export class ConfigPanel extends PanelElement {
             : nothing}
           ${appliedCount && !pending.length
             ? html`<button
-                class="tiny"
-                ?disabled=${this.applying}
-                title="Send the values as the file has them, undoing what was tried here"
-                @click=${() => void this.revertAll()}
-              >
-                Back to the file
-              </button>`
+                  class="primary tiny"
+                  ?disabled=${this.saving || this.applying || blocked !== null}
+                  title=${blocked ??
+                  `Write ${saveFiles.join(', ')} — only the edited values change, and the previous contents are kept alongside.`}
+                  @click=${() => void this.saveSettled()}
+                >
+                  ${this.saving ? 'Saving…' : 'Save to the file'}
+                </button>
+                <button
+                  class="tiny"
+                  ?disabled=${this.applying || this.saving}
+                  title="Send the values as the file has them, undoing what was tried here"
+                  @click=${() => void this.revertAll()}
+                >
+                  Back to the file
+                </button>`
             : nothing}
         </div>
         ${blocked ? html`<div class="cfg-apply-note bad">${blocked}</div>` : nothing}
         ${this.applyError ? html`<div class="cfg-apply-note bad">${this.applyError}</div>` : nothing}
+        ${this.saveError ? html`<div class="cfg-apply-note bad">${this.saveError}</div>` : nothing}
         ${cautions.map((c) => html`<div class="cfg-apply-note">${c}</div>`)}
+        ${this.saved.map(
+          (r) => html`<div class="cfg-apply-note ok">
+            Saved ${r.path} line${r.lines.length === 1 ? '' : 's'} ${r.lines.join(', ')}.
+            ${r.backup ? html`Previous contents kept in <code>${r.backup}</code>.` : nothing}
+          </div>`,
+        )}
+        ${appliedCount && !pending.length
+          ? html`<div class="cfg-apply-note">
+              Saving changes only the numbers you edited. Everything else on the line — the
+              comment, the spacing, the other axes — is left exactly as it is.
+            </div>`
+          : nothing}
         ${appliedCount
           ? html`<div class="cfg-apply-note">
-              Running in the firmware only. A restart forgets all of it, and nothing has been
-              written to /sys.
+              Running in the firmware only. A restart forgets all of it until it is saved.
             </div>`
           : nothing}
       </div>
@@ -471,9 +607,9 @@ export class ConfigPanel extends PanelElement {
         </div>
 
         <div class="param-note cfg-note">
-          Editing a value here sends it to the machine; nothing is written to <code>/sys</code>.
-          A restart forgets whatever was tried. Saving a value you have settled on, back into the
-          line it came from, is the next step.
+          Editing a value sends it to the machine and nothing more — a restart forgets it. Once a
+          number is one worth keeping, saving writes it back into the line it came from, changing
+          those characters and nothing else, after keeping a copy of the file as it was.
         </div>
       </div>
     `;

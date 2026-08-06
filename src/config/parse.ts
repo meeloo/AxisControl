@@ -24,6 +24,15 @@ export interface ConfigParam {
   text: string;
   /** The number, when the text is one. Lists, strings and expressions give null. */
   value: number | null;
+  /**
+   * Where `text` sits in the line's `raw`, so a value can be replaced without
+   * touching anything else on the line. `raw.slice(start, end) === text`, always
+   * — including on commented-out lines, where the offsets point inside the
+   * comment. Anything rewriting a line must check that identity rather than
+   * trusting it; see rewriteLine.
+   */
+  start: number;
+  end: number;
 }
 
 export type LineKind =
@@ -72,8 +81,12 @@ const META = /^(if|elif|else|while|break|continue|var|set|global|echo|abort|retu
  * driver list (`0.1:0.2`), or a braced expression that may itself contain
  * letters and spaces (`Z{move.axes[2].max}`). Each of those would break a
  * naive split on letters.
+ *
+ * `base` is where `text` begins inside the line's `raw`, so that the offsets
+ * recorded here address the original characters rather than the stripped and
+ * trimmed copy this walks.
  */
-function splitParams(text: string): ConfigParam[] {
+function splitParams(text: string, base: number): ConfigParam[] {
   const out: ConfigParam[] = [];
   let i = 0;
   while (i < text.length) {
@@ -103,11 +116,25 @@ function splitParams(text: string): ConfigParam[] {
       // A letter directly after digits starts the next parameter, but a letter
       // inside a value like "0.1:0.2" cannot occur, so this is safe.
     }
-    const raw = text.slice(start, i).trim();
+    const slice = text.slice(start, i);
+    const lead = slice.length - slice.trimStart().length;
+    const raw = slice.trim();
     const numeric = /^[+-]?(\d+\.?\d*|\.\d+)$/.test(raw);
-    out.push({ letter, text: raw, value: numeric ? Number(raw) : null });
+    out.push({
+      letter,
+      text: raw,
+      value: numeric ? Number(raw) : null,
+      start: base + start + lead,
+      end: base + start + lead + raw.length,
+    });
   }
   return out;
+}
+
+/** Where a string sits inside its container once leading whitespace is trimmed. */
+function trimmedAt(container: string, from: number): number {
+  const rest = container.slice(from);
+  return from + (rest.length - rest.trimStart().length);
 }
 
 /** Where the comment starts, ignoring `;` inside a quoted string. */
@@ -129,6 +156,8 @@ export function parseConfig(path: string, text: string): ConfigFile {
     const cut = commentAt(raw);
     const code = (cut < 0 ? raw : raw.slice(0, cut)).trim();
     const comment = cut < 0 ? null : raw.slice(cut + 1).trim();
+    /** Where `code` starts in `raw`, so parameter offsets address the real line. */
+    const codeAt = trimmedAt(raw, 0);
 
     const line: ConfigLine = {
       index,
@@ -156,7 +185,7 @@ export function parseConfig(path: string, text: string): ConfigFile {
         if (cmd) {
           line.kind = 'command';
           line.command = `${cmd[1]!.toUpperCase()}${cmd[2]}`;
-          line.params = splitParams(code.slice(cmd[0].length));
+          line.params = splitParams(code.slice(cmd[0].length), codeAt + cmd[0].length);
           if (line.command === 'M98') {
             const p = line.params.find((x) => x.letter === 'P');
             if (p) includes.push(p.text.replace(/^"|"$/g, ''));
@@ -173,7 +202,13 @@ export function parseConfig(path: string, text: string): ConfigFile {
       if (cmd && /^[GM]/i.test(inner)) {
         line.kind = 'disabled';
         line.command = `${cmd[1]!.toUpperCase()}${cmd[2]}`;
-        line.params = splitParams(inner.slice(cmd[0].length).split(';')[0] ?? '');
+        // The offsets still address `raw`: past the `;`, past whatever leading
+        // `;` and spaces the comment repeats, then past the command itself.
+        const innerAt = trimmedAt(raw, cut + 1) + (comment.length - inner.length);
+        line.params = splitParams(
+          inner.slice(cmd[0].length).split(';')[0] ?? '',
+          innerAt + cmd[0].length,
+        );
       }
     }
 
@@ -184,6 +219,39 @@ export function parseConfig(path: string, text: string): ConfigFile {
   // does not track. Depth is therefore an upper bound — "might be conditional"
   // rather than "is". For deciding what to leave alone, erring high is right.
   return { path, lines, includes };
+}
+
+/**
+ * Put new values into a line, changing nothing else.
+ *
+ * Replacements are applied right to left so that each parameter's offsets are
+ * still correct when its turn comes. Everything outside the replaced runs of
+ * characters — the command, the spacing, the other parameters, the comment,
+ * trailing whitespace — comes through byte for byte, which is the whole reason
+ * the parser keeps `raw` and these offsets instead of re-printing the line.
+ *
+ * It refuses if the line no longer reads as parsed. That should be impossible
+ * within one parse, and is exactly what happens if this is handed a `ConfigLine`
+ * from an older read of a file somebody has since changed — so the check is the
+ * last guard against writing an edit into the wrong place.
+ *
+ * A letter appearing twice on one line would take the same new value in both
+ * places. No command this is allowed to touch does that.
+ */
+export function rewriteLine(line: ConfigLine, values: ReadonlyMap<string, string>): string {
+  const targets = line.params
+    .filter((p) => values.has(p.letter))
+    .sort((a, b) => b.start - a.start);
+  let out = line.raw;
+  for (const p of targets) {
+    if (out.slice(p.start, p.end) !== p.text) {
+      throw new Error(
+        `line ${line.index + 1} does not read as it was parsed — expected ${p.letter}${p.text}`,
+      );
+    }
+    out = out.slice(0, p.start) + values.get(p.letter)! + out.slice(p.end);
+  }
+  return out;
 }
 
 /** Whether a value in this line can be safely rewritten in place. */
