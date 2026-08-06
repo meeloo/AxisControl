@@ -1762,6 +1762,20 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
   padding-top: 2px; }
 .cfg-code { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; }
 .cfg-cmd { font-family: var(--mono); font-size: 12px; font-weight: 700; color: var(--code-cmd, var(--accent)); }
+/* The view filter. A segmented row rather than a dropdown: there are four of
+   them, which one is on matters at a glance, and the counts are half the
+   value — "Problems 3" answers the question without pressing anything. */
+.cfg-views { display: inline-flex; border: 1px solid var(--border); border-radius: 5px;
+  overflow: hidden; }
+.cfg-view { font-size: 11px; padding: 3px 9px; min-height: 22px; border: none;
+  border-right: 1px solid var(--border); background: none; color: var(--text-dim);
+  cursor: pointer; white-space: nowrap; }
+.cfg-view:last-child { border-right: none; }
+.cfg-view:hover:not(:disabled) { background: var(--tint-accent); color: var(--text); }
+.cfg-view.on { background: var(--accent); color: var(--on-accent); font-weight: 600; }
+.cfg-view:disabled { opacity: 0.4; cursor: default; }
+.cfg-view em { font-style: normal; font-weight: 700; opacity: 0.75; }
+
 /* The command opens its own documentation. Styled as text rather than as a
    button — it is the thing being read, and a row of buttons down the left of a
    config file would look like a toolbar. The dotted underline is the only

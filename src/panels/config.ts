@@ -72,8 +72,18 @@ export class ConfigPanel extends PanelElement {
   private loading = false;
   /** Files the operator has collapsed. */
   private closed = new Set<string>();
-  /** Show every line, rather than only the commands. */
-  private verbose = false;
+  /**
+   * Which lines to show.
+   *
+   * "commands" is the default and what the panel has always shown. The other
+   * three exist because this file is read for four different reasons: to see
+   * everything including the comments, to tune something, or to deal with what
+   * is wrong — and on a 64-command configuration the last two are a handful of
+   * lines scattered across fourteen files.
+   */
+  private view: ViewMode = 'commands';
+  /** checkConfig's answer for this render, since it is asked once per line. */
+  private findingCache: Finding[] | null = null;
   /** Values typed here but not yet sent, keyed by file:line:letter. */
   private edits = new Map<string, string>();
   /**
@@ -432,9 +442,34 @@ export class ConfigPanel extends PanelElement {
     this.signatures = now;
   }
 
+  /**
+   * Everything the checker has to say, computed once per render.
+   *
+   * findingsFor asks per line, and checkConfig walks the whole include tree
+   * every time it is called, so without this a 64-command configuration ran it
+   * 64 times to draw one screen — and the filter below would have doubled that.
+   * Cleared at the top of render(), which is the only place the answer can
+   * change from.
+   */
   private get findings(): Finding[] {
+    if (this.findingCache) return this.findingCache;
     const axes = machine.get().axes.map((a) => a.letter);
-    return this.loaded ? checkConfig(this.loaded.files, this.index, axes) : [];
+    this.findingCache = this.loaded ? checkConfig(this.loaded.files, this.index, axes) : [];
+    return this.findingCache;
+  }
+
+  /** Whether this line survives the current filter. */
+  private shows(path: string, line: ConfigLine): boolean {
+    switch (this.view) {
+      case 'all':
+        return true;
+      case 'editable':
+        return this.canEdit(line);
+      case 'problems':
+        return this.findingsFor(path, line).length > 0;
+      default:
+        return line.kind === 'command' || line.kind === 'disabled';
+    }
   }
 
   /** Findings against one line, so they can be shown where the problem is. */
@@ -510,8 +545,6 @@ export class ConfigPanel extends PanelElement {
   }
 
   private renderLine(path: string, line: ConfigLine): TemplateResult | typeof nothing {
-    const isCommand = line.kind === 'command' || line.kind === 'disabled';
-    if (!isCommand && !this.verbose) return nothing;
 
     const entry = line.command ? this.index?.codes.find((c) => c.code === line.command) : undefined;
     const found = this.findingsFor(path, line);
@@ -858,6 +891,10 @@ export class ConfigPanel extends PanelElement {
 
   private jump(path: string, index: number): void {
     this.closed.delete(path);
+    // "see line 4" points at the other half of a conflict, which the Editable
+    // filter may well be hiding. A link that scrolls to nothing is worse than
+    // no link, so following one widens the view enough to show its target.
+    if (this.view === 'editable') this.view = 'commands';
     this.requestUpdate();
     window.setTimeout(() => {
       this.querySelector(`[data-at="${path}:${index}"]`)?.scrollIntoView({ block: 'center' });
@@ -1003,8 +1040,22 @@ export class ConfigPanel extends PanelElement {
       </div>`;
     }
 
+    this.findingCache = null;
     const findings = this.findings;
-    const counts = {
+    // How many lines each view would show, so a filter that would land on an
+    // empty screen says so on its own button instead of after being pressed.
+    const counts: Record<ViewMode, number> = { commands: 0, all: 0, editable: 0, problems: 0 };
+    for (const file of this.loaded.files) {
+      for (const line of file.lines) {
+        counts.all++;
+        if (line.kind === 'command' || line.kind === 'disabled') counts.commands++;
+        if (this.canEdit(line)) counts.editable++;
+        if (findings.some((f) => f.path === file.path && f.line.index === line.index)) {
+          counts.problems++;
+        }
+      }
+    }
+    const severities = {
       conflict: findings.filter((f) => f.severity === 'conflict').length,
       order: findings.filter((f) => f.severity === 'order').length,
       unknown: findings.filter((f) => f.severity === 'unknown').length,
@@ -1016,17 +1067,22 @@ export class ConfigPanel extends PanelElement {
           <button class="tiny" ?disabled=${this.loading} @click=${() => void this.reload(true)}>
             ${this.loading ? 'Reading…' : 'Re-read'}
           </button>
-          <label class="cfg-toggle">
-            <input
-              type="checkbox"
-              .checked=${this.verbose}
-              @change=${(e: Event) => {
-                this.verbose = (e.target as HTMLInputElement).checked;
-                this.requestUpdate();
-              }}
-            />
-            <span>All lines</span>
-          </label>
+          <div class="cfg-views">
+            ${VIEWS.map((v) => {
+              const n = counts[v.id];
+              return html`<button
+                class="cfg-view ${this.view === v.id ? 'on' : ''}"
+                ?disabled=${n === 0}
+                title=${n === 0 ? `No ${v.label.toLowerCase()} lines` : v.help}
+                @click=${() => {
+                  this.view = v.id;
+                  this.requestUpdate();
+                }}
+              >
+                ${v.label}${v.count ? html` <em>${n}</em>` : nothing}
+              </button>`;
+            })}
+          </div>
           <span class="cfg-count">
             ${this.loaded.files.length} files ·
             ${this.loaded.files.reduce(
@@ -1043,9 +1099,9 @@ export class ConfigPanel extends PanelElement {
           ? html`<div class="cfg-summary">
               <strong>${findings.length}</strong> thing${findings.length === 1 ? '' : 's'} worth a
               look:
-              ${counts.conflict ? html`<span class="cfg-chip conflict">${counts.conflict} overwritten</span>` : nothing}
-              ${counts.order ? html`<span class="cfg-chip order">${counts.order} out of order</span>` : nothing}
-              ${counts.unknown ? html`<span class="cfg-chip unknown">${counts.unknown} unrecognised</span>` : nothing}
+              ${severities.conflict ? html`<span class="cfg-chip conflict">${severities.conflict} overwritten</span>` : nothing}
+              ${severities.order ? html`<span class="cfg-chip order">${severities.order} out of order</span>` : nothing}
+              ${severities.unknown ? html`<span class="cfg-chip unknown">${severities.unknown} unrecognised</span>` : nothing}
             </div>`
           : html`<div class="cfg-summary ok">Nothing looks contradictory.</div>`}
 
@@ -1059,6 +1115,14 @@ export class ConfigPanel extends PanelElement {
           ${this.loaded.files.map((file) => {
             const open = !this.closed.has(file.path);
             const flagged = findings.filter((f) => f.path === file.path).length;
+            const shown = file.lines.filter((l) => this.shows(file.path, l));
+            // A filter that empties a file hides it. Fourteen headings with
+            // nothing under them is not a view of the two lines being looked
+            // for. Unfiltered, an empty file still shows: that it is empty is
+            // then the thing worth knowing.
+            if (!shown.length && (this.view === 'editable' || this.view === 'problems')) {
+              return nothing;
+            }
             return html`
               <section class="cfg-file">
                 <button
@@ -1076,7 +1140,7 @@ export class ConfigPanel extends PanelElement {
                 </button>
                 ${open
                   ? html`<div class="cfg-lines">
-                      ${file.lines.map(
+                      ${shown.map(
                         (line) => html`<div data-at=${`${file.path}:${line.index}`}>
                           ${this.renderLine(file.path, line)}
                         </div>`,
@@ -1149,6 +1213,25 @@ function sameValue(a: string, b: string): boolean {
 function anchorIndex(op: FileOp): number {
   return op.kind === 'insert' ? op.after.index : op.line.index;
 }
+
+type ViewMode = 'commands' | 'all' | 'editable' | 'problems';
+
+const VIEWS: Array<{ id: ViewMode; label: string; help: string; count?: boolean }> = [
+  { id: 'commands', label: 'Commands', help: 'Every line the machine runs, and the ones commented out' },
+  { id: 'all', label: 'All lines', help: 'Including comments, blank lines and the if/while structure' },
+  {
+    id: 'editable',
+    label: 'Editable',
+    help: 'Only the lines whose values can be changed and tried from here',
+    count: true,
+  },
+  {
+    id: 'problems',
+    label: 'Problems',
+    help: 'Only the lines something was reported about',
+    count: true,
+  },
+];
 
 customElements.define('cnc-config', ConfigPanel);
 
