@@ -1,14 +1,16 @@
 // Reading config.g and everything it runs, in the order it runs them.
 
-import { parseConfig, type ConfigFile } from './parse.js';
+import { OVERRIDE_FILE, parseConfig, type ConfigFile } from './parse.js';
 import type { MachineDriver } from '../machine/driver.js';
 
 /** Where a relative M98 path is resolved from. */
 const SYS = '/sys';
 
-function resolve(path: string): string {
-  if (path.startsWith('/')) return path;
-  return `${SYS}/${path}`;
+/** An M98 P path as an absolute one. Exported so the checker resolves it identically. */
+export function resolveInclude(path: string): string {
+  const bare = path.replace(/^"|"$/g, '');
+  if (bare.startsWith('/')) return bare;
+  return `${SYS}/${bare}`;
 }
 
 export interface LoadedConfig {
@@ -45,13 +47,15 @@ export async function loadConfig(
       const bytes = await driver.readFile(path);
       text = new TextDecoder().decode(bytes);
     } catch (err) {
-      missing.push({ path, reason: (err as Error).message });
+      // config-override.g not existing is the normal state of a machine whose
+      // values have never been saved with M500, so its absence is not news.
+      if (!path.endsWith(OVERRIDE_FILE)) missing.push({ path, reason: (err as Error).message });
       return;
     }
     const file = parseConfig(path, text);
     files.push(file);
     for (const include of file.includes) {
-      await visit(resolve(include), depth + 1);
+      await visit(resolveInclude(include), depth + 1);
     }
   };
 

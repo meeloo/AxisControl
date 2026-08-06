@@ -18,7 +18,8 @@
 // everything that could conceivably be wrong. A checker that cries wolf is one
 // people learn to scroll past.
 
-import type { ConfigFile, ConfigLine } from './parse.js';
+import { runsFile, type ConfigFile, type ConfigLine } from './parse.js';
+import { resolveInclude } from './load.js';
 import type { GcodeIndex } from '../docs/types.js';
 
 export type Severity = 'conflict' | 'order' | 'unknown';
@@ -123,6 +124,49 @@ function key(line: ConfigLine): string {
   return `${line.command}|${parts.join(',')}`;
 }
 
+/**
+ * Every live command line, in the order the machine actually runs them.
+ *
+ * Not file after file. RRF stops at an M98, runs the whole of the named file,
+ * and carries on with the next line — so config.g's own tail runs AFTER every
+ * fragment it called, and this has to step into each include where the call is.
+ *
+ * Concatenating the loaded files instead put all of config.g first, which got
+ * both of the cross-file questions backwards: a setting made in config.g after
+ * the includes was reported as being overwritten by a fragment when it is the
+ * one that wins, and a command in that tail was reported as running before the
+ * M584 that it in fact runs after.
+ *
+ * A file called twice is walked once, matching what loadConfig reads. Running
+ * it twice is legal and rare, and the second run cannot change what the text
+ * says about itself.
+ */
+function executionOrder(files: ConfigFile[]): Array<{ path: string; line: ConfigLine }> {
+  const byPath = new Map(files.map((f) => [f.path, f]));
+  const out: Array<{ path: string; line: ConfigLine }> = [];
+  const walked = new Set<string>();
+
+  const walk = (file: ConfigFile): void => {
+    if (walked.has(file.path)) return;
+    walked.add(file.path);
+    for (const line of file.lines) {
+      if (line.kind !== 'command' || !line.command) continue;
+      out.push({ path: file.path, line });
+      const runs = runsFile(line);
+      const target = runs ? byPath.get(resolveInclude(runs)) : undefined;
+      if (target) walk(target);
+    }
+  };
+
+  // loadConfig puts the entry first, and everything else is reached from it.
+  if (files[0]) walk(files[0]);
+  // Anything not reachable from the entry is still checked rather than quietly
+  // left out — a file loaded but never called is a question in itself, and
+  // dropping its lines would make the checker's silence mean two things.
+  for (const file of files) walk(file);
+  return out;
+}
+
 export function checkConfig(
   files: ConfigFile[],
   index: GcodeIndex | null,
@@ -130,13 +174,7 @@ export function checkConfig(
   axes: readonly string[] = [],
 ): Finding[] {
   const findings: Finding[] = [];
-  /** Every live command line, in the order the machine runs them. */
-  const run: Array<{ path: string; line: ConfigLine }> = [];
-  for (const file of files) {
-    for (const line of file.lines) {
-      if (line.kind === 'command' && line.command) run.push({ path: file.path, line });
-    }
-  }
+  const run = executionOrder(files);
 
   // --- Silent overwrites ----------------------------------------------------
   const seen = new Map<string, { path: string; line: ConfigLine }>();

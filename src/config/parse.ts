@@ -66,11 +66,33 @@ export interface ConfigFile {
   /** Absolute path on the controller, e.g. "/sys/config-axes.g". */
   path: string;
   lines: ConfigLine[];
-  /** Paths this file runs with M98, in the order it runs them. */
+  /** Paths this file runs — M98 targets, and config-override.g for an M501. */
   includes: string[];
 }
 
 const COMMAND = /^([GMT])(\d+(?:\.\d+)?)/i;
+
+/**
+ * The file RRF runs at this line, if any.
+ *
+ * M98 is the obvious one. M501 is the one that gets forgotten: it reads
+ * config-override.g, which is where M500 writes tuned values, and those run
+ * last and beat everything the hand-written files said. A checker that follows
+ * only M98 will report a line as being in force when config-override.g has
+ * quietly replaced it — the exact class of silent overwrite this is for.
+ */
+export const OVERRIDE_FILE = 'config-override.g';
+
+export function runsFile(line: ConfigLine): string | null {
+  if (line.kind !== 'command') return null;
+  if (line.command === 'M98') {
+    const p = line.params.find((x) => x.letter === 'P');
+    return p ? p.text.replace(/^"|"$/g, '') : null;
+  }
+  if (line.command === 'M501') return OVERRIDE_FILE;
+  return null;
+}
+
 const META = /^(if|elif|else|while|break|continue|var|set|global|echo|abort|return)\b/i;
 
 /**
@@ -186,10 +208,8 @@ export function parseConfig(path: string, text: string): ConfigFile {
           line.kind = 'command';
           line.command = `${cmd[1]!.toUpperCase()}${cmd[2]}`;
           line.params = splitParams(code.slice(cmd[0].length), codeAt + cmd[0].length);
-          if (line.command === 'M98') {
-            const p = line.params.find((x) => x.letter === 'P');
-            if (p) includes.push(p.text.replace(/^"|"$/g, ''));
-          }
+          const runs = runsFile(line);
+          if (runs) includes.push(runs);
         }
       }
     } else if (comment) {
