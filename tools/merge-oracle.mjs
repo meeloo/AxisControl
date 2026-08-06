@@ -44,10 +44,10 @@ const ok = (c, w, x = '') => {
 
 // Divergences that are known and deliberately not resolved here.
 //
-// Leaving one on the list is a real cost — it is how a test quietly stops
-// testing — so each needs the evidence that would settle it, and anything NOT
-// on the list still fails loudly.
-const KNOWN = new Set(['a null array element']);
+// Empty, and worth keeping empty: a list like this is how a test quietly stops
+// testing. The one entry it used to hold was resolved by looking at a real
+// board rather than by tolerating it.
+const KNOWN = new Set();
 const known = (name, diffs) => {
   console.log(`KNOWN ${name}`);
   for (const d of diffs.slice(0, 2)) console.log(`      ${d}`);
@@ -131,40 +131,26 @@ compare('a live patch updates positions without blanking the verbose fields', [
   { move: { axes: [{ machinePosition: 12.5 }, { machinePosition: 3 }, {}, {}] } },
 ]);
 
-// --- The wrinkle merge.ts documents: a null element ------------------------
+// --- What a null element means --------------------------------------------
 //
-// KNOWN DIVERGENCE, and the only one.
+// Settled on a real board, not from documentation, which says nothing about
+// it. Three consecutive rr_model?flags=d99fn responses with the machine idle
+// carry every array element in full every time — axes 0 and 1 are unchanged
+// and are still sent complete — so there is no "unchanged" placeholder for a
+// null to be. What nulls do appear are empty slots: tools[0] on a machine
+// whose tools start at T1, and sensors.gpIn as
+// [null,null,null,null,null,null,{"value":1}]. Unconfigured spindles arrive as
+// objects, not nulls, which confirms null is reserved for absence.
 //
-//   ours   — "null element = no change to this element", keep what we had.
-//   theirs — null replaces the item: there is nothing at this index now.
-//
-// Neither reading is documented. docs.duet3d.com describes seqs and per-key
-// fetches but says nothing about what a null array element means in a patch,
-// and the object model reference only uses "null if unknown" about scalar
-// fields.
-//
-// What settles it is one look at the real machine, which the mock cannot
-// answer because the mock is ours:
-//
-//   open  http://sebscnc.local/rr_model?flags=d99fn  twice with nothing moving
-//
-// If unchanged array items come back as {} then null must mean "absent", ours
-// is wrong, and the fix is to drop the null branch in merge.ts so a null
-// overwrites. If they come back as null, ours is right and theirs would blank
-// every axis on every tick.
-//
-// The impact either way is narrow, which is why this is not being changed on a
-// guess: a permanently-absent element (tools[0] on a machine whose tools start
-// at T1) is set to null by the first full fetch and stays null under both
-// readings — see the case below. Only an element that goes from present to
-// null diverges, which is a tool or sensor being deleted while connected.
-compare('a null array element', [
+// merge.ts read null as "no change to this element" and was wrong. It only
+// ever mattered when an element went from present to absent, where it kept a
+// stale tool or sensor on screen for the rest of the session.
+compare('a null array element empties that slot', [
   full,
   { move: { axes: [{ machinePosition: 1 }, null, null, null] } },
 ]);
 
-// The boundary of that divergence: an element that is null from the start
-// agrees under both readings, which is the common case on this machine.
+// The common case on this machine: a slot that is empty from the first fetch.
 compare('an element that was never there stays null', [
   { ...full, tools: [null, { number: 1, name: 'Spindle tool 1' }] },
   { tools: [null, { name: 'Renamed' }] },
@@ -203,5 +189,45 @@ compare('a run of patches', [
   { state: { status: 'idle' }, move: { axes: [{ homed: false }, {}, {}, {}] } },
 ]);
 
-console.log(fails.length ? `\n${fails.length} DIVERGED: ${fails.join(", ")}` : "\nno divergence beyond the known one");
+// --- A real board -----------------------------------------------------------
+//
+// Trimmed from three consecutive d99fn responses off the machine this app was
+// written for: an MB6HC with four axes, nine tools numbered from 1, and seven
+// GP inputs of which only the last is configured. Synthetic patches exercise
+// the branches; this checks the shapes RRF actually emits.
+const board = {
+  move: {
+    axes: [
+      { machinePosition: 0, stepPos: 0, userPosition: -136.4 },
+      { machinePosition: 0, stepPos: 0, userPosition: -120.8 },
+      { machinePosition: 85.0, stepPos: 68000, userPosition: -148.79 },
+      { machinePosition: 70.0, stepPos: 56000, userPosition: 50.0 },
+    ],
+    extruders: [],
+  },
+  sensors: {
+    endstops: [{ triggered: true }, { triggered: true }, { triggered: false }, { triggered: true }],
+    gpIn: [null, null, null, null, null, null, { value: 1 }],
+    probes: [{ measuredHeight: null, value: [0] }, { measuredHeight: null, value: [0] }],
+  },
+  spindles: [
+    { current: 0, state: 'stopped' },
+    { current: null, state: 'unconfigured' },
+  ],
+  state: { currentTool: -1, gpOut: [null, null, null, null, null, null, { pwm: 0 }], status: 'idle', upTime: 9460 },
+  tools: [
+    null,
+    { active: [], isRetracted: false, standby: [], state: 'off' },
+    { active: [], isRetracted: false, standby: [], state: 'off' },
+  ],
+};
+// The second and third fetches differ only in the handful of live values, and
+// resend everything else verbatim — which is the point.
+const tick = JSON.parse(JSON.stringify(board));
+tick.state.upTime = 9507;
+tick.state.msUpTime = 9;
+compare('two consecutive fetches from the machine', [board, tick]);
+compare('and a third', [board, tick, { ...tick, state: { ...tick.state, upTime: 9518 } }]);
+
+console.log(fails.length ? `\n${fails.length} DIVERGED: ${fails.join(", ")}` : '\nno divergence');
 process.exit(fails.length ? 1 : 0);

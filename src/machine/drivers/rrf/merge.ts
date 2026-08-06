@@ -9,21 +9,22 @@
 // place — `move.axes[1].machinePosition` arrives without the axis's `letter`
 // or `min`/`max`. Replacing the array wholesale would blank those every tick.
 //
-// One RRF-specific wrinkle: a shortened array in a patch means items were
-// removed (e.g. a tool was deleted), so we truncate to the patch length. A
-// `null` array element means "no change to this element".
+// Two RRF-specific wrinkles, both settled against a real board rather than
+// guessed at — see tools/merge-oracle.mjs, which checks this file against
+// @duet3d/objectmodel, the implementation DWC ships.
 //
-// That last sentence is the one unverified claim in this file, and it is the
-// only place this merge disagrees with @duet3d/objectmodel, which reads a null
-// element as "there is nothing at this index now" and overwrites. Neither
-// reading is documented. `npm run merge-oracle` runs both implementations over
-// the same patches and reports it; the comment there says which observation
-// settles it and what to change if the reference turns out to be right.
+// A shortened array means items were removed (a tool was deleted), so we
+// truncate to the patch length.
 //
-// It matters less than it sounds: an element that is null from the start ends
-// up null under both readings, so the machines this runs on agree today. The
-// two only part company when an element goes from present to null, which is an
-// item being deleted while connected.
+// A `null` element means there is nothing at that index — an empty slot, not
+// an unchanged one. This file used to claim the opposite, and it was wrong.
+// A d99fn response carries every array element in full on every tick, so
+// there is no "unchanged" placeholder for null to be: on this machine
+// tools[0] is null because tools start at T1, and sensors.gpIn arrives as
+// [null,null,null,null,null,null,{"value":1}]. Reading null as "keep what we
+// had" only ever differed when an element went from present to absent — a
+// tool or sensor deleted while connected — and there it kept a stale object
+// on screen for the rest of the session.
 
 export function mergeInto<T>(target: T, patch: unknown): T {
   if (patch === null || patch === undefined) return target;
@@ -34,8 +35,8 @@ export function mergeInto<T>(target: T, patch: unknown): T {
     for (let i = 0; i < patch.length; i++) {
       const item = patch[i];
       if (item === null) {
-        // Null element = unchanged; keep whatever we already had.
-        if (out[i] === undefined) out[i] = null;
+        // Nothing at this index. Overwrite rather than keep — see above.
+        out[i] = null;
         continue;
       }
       out[i] = isPlainObject(item) || Array.isArray(item) ? mergeInto(out[i], item) : item;
