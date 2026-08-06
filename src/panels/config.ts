@@ -1216,9 +1216,11 @@ function anchorIndex(op: FileOp): number {
 
 type ViewMode = 'commands' | 'all' | 'editable' | 'problems';
 
+// Narrowing left to right, so the two that answer a question come before the
+// one that just shows more. All lines is last because it is the least used and
+// the least specific — it is where you end up when the others have not got it.
 const VIEWS: Array<{ id: ViewMode; label: string; help: string; count?: boolean }> = [
   { id: 'commands', label: 'Commands', help: 'Every line the machine runs, and the ones commented out' },
-  { id: 'all', label: 'All lines', help: 'Including comments, blank lines and the if/while structure' },
   {
     id: 'editable',
     label: 'Editable',
@@ -1231,6 +1233,7 @@ const VIEWS: Array<{ id: ViewMode; label: string; help: string; count?: boolean 
     help: 'Only the lines something was reported about',
     count: true,
   },
+  { id: 'all', label: 'All lines', help: 'Including comments, blank lines and the if/while structure' },
 ];
 
 customElements.define('cnc-config', ConfigPanel);
