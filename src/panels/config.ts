@@ -202,14 +202,26 @@ export class ConfigPanel extends PanelElement {
    */
   private async saveSettled(): Promise<void> {
     const driver = activeDriver();
-    const groups = this.settled();
-    if (!driver || !groups.length || this.saving) return;
+    if (!driver || this.saving) return;
     const blocked = blockedBy(machine.peek().status);
     if (blocked) {
       this.saveError = blocked;
       this.requestUpdate();
       return;
     }
+    // Anything typed but not yet sent goes to the machine first.
+    //
+    // Saving used to require applying by hand beforehand, on the reasoning that
+    // what goes into config.g should be a number that has been felt. That is
+    // still true, and it is still what happens — but it is this button's job to
+    // do it, not the operator's to know it. Requiring the step only meant the
+    // Save button was invisible until somebody had guessed at it.
+    if (this.pendingLines().length) {
+      await this.applyEdits();
+      if (this.applyError) return;
+    }
+    const groups = this.settled();
+    if (!groups.length) return;
     this.saving = true;
     this.saveError = null;
     this.saved = [];
@@ -458,7 +470,9 @@ export class ConfigPanel extends PanelElement {
 
     const cautions = [...new Set(pending.map((p) => caution(p.line.command)).filter(Boolean))];
     const blocked = blockedBy(machine.get().status);
-    const saveFiles = this.settled().map((g) => g.file.path);
+    const saveFiles = [
+      ...new Set([...this.settled().map((g) => g.file.path), ...pending.map((p) => p.path)]),
+    ];
 
     return html`
       <div class="cfg-apply">
@@ -472,38 +486,52 @@ export class ConfigPanel extends PanelElement {
           <span class="topbar-spacer"></span>
           ${pending.length
             ? html`<button
-                  class="primary tiny"
-                  ?disabled=${this.applying || blocked !== null}
-                  title=${blocked ?? 'Send these to the machine now. Nothing is written to /sys.'}
-                  @click=${() => void this.applyEdits()}
-                >
-                  ${this.applying ? 'Sending…' : 'Try on the machine'}
-                </button>
-                <button class="tiny ghost" ?disabled=${this.applying} @click=${() => {
+                class="primary tiny"
+                ?disabled=${this.applying || this.saving || blocked !== null}
+                title=${blocked ?? 'Send these to the machine now. Nothing is written to /sys.'}
+                @click=${() => void this.applyEdits()}
+              >
+                ${this.applying ? 'Sending…' : 'Try on the machine'}
+              </button>`
+            : nothing}
+          <!-- Offered whenever there is anything to save, whether it has been
+               tried yet or not. Gating this on having applied first meant the
+               button did not exist until somebody had guessed that it would
+               appear, which is not a discoverable way to save a file. -->
+          ${pending.length || appliedCount
+            ? html`<button
+                class=${appliedCount && !pending.length ? 'primary tiny' : 'tiny'}
+                ?disabled=${this.saving || this.applying || blocked !== null}
+                title=${blocked ??
+                `Write ${saveFiles.join(', ')}${
+                  pending.length ? ', after sending the edited lines to the machine' : ''
+                } — only the edited values change, and the previous contents are kept alongside.`}
+                @click=${() => void this.saveSettled()}
+              >
+                ${this.saving ? 'Saving…' : 'Save to the file'}
+              </button>`
+            : nothing}
+          ${pending.length
+            ? html`<button
+                class="tiny ghost"
+                ?disabled=${this.applying || this.saving}
+                @click=${() => {
                   this.edits.clear();
                   this.requestUpdate();
-                }}>
-                  Discard
-                </button>`
+                }}
+              >
+                Discard
+              </button>`
             : nothing}
           ${appliedCount && !pending.length
             ? html`<button
-                  class="primary tiny"
-                  ?disabled=${this.saving || this.applying || blocked !== null}
-                  title=${blocked ??
-                  `Write ${saveFiles.join(', ')} — only the edited values change, and the previous contents are kept alongside.`}
-                  @click=${() => void this.saveSettled()}
-                >
-                  ${this.saving ? 'Saving…' : 'Save to the file'}
-                </button>
-                <button
-                  class="tiny"
-                  ?disabled=${this.applying || this.saving}
-                  title="Send the values as the file has them, undoing what was tried here"
-                  @click=${() => void this.revertAll()}
-                >
-                  Back to the file
-                </button>`
+                class="tiny"
+                ?disabled=${this.applying || this.saving}
+                title="Send the values as the file has them, undoing what was tried here"
+                @click=${() => void this.revertAll()}
+              >
+                Back to the file
+              </button>`
             : nothing}
         </div>
         ${blocked ? html`<div class="cfg-apply-note bad">${blocked}</div>` : nothing}
@@ -516,10 +544,11 @@ export class ConfigPanel extends PanelElement {
             ${r.backup ? html`Previous contents kept in <code>${r.backup}</code>.` : nothing}
           </div>`,
         )}
-        ${appliedCount && !pending.length
+        ${pending.length || appliedCount
           ? html`<div class="cfg-apply-note">
               Saving changes only the numbers you edited. Everything else on the line — the
-              comment, the spacing, the other axes — is left exactly as it is.
+              comment, the spacing, the other axes — is left exactly as it is, and the file as it
+              was is kept alongside.
             </div>`
           : nothing}
         ${appliedCount
