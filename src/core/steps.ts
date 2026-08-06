@@ -84,20 +84,48 @@ export function stepTick(mm: number): string {
 }
 
 /**
- * Feed rates offered by the speed cursor, mm/min.
+ * Feed rates offered by the speed cursor, mm/min, derived from the machine.
  *
- * A 1–2–5 series here, unlike the distances: feed is a continuous quantity
- * you tune rather than a quantum you count, so finer rungs are useful and there
- * is no arithmetic downstream to make ugly.
+ * Computed rather than listed. A fixed ladder has to be filtered against the
+ * axis limit, and filtering can only ever offer a rung at or below it — so an
+ * M203 of 12000 stopped the cursor at 10000, leaving a sixth of the machine's
+ * speed unreachable while the label beside it read "machine limit 12000". It is
+ * also wrong at the other end: a ladder that starts at 10mm/min spends its
+ * bottom third on speeds nobody jogs at.
+ *
+ * So the limit itself is always the top rung, and the rungs below it are the
+ * 1-2-5 series across the three decades beneath — which keeps every one of them
+ * a number an operator could have chosen, and keeps the count in the eight-to-
+ * twelve range that a slider can actually be aimed at.
+ *
+ *   12000 -> 20 50 100 200 500 1000 2000 5000 10000 12000
+ *    6000 -> 10 20 50 100 200 500 1000 2000 5000 6000
+ *     750 -> 1 2 5 10 20 50 100 200 500 750
  */
-export const FEED_LADDER: readonly number[] = [
-  10, 20, 50, 100, 200, 500, 1000, 2000, 3000, 5000, 6000, 8000, 10000, 15000, 20000,
-];
+export function feedLadder(maxFeed: number): number[] {
+  const top = maxFeed > 0 && isFinite(maxFeed) ? maxFeed : 20000;
+  // Three decades of range below the top. Below that is creep nobody jogs at,
+  // and every extra decade costs rungs the slider has to share out.
+  const floor = top / 1000;
+  const rungs: number[] = [];
+  for (let e = -3; e <= 6; e++) {
+    for (const m of [1, 2, 5]) {
+      // Rounded because 1e-3 * 5 * 10 * 10 is not 0.5 in binary floating point,
+      // and a speed cursor reading 0.5000000000000001 would be its own bug.
+      const v = Math.round(m * 10 ** e * 1e6) / 1e6;
+      if (v >= floor && v < top) rungs.push(v);
+    }
+  }
+  rungs.push(top);
+  return rungs;
+}
 
-export function nearestFeed(value: number): number {
-  let best = FEED_LADDER[0];
+/** The rung nearest a given feed, for restoring a saved preference. */
+export function nearestFeed(value: number, maxFeed = 20000): number {
+  const ladder = feedLadder(maxFeed);
+  let best = ladder[0]!;
   let bestError = Infinity;
-  for (const f of FEED_LADDER) {
+  for (const f of ladder) {
     const error = Math.abs(Math.log(f / Math.max(value, 1)));
     if (error < bestError) {
       bestError = error;
@@ -106,3 +134,4 @@ export function nearestFeed(value: number): number {
   }
   return best;
 }
+

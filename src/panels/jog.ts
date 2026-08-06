@@ -32,7 +32,7 @@ import { actions, connected, loadSetting, machine, saveSetting } from '../core/s
 import { BUSY_STATES } from '../machine/types.js';
 import { empty } from '../ui/widgets.js';
 import {
-  FEED_LADDER,
+  feedLadder,
   STEP_LADDER,
   nearestStep,
   ringSteps,
@@ -506,11 +506,23 @@ export class JogPanel extends PanelElement {
 
   private renderCursors(): TemplateResult {
     const steps = this.steps;
+    // Built from the machine's own limit rather than filtered from a list, so
+    // the top rung IS the limit — see feedLadder. A fixed ladder could only
+    // offer the nearest rung at or below it, which left an M203 of 12000
+    // capped at 10000.
     const feedCap = this.feedLimit(['X', 'Y']);
-    const usable = FEED_LADDER.filter((f) => f <= feedCap);
-    const feeds = usable.length ? usable : [FEED_LADDER[0]];
-    const chosen = Math.min(this.settings.feed, feeds[feeds.length - 1]);
-    const feedIndex = Math.max(0, feeds.indexOf(chosen) < 0 ? feeds.length - 1 : feeds.indexOf(chosen));
+    const feeds = feedLadder(feedCap);
+    // Snap DOWN to the nearest rung, never up. The ladder changes with the
+    // machine's limit now, so a saved 3000 can find itself between rungs — and
+    // the old code answered that by selecting the last index, which is to say
+    // the maximum. A preference that quietly becomes full speed is the one
+    // direction this must not fail in.
+    // A loop rather than findLastIndex, which is ES2023 — this bundle targets
+    // safari12 and tsc caught it.
+    const wanted = this.settings.feed;
+    let feedIndex = 0;
+    for (let i = 0; i < feeds.length; i++) if (feeds[i]! <= wanted) feedIndex = i;
+    const chosen = feeds[feedIndex]!;
 
     return html`
       <div class="jog-cursors">
