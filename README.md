@@ -64,6 +64,15 @@ npm run build      # dist/, with .gz siblings for the controller
 npm run typecheck
 ```
 
+Or the three you actually want day to day, which run from anywhere and do not
+have to be remembered:
+
+```
+./tools/run           # build, then watch and serve
+./tools/updateRun     # git pull first, for a machine that is behind
+./tools/bumpVersion   # npm version patch, and push the commit with its tag
+```
+
 ## If the camera's replies cannot be read
 
 A Reolink answers every request but sends no `Access-Control-Allow-Origin`, and

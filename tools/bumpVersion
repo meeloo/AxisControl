@@ -1,0 +1,9 @@
+#!/bin/sh
+# Bump the patch version, and push the commit and its tag together.
+#
+# npm version makes both a commit and a tag; --follow-tags is what stops the
+# commit going up on its own and leaving the tag sitting on this machine.
+set -e
+cd "$(dirname "$0")/.."
+npm version patch
+git push --follow-tags

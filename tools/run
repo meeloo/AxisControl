@@ -1,0 +1,10 @@
+#!/bin/sh
+# Build once, then serve with the watcher.
+#
+# `npm run dev` builds too, so the first build looks redundant — it is not. It
+# is the one that is allowed to fail: set -e stops here on a type error or a
+# broken import, with the error on screen, instead of dropping into a watch
+# loop that serves the last good bundle and looks like it worked.
+set -e
+cd "$(dirname "$0")/.."
+npm run build && npm run dev

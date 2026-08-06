@@ -1,0 +1,6 @@
+#!/bin/sh
+# Pull, build, and serve — for coming back to a machine that is behind.
+set -e
+cd "$(dirname "$0")/.."
+git pull
+npm run build && npm run dev
