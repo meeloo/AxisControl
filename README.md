@@ -23,28 +23,104 @@ tool and network setup are all still DWC's job, and DWC stays installed at `/`.
 > the stop, and treat the simulation as a drawing rather than a promise. See the
 > warranty and liability sections of [LICENSE](LICENSE).
 
-## What is in it
+## What it does that the alternatives do not
 
-Twenty-one panels, arranged onto pages you lay out yourself:
+Four things, roughly in order of how much they change a day at the machine.
 
-- **Position** — work and machine coordinates, WCS selection (G54–G59.3), zeroing
+### It reads your configuration and tells you what is wrong with it
+
+![The Configuration panel: values that can be changed and tried, with the machine's own reading beside each one](docs/screenshots/config-tune.webp)
+
+RRF runs `config.g` top to bottom and mostly does not complain. Set the same
+maximum speed twice and the second silently wins. Configure an axis before the
+`M584` that creates it and the line is refused at boot with nobody watching.
+Misspell a parameter and it is ignored. Each leaves a machine that runs,
+behaves differently from what the file appears to say, and offers no clue why.
+
+The Configuration panel follows `config.g` through every `M98` **and** through
+the `M501` into `config-override.g`, in the order the firmware actually runs
+them — a fragment called from the middle of `config.g` runs before the lines
+below the call, and getting that backwards means naming the wrong line as the
+winner. Then it says what it found:
+
+![The same panel filtered to the three faults it found, each on its own line](docs/screenshots/config-check.webp)
+
+Beside every value it shows what the machine is *actually* running, read from
+the object model. A line that reads correctly and is not in force — overridden
+by `config-override.g`, replaced by a later duplicate, changed at the console
+and never saved — is the failure this is for, and it is the one nothing else
+shows you.
+
+### It collapses the tuning loop from minutes to seconds
+
+Edit, restart, feel it, edit again. That loop exists only because the file is
+the only way anyone offers to change acceleration or jerk or motor current. So
+don't use the file: type a number, press **Try on the machine**, and it is in
+force before the file has been touched at all. Nothing is written; `M999`
+undoes everything.
+
+When the number is one worth keeping, **Save to the file** writes it back into
+the line it came from, changing those characters and nothing else — your
+alignment spaces, your comments, your commented-out previous values and your
+line endings all come through byte for byte, because a config file people
+hand-edit has to still look like theirs afterwards. It re-reads first and
+refuses if the file changed underneath, keeps a `.bak` before the first write
+of the session, and reads back what it wrote.
+
+You can also add a line, comment one out, or delete one. The add box takes any
+text and validates it on every keystroke in the position it would occupy — a
+second `M203` that would overwrite the first, a parameter for an axis you do
+not have, a command the reference has never heard of: all refused, with the
+reason, before anything is written.
+
+### It tracks a running job against the toolpath, to the byte
+
+The G-code parser records the source byte offset on every vertex. RRF reports
+`job.filePosition` as a byte offset, so comparing the two in the fragment
+shader draws the cut/uncut boundary and places the live cutter exactly. A
+parser that discards offsets can draw a toolpath but can never follow a job.
+Run-from-line picks the restart point off the drawing, which is what you want
+after a broken cutter.
+
+### It is honest about what it cannot do
+
+Panels hide themselves when the controller cannot back them, rather than
+showing buttons that fail. A camera that sends no CORS headers is marked
+**blind** and does the half that needs no reply. A line carrying an expression
+or sitting inside an `if` is shown and marked not-editable rather than guessed
+at. Three probing flows — tool length, workpiece, feature — are three different
+jobs and are never conflated.
+
+## The panels
+
+Twenty-four, arranged onto pages you lay out yourself.
+
 - **Motion** — a jog rose of concentric rings, eight directions each, with
   distances that are always numbers a person would choose
-- **Spindle & Tools** — the active tool stated large, ATC slots, and tool
-  libraries importable straight from a Fusion 360 `.tools` export
+- **Configuration** — the above
 - **Toolpath** — WebGL viewer with live cutter tracking, a time slider,
   run-from-line picking, and the actual cutter drawn to size
-- **Probing** — separate flows for tool length, workpiece and feature probing,
-  which are three different jobs and never conflated
-- **Machining, Surfacing, Import** — conversational operations, spoilboard
-  flattening, and SVG/DXF import with tool-radius offsetting
+- **Probing** — tool length, corner, edge and feature, kept separate
+- **Spindle & Tools** — the active tool stated large, ATC slots, and tool
+  libraries importable straight from a Fusion 360 `.tools` export
+- **Position** and **Coordinates** — work and machine coordinates, WCS
+  selection (G54–G59.3), zeroing, offsets, names and rotation
 - **Tool changer** — set up a RapidChange ATC and install its macros: pocket
   geometry checked against the machine's own travel, every file shown before it
   is written, and nothing run for you
+- **Preflight** — check a job against the machine before starting it
+- **Run from line** — restart a job partway through
+- **Machining**, **Surface**, **Import** — conversational facing, contours and
+  pockets without CAM; probe a height map and compensate Z against it; SVG/DXF
+  import with tool-radius offsetting
 - **Camera** — live H.264 over HTTP-FLV where the camera allows it, pipelined
   stills where it does not, with pan/tilt and lighting for Reolink. Click the
   picture to bring that point to the middle, double-click to zoom in on it
-- **Job, Console, Files, Macros, Object model, Diagnostics, Preflight**
+- **G-code reference** — the whole RRF dictionary, searchable, offline, and
+  installed on the machine with everything else
+- **Install** — serve Axis Control from the controller and keep it updated
+- **Overrides**, **Job**, **Console**, **Files**, **Macros**, **Machine Model**,
+  **Diagnostics**, **Firmware**
 
 Every field that holds a position has a crosshair beside it that fills it in
 from where the machine is standing — in machine or work coordinates, whichever
@@ -157,6 +233,8 @@ src/
     drivers/
       rrf/       RepRapFirmware: HTTP transport, object model, state mapping
       carvera/   Makera Carvera / Z1 — stub, see its README first
+  config/        config.g reader, checker, in-place editor — see below
+  docs/          the G-code reference, built at build time from docs.duet3d.com
   ui/            panel base class, dashboard layout, top bar, prompt dialog
   panels/        one file per panel, self-registering
   viewer/        G-code parser, WebGL2 renderer, mat4
@@ -190,6 +268,21 @@ has ~8 sockets and half may go to non-HTTP services). So the driver polls:
 Sessions use `sessionKey`/`X-Session-Key` where available, falling back to
 implicit per-IP sessions on older firmware.
 
+### The configuration editor never re-prints a line
+
+`src/config/parse.ts` records the byte offsets of every parameter's value
+inside its line, and `rewriteLine` replaces exactly those characters, right to
+left so the offsets stay valid. Nothing is reformatted, reordered or
+normalised, and the line's original text is what gets written back with only
+those characters changed. `src/config/save.ts` re-reads the file first, refuses
+by name and line number if it changed underneath, keeps a `.bak`, and reads
+back what it wrote.
+
+The checker in `src/config/check.ts` builds its sequence by walking the include
+tree — into each `M98` where the call is, and into `config-override.g` at the
+`M501` — because concatenating the files instead gets both cross-file questions
+backwards rather than merely missing them.
+
 ### Why the byte offset matters
 
 The parser records the **source byte offset** on every vertex. RRF reports
@@ -215,9 +308,20 @@ Used daily on one machine — a 750x1500 router with an 8-slot RapidChange ATC, 
 proven on a sample of exactly one. The RRF driver is complete enough for real
 work; the Carvera/Z1 driver is a stub.
 
-Known gaps: job history, an ATC carousel view, and no automated test suite —
-verification so far has been a real headless browser driven against the mocks,
-which has caught a great deal but is not the same thing.
+Known gaps: job history and an ATC carousel view. Verification is a real
+headless browser driven against the mocks, plus three harnesses that live in
+the repo and check the things whose failures are silent:
+
+```
+npm run merge-oracle    # our object-model merge against Duet3D's own implementation
+npm run rewrite-check   # the in-place config edit: offsets, widths, line endings
+npm run gcode-params    # which doc bullets are parameters and which are prose
+```
+
+`rewrite-check` takes a directory and will sweep real config files for the
+invariant the config editor rests on — that every parameter is still found at
+the offsets recorded for it. The browser-driven end-to-end scripts are not in
+the repo yet, which is the real gap.
 
 Browser support goes back further than you would expect: the bundle targets
 ES2019, and there is a compatibility layer for Safari 12 (an iPad mini 2 makes a
