@@ -34,13 +34,16 @@ export interface SaveReport {
   lines: number[];
 }
 
-/** Files already backed up in this session, so a tuning loop keeps the original. */
+/**
+ * Files already backed up in this session, so a tuning loop keeps the original.
+ *
+ * Saving twice in a row is normal — try 3500, save, decide 3200 was better,
+ * save again — and backing up each time would make the second save overwrite
+ * the only copy of what the file said before any of this started. Reloading the
+ * page starts a new session and takes a fresh copy, which is the right moment:
+ * by then the previous save is what the machine has been running.
+ */
 const backedUp = new Set<string>();
-
-/** Only for tests: forget the session's backups. */
-export function resetBackups(): void {
-  backedUp.clear();
-}
 
 /**
  * The backup's name.
