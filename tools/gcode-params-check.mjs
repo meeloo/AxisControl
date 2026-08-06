@@ -69,17 +69,38 @@ for (const bullet of PROSE) {
   ok(got === null, `"${bullet.slice(0, 34)}…" is prose, not a parameter`, got ?? '');
 }
 
-// --- Shapes that are ambiguous and are refused -----------------------------
-//
-// Two of the same letter is where a placeholder and an English word stop being
-// distinguishable, so anything but n is refused there. If the docs ever write
-// one, it will show up as a parameter going missing rather than as prose being
-// admitted — the failure worth having of the two.
-ok(letterOf('Lbb Something with a two-letter placeholder') === null,
-   'a two-character non-n placeholder is refused, and that is the safe side',
-   letterOf('Lbb x') ?? '');
+ok(letterOf('Lbb Something with a two-letter placeholder') === 'Lbb',
+   'a two-character placeholder in another letter is a parameter too',
+   letterOf('Lbb x') ?? '(dropped)');
 ok(letterOf('Tnn Logical trigger number') === 'Tnn',
-   'while two n characters stay accepted, because Tnn is everywhere');
+   'and two n characters, because Tnn is everywhere');
+
+// --- The markup, which is better than any of the above ---------------------
+//
+// The page bolds every parameter, so where the bold is there is nothing to
+// infer: the bold run IS the name. bullets() keeps the tags on the Parameters
+// section for exactly this. The shape rules above are the fallback for a
+// section that stops bolding, not the main path.
+const BOLD = [
+  ['<strong>Lbb</strong> Maximum spindle RPM', 'Lbb'],
+  ['<strong>Laaa:bbb</strong> Minimum and maximum spindle RPM', 'Laaa:bbb'],
+  ['<strong>Xnnn</strong> Maximum feedrate for X axis', 'Xnnn'],
+  ['<strong>P"pin_name"</strong> Pin name and inversion status', 'P"pin_name"'],
+  ['<a class="toc" href="#x"></a> <strong>Rnn</strong> Spindle number', 'Rnn'],
+];
+for (const [bullet, expected] of BOLD) {
+  ok(letterOf(bullet) === expected, `bold markup names the parameter: ${expected}`,
+     letterOf(bullet) ?? '(dropped)');
+}
+
+// A bold word inside a sentence is not a parameter called must. This is why
+// the match is anchored at the start of the bullet rather than searching it.
+ok(letterOf('This <strong>must</strong> be set before the axis is used') === null,
+   'a bold word in the middle of a sentence is not a parameter',
+   letterOf('This <strong>must</strong> be set') ?? '');
+ok(letterOf('<strong>All</strong> parameters are optional unless stated') === null,
+   'nor is a bolded sentence opener with nothing after it but prose... ',
+   letterOf('<strong>All</strong> parameters are optional unless stated') ?? '');
 
 console.log(fails.length ? `\n${fails.length} FAILED: ${fails.join(', ')}` : '\nall passed');
 process.exit(fails.length ? 1 : 0);

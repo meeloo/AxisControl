@@ -178,16 +178,54 @@ function headingCode(heading) {
 }
 
 /**
+ * Words that open a bullet in a Parameters list without being parameters.
+ *
+ * The shape of a placeholder and the shape of a short English word overlap —
+ * `Lbb` and `All` are the same shape — so past two characters the only thing
+ * that separates them is which words English has. This is that list, and it is
+ * the honest way round: a name that turns out to be missing shows up as a
+ * parameter appearing out of nowhere in the reference, whereas tightening the
+ * shape instead silently drops real parameters like M950's Lbb.
+ *
+ * Being wrong in this direction is also the cheaper mistake. A parameter the
+ * index never saw makes the config checker call a correct line unrecognised,
+ * which is a false positive an operator sees and stops trusting; a stray word
+ * in the reference is a line of noise on a page nobody reads twice.
+ */
+const PROSE_OPENERS = new Set([
+  'a', 'add', 'all', 'an', 'and', 'any', 'as', 'at', 'be', 'both', 'by', 'can',
+  'default', 'deprecated', 'do', 'does', 'duet', 'each', 'either', 'for', 'from',
+  'here', 'how', 'if', 'in', 'is', 'it', 'its', 'may', 'must', 'no', 'not',
+  'note', 'obsolete', 'off', 'on', 'one', 'only', 'optional', 'or', 'other',
+  'reprapfirmware', 'required', 'see', 'set', 'she', 'so', 'some', 'supported',
+  'the', 'their', 'then', 'there', 'these', 'they', 'this', 'those', 'to', 'too',
+  'unless', 'use', 'used', 'value', 'values', 'when', 'where', 'which', 'while',
+  'with', 'you', 'your',
+]);
+
+/**
+ * An English word rather than a parameter name.
+ *
+ * Length-guarded, because single letters are real parameters — `S`, `A`, `I` —
+ * and one of them would otherwise be lost to the word "a".
+ */
+function isProse(head) {
+  return head.length >= 2 && PROSE_OPENERS.has(head.toLowerCase());
+}
+
+/**
  * Whether a parameter's tail is made only of value placeholders.
  *
- * Every run of letters has to be three or more of the same character — `bbb`,
+ * Every run of letters has to be two or more of the same character — `bb`,
  * `aaa`, `nnn` — with anything non-alphabetic between them, so `aaa:bbb` and
- * `nnn:nnn...` pass and `epRapFirmware` does not.
+ * `nnn:nnn...` pass and `epRapFirmware` does not. Two rather than three
+ * because the docs do write two-character placeholders, and PROSE_OPENERS
+ * rather than a longer run is what keeps the English words out.
  */
 function isPlaceholderRuns(tail) {
   const runs = tail.match(/[A-Za-z]+/g) ?? [];
   if (!runs.length) return false;
-  return runs.every((run) => run.length >= 3 && new Set(run.toLowerCase()).size === 1);
+  return runs.every((run) => run.length >= 2 && new Set(run.toLowerCase()).size === 1);
 }
 
 /**
@@ -198,7 +236,32 @@ function isPlaceholderRuns(tail) {
  * so the split is at the first run of spaces after a leading non-space token,
  * not at a fixed width.
  */
-function parseParam(line) {
+function parseParam(bullet) {
+  // The page bolds every parameter, and the bold run is the parameter — no
+  // guessing about shape needed at all. This is the whole answer where the
+  // markup is there: `<strong>Lbb</strong> Maximum spindle RPM` says which part
+  // is the name, and a sentence that merely starts a bullet has no bold on it.
+  //
+  // Anchored at the start, so a sentence with a bold word in the middle of it
+  // ("This <strong>must</strong> be set") does not become a parameter called
+  // must. The heuristic below still runs when there is no bold: the page has
+  // been through several rewrites, and a section that stops bolding should
+  // degrade to the old behaviour rather than return nothing at all.
+  const bold =
+    /^\s*(?:<a\b[^>]*>[\s\S]*?<\/a>\s*)*<(strong|b)\b[^>]*>([\s\S]*?)<\/\1>([\s\S]*)$/i.exec(bullet);
+  if (bold) {
+    const head = text(bold[2]).replace(/[,:]+$/, '');
+    const rest = text(bold[3]);
+    if (head && rest && /^[A-Za-z]/.test(head) && !/^[GgMmTt]\d/.test(head) && !isProse(head)) {
+      return {
+        letter: head,
+        text: rest.replace(/^\(required\)\s*/i, '').trim(),
+        required: /\(required\)/i.test(rest),
+      };
+    }
+  }
+
+  const line = text(bullet);
   const cleaned = line.replace(/^[*\-•]\s*/, '').trim();
   if (!cleaned) return null;
   const match = /^([A-Za-z][^\s]*)\s+(.*)$/.exec(cleaned);
@@ -220,6 +283,7 @@ function parseParam(line) {
   const isParam =
     /^[A-Za-z]"/.test(match[1]) ||
     (!/^[GgMmTt]\d/.test(head) &&
+      !isProse(head) &&
       // Two shapes of placeholder, and the second was missing.
       //
       //   n-only:  Xnnn, Tnn, Dn, S, R1, Ennn:nnn...   the docs' usual form
@@ -228,12 +292,9 @@ function parseParam(line) {
       //                                                needed a second letter
       //                                                to name a second thing
       //
-      // The n-only form allows a single n because Dn and En are real. The
-      // general form needs three of the same character, which is the line
-      // between a placeholder and an English word: "All", "See", "Off" and
-      // "Add" all end in a doubled letter and would walk straight in at two.
-      // Nothing in English runs a letter three times, and nothing in the docs
-      // writes a placeholder shorter than that unless it is n.
+      // The n-only form allows a single n because Dn and En are real; the
+      // general form needs two of the same character, and PROSE_OPENERS keeps
+      // the English words that are also that shape out.
       (!/[a-mo-zA-MO-Z]/.test(tail) || isPlaceholderRuns(tail)));
   if (!isParam) return null;
 
@@ -310,8 +371,11 @@ function parseIndex(rawHtml) {
 
     const bullets = (chunk) =>
       [...chunk.matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi)].map((m) => text(m[1])).filter(Boolean);
+    // Parameters keep their markup: parseParam reads the bold run out of it.
+    const rawBullets = (chunk) =>
+      [...chunk.matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi)].map((m) => m[1]).filter((h) => text(h));
 
-    const params = bullets(sectionOf('Parameters')).map(parseParam).filter(Boolean);
+    const params = rawBullets(sectionOf('Parameters')).map(parseParam).filter(Boolean);
 
     const examplesChunk = sectionOf('Example');
     const examples = [
