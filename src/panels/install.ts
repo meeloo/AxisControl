@@ -80,10 +80,22 @@ export class InstallPanel extends PanelElement {
 
   override connectedCallback(): void {
     super.connectedCallback();
+    let lastUrl = '';
     this.bind(() => {
-      connected.get();
+      const live = connected.get();
+      const url = controllerUrl.get();
       machine.get();
-      controllerUrl.get();
+      // Read what is installed once there is something to read it from.
+      //
+      // The panel is rebuilt from the saved layout before auto-connect
+      // finishes, so the read below found nothing and left the installed
+      // version showing "…" for the rest of the session. `installed` is
+      // undefined only until something has been read — readManifest answers
+      // null rather than throwing, so this cannot spin.
+      if (live && (this.installed === undefined || url !== lastUrl)) {
+        lastUrl = url;
+        void this.readInstalled();
+      }
     });
     void this.refresh();
   }

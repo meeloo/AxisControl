@@ -74,11 +74,20 @@ export class ConfigPanel extends PanelElement {
   override connectedCallback(): void {
     super.connectedCallback();
     this.bind(() => {
-      connected.get();
+      const live = connected.get();
       machine.get();
+      // Read as soon as there is a machine to read from, rather than once when
+      // the element is built.
+      //
+      // On a page reload the panel is created from the saved layout while the
+      // connection is still being made, so a single read here found no driver,
+      // returned without saying anything, and left "No configuration read" on
+      // screen for the rest of the session. This runs again on every machine
+      // update; reload() itself decides there is nothing to do, which is what
+      // keeps it from re-downloading six files a second.
+      if (live) void this.reload();
     });
     void loadIndex().then((i) => ((this.index = i), this.requestUpdate()));
-    void this.reload();
   }
 
   /** Lines whose values this panel is willing to touch. */
@@ -220,13 +229,24 @@ export class ConfigPanel extends PanelElement {
       // Re-read either way. On success the file has changed underneath the
       // parsed copy; on failure the most useful thing to show is what the file
       // says now, which is how a refusal gets explained.
-      await this.reload();
+      await this.reload(true);
     }
   }
 
-  private async reload(): Promise<void> {
+  /**
+   * Read config.g and everything it runs.
+   *
+   * Called both by the Re-read button and by every machine update, so it has to
+   * be the thing that decides whether there is anything to do. Without `force`
+   * it reads once and then leaves it alone: re-downloading the whole
+   * configuration on each model poll would be pointless traffic, and retrying a
+   * read that just failed would replace the error and its Try again button with
+   * a flicker.
+   */
+  private async reload(force = false): Promise<void> {
     const driver = activeDriver();
     if (!driver || this.loading) return;
+    if (!force && (this.loaded || this.error)) return;
     this.loading = true;
     this.error = null;
     this.requestUpdate();
@@ -516,10 +536,21 @@ export class ConfigPanel extends PanelElement {
     if (this.error) {
       return html`<div class="pack cfg">
         <div class="warn-banner bad">${this.error}</div>
-        <div class="pack-actions"><button @click=${() => void this.reload()}>Try again</button></div>
+        <div class="pack-actions"><button @click=${() => void this.reload(true)}>Try again</button></div>
       </div>`;
     }
-    if (!this.loaded) return empty(this.loading ? 'Reading /sys/config.g…' : 'No configuration read');
+    if (this.loading) return empty('Reading /sys/config.g…');
+    // Connected, not loading, nothing read: the read should already have
+    // happened, so this is a state nobody should see. It gets a button rather
+    // than a sentence anyway — an empty panel with no way to act on it was
+    // exactly what made the bug above look like the panel simply not working.
+    if (!this.loaded) {
+      return html`<div class="pack cfg">
+        <div class="pack-actions">
+          <button @click=${() => void this.reload(true)}>Read /sys/config.g</button>
+        </div>
+      </div>`;
+    }
 
     const findings = this.findings;
     const counts = {
@@ -531,7 +562,7 @@ export class ConfigPanel extends PanelElement {
     return html`
       <div class="pack cfg">
         <div class="cfg-bar">
-          <button class="tiny" ?disabled=${this.loading} @click=${() => void this.reload()}>
+          <button class="tiny" ?disabled=${this.loading} @click=${() => void this.reload(true)}>
             ${this.loading ? 'Reading…' : 'Re-read'}
           </button>
           <label class="cfg-toggle">
