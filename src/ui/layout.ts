@@ -197,6 +197,7 @@ export class DashboardHost extends PanelElement {
       if (!el) {
         el = document.createElement(def.tag) as PanelElement;
         el.instanceId = instanceId;
+        el.panelType = panelId;
         this.elements.set(instanceId, el);
       }
       wrapper.appendChild(el);

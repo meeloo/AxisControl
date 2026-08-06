@@ -15,6 +15,20 @@ export class PanelElement extends LitElement {
   private disposers: (() => void)[] = [];
   /** Panel instance id, assigned by the layout host. */
   instanceId = '';
+  /** Which kind of panel this is, assigned by the layout host. */
+  panelType = '';
+
+  /**
+   * Key for anything this instance remembers of its own — see ui/folder.ts.
+   *
+   * The instance id, so two panels of the same kind on a page each keep their
+   * own. It falls back to the panel type for an element built outside the
+   * layout, and the first instance of a kind has an id equal to its type
+   * anyway, so a setting stored before this existed still reads back.
+   */
+  protected get panelKey(): string {
+    return this.instanceId || this.panelType || this.tagName.toLowerCase();
+  }
 
   /** Render into light DOM — see note above. */
   protected override createRenderRoot(): HTMLElement | DocumentFragment {

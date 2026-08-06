@@ -82,7 +82,7 @@ export class MacrosPanel extends PanelElement {
     // Load once per connection rather than on every render — the machine signal
     // ticks four times a second and a filelist walk per tick would hammer the
     // board for a directory that changes about once a month.
-    const root = panelDir('macros', capabilities.peek().macroRoot);
+    const root = panelDir(this.panelKey, capabilities.peek().macroRoot);
     const key = connected.peek() ? root : null;
     if (key && this.loadedFor !== key && !this.loading) {
       this.loadedFor = key;
@@ -102,7 +102,7 @@ export class MacrosPanel extends PanelElement {
   private async load(): Promise<void> {
     const driver = activeDriver();
     const home = capabilities.peek().macroRoot;
-    const root = panelDir('macros', home);
+    const root = panelDir(this.panelKey, home);
     if (!driver || !root) return;
 
     this.loading = true;
@@ -230,7 +230,7 @@ export class MacrosPanel extends PanelElement {
       <div class="macros">
         <div class="macro-bar">
           <span class="hint">${count} macro${count === 1 ? '' : 's'} in</span>
-          ${dirPicker('macros', caps.macroRoot, () => {
+          ${dirPicker(this.panelKey, caps.macroRoot, () => {
             this.loadedFor = null;
             void this.load();
             this.requestUpdate();
@@ -249,7 +249,7 @@ export class MacrosPanel extends PanelElement {
         </div>
         ${this.error ? html`<div class="warn-banner">${this.error}</div>` : nothing}
         ${!this.loading && !count && !this.error
-          ? empty(`No .g files under ${panelDir('macros', caps.macroRoot)}.`)
+          ? empty(`No .g files under ${panelDir(this.panelKey, caps.macroRoot)}.`)
           : nothing}
         <div class="macro-scroll">${this.groups.map((g) => this.renderGroup(g))}</div>
         ${live && !this.canRun

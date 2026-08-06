@@ -55,7 +55,7 @@ export class FilesPanel extends PanelElement {
       const now = connected.get();
       if (now && !wasConnected) {
         const caps = capabilities.peek();
-        this.cwd = panelDir('files', caps.configRoot ?? caps.gcodeRoot) ?? '/';
+        this.cwd = panelDir(this.panelKey, caps.configRoot ?? caps.gcodeRoot) ?? '/';
         void this.load();
       }
       wasConnected = now;
@@ -268,16 +268,16 @@ export class FilesPanel extends PanelElement {
           <button class="tiny" title="Refresh" @click=${() => void this.load()}>⟳</button>
           <span class="files-path">${this.cwd}</span>
           <button
-            class=${panelDir('files', null) === this.cwd ? 'tiny pin pinned' : 'tiny pin'}
-            title=${panelDir('files', null) === this.cwd
+            class=${panelDir(this.panelKey, null) === this.cwd ? 'tiny pin pinned' : 'tiny pin'}
+            title=${panelDir(this.panelKey, null) === this.cwd
               ? 'This panel opens here. Click to forget it.'
               : `Open in ${this.cwd} next time`}
             @click=${() => {
-              setPanelDir('files', panelDir('files', null) === this.cwd ? null : this.cwd);
+              setPanelDir(this.panelKey, panelDir(this.panelKey, null) === this.cwd ? null : this.cwd);
               this.requestUpdate();
             }}
           >
-            ${panelDir('files', null) === this.cwd ? '★' : '☆'}
+            ${panelDir(this.panelKey, null) === this.cwd ? '★' : '☆'}
           </button>
         </div>
 

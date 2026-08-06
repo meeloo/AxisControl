@@ -594,7 +594,7 @@ export class ViewerPanel extends PanelElement {
     const driver = activeDriver();
     if (!driver) return;
     const home = capabilities.peek().gcodeRoot;
-    const root = panelDir('viewer', home) ?? home;
+    const root = panelDir(this.panelKey, home) ?? home;
     const entries = await run('list G-code', (d) => d.listFiles(root));
     this.files = (entries ?? []).filter((e) => !e.directory && /\.(g|gcode|nc|tap)$/i.test(e.name));
     this.requestUpdate();
@@ -932,7 +932,7 @@ export class ViewerPanel extends PanelElement {
           ? html`
               <div class="viewer-picker">
                 <div class="viewer-picker-bar">
-                  ${dirPicker('viewer', caps.gcodeRoot, () => void this.listFolder())}
+                  ${dirPicker(this.panelKey, caps.gcodeRoot, () => void this.listFolder())}
                 </div>
                 <div class="viewer-picker-list">
                 ${this.files.length
@@ -944,7 +944,7 @@ export class ViewerPanel extends PanelElement {
                       `,
                     )
                   : html`<div class="empty">
-                      No G-code files in ${panelDir('viewer', caps.gcodeRoot)}
+                      No G-code files in ${panelDir(this.panelKey, caps.gcodeRoot)}
                     </div>`}
                 </div>
               </div>

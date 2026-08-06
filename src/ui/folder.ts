@@ -11,10 +11,15 @@
 // wherever this month's jobs are posted. One shared setting would be wrong for
 // two of the three.
 //
-// The choice is stored by panel id, not by panel instance. Two viewers open
-// side by side are the same kind of thing looking at the same machine, and
-// making you set the folder twice would be an odd reward for splitting the
-// screen.
+// Stored per panel INSTANCE, not per kind of panel. Opening a second Files
+// panel is what you do precisely when you want two folders at once — /sys in
+// one and /macros in the other, to copy between them — and a shared setting
+// made the second panel drag the first along with it. Two of a kind are only
+// the same thing if you never needed two.
+//
+// The key is the instance id, which the layout persists, so a folder survives
+// a reload. The first instance of a kind has an id equal to its kind, so
+// anything chosen before this changed still reads back.
 
 import { html, nothing, type TemplateResult } from 'lit';
 import { PanelElement } from './panel.js';
