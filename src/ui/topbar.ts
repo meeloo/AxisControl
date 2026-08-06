@@ -262,6 +262,15 @@ export class TopBar extends PanelElement {
             </button>
           `;
         })}
+      </nav>
+
+      <!-- Outside the scroller on purpose. These two were the last children of
+           .pages, which scrolls horizontally with a hidden scrollbar, so on a
+           narrow window they slid off the end and there was no visible way to
+           get to them — the one control that adds a panel, unreachable exactly
+           when the screen is small enough that you need to rearrange. Only the
+           tabs scroll now; the actions stay put. -->
+      <div class="page-actions">
         <button class="page-add" title="Add a page" @click=${() => addPage()}>+</button>
         <button
           class="tiny"
@@ -270,7 +279,7 @@ export class TopBar extends PanelElement {
         >
           ${panelPickerOpen.get() ? 'Close' : '+ Panel'}
         </button>
-      </nav>
+      </div>
     `;
   }
 
@@ -318,8 +327,10 @@ export class TopBar extends PanelElement {
         <div class="status-area">
           <span class="pill ${statusClass(state.status)}">${statusLabel(state.status)}</span>
           ${state.tool
-            ? html`<span class="pill active" title="Active tool">
-                T${state.tool.number}${state.tool.name ? ` · ${state.tool.name}` : ''}
+            ? html`<span class="pill active tool-pill" title="Active tool">
+                T${state.tool.number}${state.tool.name
+                  ? html`<span class="tool-name"> · ${state.tool.name}</span>`
+                  : nothing}
               </span>`
             : nothing}
           <span class="identity">${state.identity ?? (info?.label ?? '')}</span>

@@ -241,7 +241,43 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 
 .identity { color: var(--text-dim); font-size: 12px; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; max-width: 24ch; }
+/* Does not shrink, deliberately.
+ *
+ * Below about 750px this bar used to overflow the window and STOP went off the
+ * right edge, unreachable, on exactly the small screen somebody is holding
+ * while standing at the machine. The fix is not to let this box shrink: its
+ * children are flex: none, so a shrinking box just pushes them out of itself
+ * and under the Restart button beside it — visible, and not clickable, which
+ * is worse than missing. What gives way instead is the tab strip, which
+ * scrolls, and the two pieces of text the media queries below drop. */
 .status-area { display: flex; gap: 6px; align-items: center; flex: 0 0 auto; }
+/* Both pills stay whole. "I…" is not a machine state, and "T…" is not a tool —
+   which tool is in the spindle is the one thing on this bar that must never be
+   ambiguous. The tool's NAME drops on a narrow screen and its number does not,
+   so the pill reads "T1" rather than a truncated word. */
+.status-area .pill { flex: none; white-space: nowrap; }
+.topbar .estop, .topbar .restart { flex: none; }
+/* The firmware string is the first thing worth losing: it names a machine you
+   are standing in front of. A media query rather than flex sizing because the
+   top bar really is the width of the window, so the window is the right thing
+   to ask about. */
+@media (max-width: 780px) { .identity, .tool-name { display: none; } }
+/* Phone width. Adding a PAGE is a layout job nobody does one-handed at the
+   machine, and dropping it is what keeps STOP on screen at 360px. Adding a
+   panel stays — that is how you get at a control you cannot see. */
+@media (max-width: 480px) { .page-add { display: none; } }
+/* Phone portrait. The bar has run out of things it can drop without losing
+   meaning, so the remaining width comes out of the spacing and the padding —
+   STOP keeps its colour, its position and a 62px target, which is still well
+   over the 44px a fingertip needs. */
+@media (max-width: 480px) {
+  .topbar { gap: 4px; padding-left: 2px; padding-right: 4px; }
+  /* Its 8px floor is the last thing between STOP and the edge at 360px. */
+  .topbar-spacer { min-width: 0; }
+  .topbar .estop { min-width: 62px; padding-left: 8px; padding-right: 8px; letter-spacing: 0.04em; }
+  .topbar .restart { padding-left: 8px; padding-right: 8px; }
+  .gear { min-width: 32px; padding: 0 4px; }
+}
 
 .pill {
   display: inline-block;
@@ -312,6 +348,10 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
    time a page is added. */
 .pages { display: flex; align-items: center; gap: 4px; flex: 0 1 auto; min-width: 0;
   overflow-x: auto; scrollbar-width: none; }
+/* Never shrinks and never scrolls away: adding a panel is how you fix a layout
+   that does not fit, so it has to be reachable on the screens where it does
+   not fit. The tabs beside it can scroll instead. */
+.page-actions { display: flex; align-items: center; gap: 4px; flex: none; }
 .pages::-webkit-scrollbar { display: none; }
 .page-tab {
   display: inline-flex; align-items: center; gap: 6px;
