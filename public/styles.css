@@ -1836,4 +1836,23 @@ button.cfg-state { border: none; cursor: pointer; font-family: inherit; }
 .cfg-missing-no { font-size: 11px; color: var(--bad); flex: 1 1 200px; }
 .cfg-new { font-family: var(--mono); font-size: 11px; color: var(--text-dim);
   background: var(--bg-input); border-radius: 3px; padding: 1px 5px; }
+
+/* Per-line actions. Hidden until the line is hovered: a configuration is read
+   far more often than it is changed, and a delete button on every line of a
+   file somebody is reading is an invitation nobody asked for. */
+.cfg-ops { display: inline-flex; gap: 2px; opacity: 0; transition: opacity 90ms; }
+.cfg-line:hover .cfg-ops, .cfg-ops:focus-within { opacity: 1; }
+.cfg-op { font-family: var(--mono); font-size: 11px; line-height: 1; min-width: 18px;
+  min-height: 18px; padding: 0 4px; border: 1px solid var(--border); border-radius: 3px;
+  background: var(--bg); color: var(--text-dim); cursor: pointer; }
+.cfg-op:hover { border-color: var(--accent); color: var(--accent); }
+.cfg-op.bad:hover { border-color: var(--bad); color: var(--bad); }
+
+.cfg-draft { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 5px;
+  padding: 6px 8px; border-left: 2px solid var(--accent); background: var(--tint-accent);
+  border-radius: 0 4px 4px 0; }
+.cfg-draft.queued { border-left-color: var(--good); background: none; }
+.cfg-draft-input { flex: 1 1 260px; font-family: var(--mono); font-size: 12px;
+  min-height: 24px; padding: 2px 6px; }
+.cfg-draft .cfg-missing-no { flex: 1 1 100%; }
 .cfg-apply-note code { font-size: 11px; color: inherit; }

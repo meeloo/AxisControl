@@ -216,12 +216,14 @@ export function placeFor(
  * a second set written for this. Returns the findings the insertion would add;
  * an empty list means the placement is one the checker has no objection to.
  *
- * As the rules and the family set currently stand this is not expected to fire:
- * M584 is itself in the family, so "after the last sibling" is never before the
- * M584 that creates the axes, and only commands with no line at all are ever
- * offered, so a duplicate cannot be produced either. It is here because both of
- * those are properties of two tables that will be edited again, and neither
- * announces itself when it stops being true.
+ * This is what makes the panel's free-text insert defensible, and there it
+ * fires constantly: a second M203 that would silently overwrite the first, a
+ * parameter for an axis the machine does not have, a line above the M584 that
+ * creates the axes. For the lines this module places by itself it is belt and
+ * braces — M584 is in the family, so "after the last sibling" is never above
+ * it, and only commands absent everywhere are offered, so no duplicate can be
+ * made. Both of those are properties of tables that will be edited again, and
+ * neither announces itself when it stops holding.
  *
  * Comparing messages rather than counts: an insertion that removed one finding
  * and introduced another would net to zero and be waved through.

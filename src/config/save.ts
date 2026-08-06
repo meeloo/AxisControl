@@ -35,7 +35,8 @@ import type { MachineDriver } from '../machine/driver.js';
 export type FileOp =
   | { kind: 'set'; line: ConfigLine; values: Map<string, string> }
   | { kind: 'replace'; line: ConfigLine; text: string }
-  | { kind: 'insert'; after: ConfigLine; text: string };
+  | { kind: 'insert'; after: ConfigLine; text: string }
+  | { kind: 'delete'; line: ConfigLine };
 
 /** The line each op is anchored to — the one that has to still be as parsed. */
 const anchor = (op: FileOp): ConfigLine => (op.kind === 'insert' ? op.after : op.line);
@@ -48,6 +49,8 @@ export interface SaveReport {
   lines: number[];
   /** Lines added rather than changed, by the number they end up at. */
   added: number[];
+  /** Lines removed, by the number they had. */
+  removed: number[];
 }
 
 /**
@@ -134,23 +137,37 @@ export async function saveFile(
     else if (op.kind === 'replace') parts[op.line.index * 2] = op.text;
   }
 
-  // Then the insertions, from the bottom up, so that each one is placed before
-  // anything above it has shifted.
-  const inserts = ops.filter((o): o is Extract<FileOp, { kind: 'insert' }> => o.kind === 'insert')
-    .sort((a, b) => b.after.index - a.after.index);
+  // Then the ones that move lines, from the bottom up, so that each is applied
+  // before anything above it has shifted. Insertions and deletions together and
+  // in one order: done in two passes they would each be correct against the
+  // original numbering and wrong against each other's.
+  const moving = ops
+    .filter((o): o is Extract<FileOp, { kind: 'insert' | 'delete' }> =>
+      o.kind === 'insert' || o.kind === 'delete')
+    .sort((a, b) => anchor(b).index - anchor(a).index);
   const added: number[] = [];
+  const removed: number[] = [];
   const separator = /\r\n/.test(original) ? '\r\n' : '\n';
-  for (const op of inserts) {
-    const at = op.after.index * 2;
-    if (parts[at + 1] !== undefined) {
-      // The line has a newline after it: reuse it, and give the new line one of
-      // the same kind so a CRLF file stays a CRLF file.
-      parts.splice(at + 2, 0, op.text, parts[at + 1]!);
+  for (const op of moving) {
+    const at = anchor(op).index * 2;
+    if (op.kind === 'insert') {
+      if (parts[at + 1] !== undefined) {
+        // The line has a newline after it: reuse it, and give the new line one
+        // of the same kind so a CRLF file stays a CRLF file.
+        parts.splice(at + 2, 0, op.text, parts[at + 1]!);
+      } else {
+        // Inserting after the file's last line, which has no newline of its own.
+        parts.push(separator, op.text);
+      }
+      added.push(anchor(op).index + 2);
     } else {
-      // Inserting after the file's last line, which has no newline of its own.
-      parts.push(separator, op.text);
+      // Take the line and the newline that ended it. On the last line there is
+      // no newline after, so the one before it goes instead — otherwise the
+      // file would end with a blank line that was not there before.
+      if (parts[at + 1] !== undefined) parts.splice(at, 2);
+      else parts.splice(Math.max(0, at - 1), 2);
+      removed.push(anchor(op).index + 1);
     }
-    added.push(op.after.index + 2);
   }
 
   const updated = parts.join('');
@@ -179,7 +196,10 @@ export async function saveFile(
   return {
     path: file.path,
     backup,
-    lines: ops.filter((o) => o.kind !== 'insert').map((o) => anchor(o).index + 1),
+    lines: ops
+      .filter((o) => o.kind === 'set' || o.kind === 'replace')
+      .map((o) => anchor(o).index + 1),
     added: added.sort((a, b) => a - b),
+    removed: removed.sort((a, b) => a - b),
   };
 }

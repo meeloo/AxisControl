@@ -53,7 +53,13 @@ import {
   placeFor,
   type Addition,
 } from '../config/add.js';
-import { editable, rewriteLine, type ConfigFile, type ConfigLine } from '../config/parse.js';
+import {
+  editable,
+  parseConfig,
+  rewriteLine,
+  type ConfigFile,
+  type ConfigLine,
+} from '../config/parse.js';
 import { actions } from '../core/store.js';
 import { loadIndex } from '../docs/load.js';
 import type { GcodeIndex } from '../docs/types.js';
@@ -90,6 +96,15 @@ export class ConfigPanel extends PanelElement {
   private adding = new Map<string, Addition[]>();
   /** Commands to write a whole new line for. */
   private newCommands = new Set<string>();
+  /** New lines typed by hand, keyed by the file:line they go after. */
+  private inserts = new Map<string, string>();
+  /** Lines to comment out, or to bring back, keyed by file:line. */
+  private toggled = new Set<string>();
+  /** Lines to remove entirely, keyed by file:line. */
+  private removing = new Set<string>();
+  /** Which line's insert field is open, and what has been typed into it. */
+  private inserting: string | null = null;
+  private draft = '';
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -247,7 +262,17 @@ export class ConfigPanel extends PanelElement {
     for (const file of this.loaded?.files ?? []) {
       const edits: FileOp[] = [];
       for (const line of file.lines) {
-        if (!this.canEdit(line)) continue;
+        const key = `${file.path}:${line.index}`;
+        // Removing, commenting out and inserting apply to any line at all, not
+        // only the ones whose values this panel is willing to tune.
+        if (this.removing.has(key)) {
+          edits.push({ kind: 'delete', line });
+          continue;
+        }
+        if (this.toggled.has(key)) edits.push({ kind: 'replace', line, text: this.toggledText(line) });
+        const typed = this.inserts.get(key);
+        if (typed) edits.push({ kind: 'insert', after: line, text: typed });
+        if (!this.canEdit(line) || this.toggled.has(key)) continue;
         const values = new Map<string, string>();
         for (const p of line.params) {
           const v = this.applied.get(editKey(file.path, line, p.letter));
@@ -315,7 +340,11 @@ export class ConfigPanel extends PanelElement {
         this.saved.push(await saveFile(driver, file, edits));
         // Only the lines that made it to disk stop being "applied, not saved".
         for (const op of edits) {
-          if (op.kind === 'insert') continue;
+          const at = `${file.path}:${anchorIndex(op)}`;
+          this.inserts.delete(at);
+          this.toggled.delete(at);
+          this.removing.delete(at);
+          if (op.kind === 'insert' || op.kind === 'delete') continue;
           this.adding.delete(`${file.path}:${op.line.index}`);
           const letters =
             op.kind === 'set'
@@ -497,11 +526,13 @@ export class ConfigPanel extends PanelElement {
               : nothing}
             ${this.lineState(path, line)}
             ${this.renderAdd(path, line)}
+            ${this.renderOps(path, line)}
           </div>
           ${entry ? html`<div class="cfg-title">${entry.title}</div>` : nothing}
           ${line.comment && line.kind === 'command'
             ? html`<div class="cfg-comment">${line.comment}</div>`
             : nothing}
+          ${this.renderDraft(path, line)}
           ${found.map(
             (f) => html`<div class="cfg-finding ${f.severity}">
               ${f.message}
@@ -641,6 +672,161 @@ export class ConfigPanel extends PanelElement {
     `;
   }
 
+  /**
+   * Per-line actions: add a line under this one, comment it out, remove it.
+   *
+   * Quiet until the line is hovered or one of them is pending. A configuration
+   * is read far more often than it is changed, and a row of controls on every
+   * line of a file being read is noise — worse, it invites pressing one.
+   */
+  private renderOps(path: string, line: ConfigLine): TemplateResult | typeof nothing {
+    if (line.kind === 'note' && !line.raw.trim()) return nothing;
+    const key = `${path}:${line.index}`;
+    if (this.removing.has(key)) {
+      return html`<button class="cfg-state pending" title="Undo" @click=${() => {
+        this.removing.delete(key);
+        this.requestUpdate();
+      }}>to be removed</button>`;
+    }
+    if (this.toggled.has(key)) {
+      return html`<button class="cfg-state pending" title="Undo" @click=${() => {
+        this.toggled.delete(key);
+        this.requestUpdate();
+      }}>
+        ${line.kind === 'disabled' ? 'to be brought back' : 'to be commented out'}
+      </button>`;
+    }
+    const live = line.kind === 'command';
+    return html`<span class="cfg-ops">
+      <button class="cfg-op" title="Add a line after this one" @click=${() => {
+        this.inserting = this.inserting === key ? null : key;
+        this.draft = '';
+        this.requestUpdate();
+      }}>+</button>
+      ${line.kind === 'command' || line.kind === 'disabled'
+        ? html`<button
+            class="cfg-op"
+            title=${live
+              ? 'Comment it out — it stays in the file and stops running'
+              : 'Bring it back — it starts running again at the next restart'}
+            @click=${() => {
+              this.toggled.add(key);
+              this.requestUpdate();
+            }}
+          >
+            ${live ? ';' : '↺'}
+          </button>`
+        : nothing}
+      <button class="cfg-op bad" title="Remove the line from the file" @click=${() => {
+        this.removing.add(key);
+        this.requestUpdate();
+      }}>✕</button>
+    </span>`;
+  }
+
+  /**
+   * The box for a line typed by hand, and what the checker makes of it.
+   *
+   * Validated on every keystroke against the position it would actually go in,
+   * and refused rather than warned about: the whole argument for letting anyone
+   * type anything here is that the result is checked as hard as the rest of the
+   * file already is.
+   */
+  private renderDraft(path: string, line: ConfigLine): TemplateResult | typeof nothing {
+    const key = `${path}:${line.index}`;
+    const queued = this.inserts.get(key);
+    if (queued !== undefined && this.inserting !== key) {
+      return html`<div class="cfg-draft queued">
+        <span class="cfg-state pending">to be added below</span>
+        <code class="cfg-new">${queued}</code>
+        <button class="tiny ghost" @click=${() => {
+          this.inserts.delete(key);
+          this.requestUpdate();
+        }}>Undo</button>
+      </div>`;
+    }
+    if (this.inserting !== key) return nothing;
+    const problems = this.checkDraft(path, line, this.draft);
+    const usable = this.draft.trim().length > 0 && problems.length === 0;
+    return html`<div class="cfg-draft">
+      <input
+        class="cfg-draft-input"
+        placeholder=${`A line to run after line ${line.index + 1}`}
+        .value=${this.draft}
+        @input=${(e: Event) => {
+          this.draft = (e.target as HTMLInputElement).value;
+          this.requestUpdate();
+        }}
+        @keydown=${(e: KeyboardEvent) => {
+          if (e.key === 'Escape') {
+            this.inserting = null;
+            this.requestUpdate();
+          }
+          if (e.key === 'Enter' && usable) {
+            this.inserts.set(key, this.draft.trim());
+            this.inserting = null;
+            this.requestUpdate();
+          }
+        }}
+      />
+      <button class="tiny primary" ?disabled=${!usable} @click=${() => {
+        this.inserts.set(key, this.draft.trim());
+        this.inserting = null;
+        this.requestUpdate();
+      }}>Add</button>
+      <button class="tiny ghost" @click=${() => {
+        this.inserting = null;
+        this.requestUpdate();
+      }}>Cancel</button>
+      ${problems.map((t) => html`<div class="cfg-missing-no">${t}</div>`)}
+    </div>`;
+  }
+
+  /**
+   * What is wrong with a line somebody has typed, before it goes anywhere.
+   *
+   * This is what makes a free-text insert defensible. The text is parsed by the
+   * same parser, put into the file at the exact position it would occupy, and
+   * run through the same checker — so it is judged by the rules that already
+   * describe this configuration rather than by anything written for this box.
+   * An empty answer means the checker has no objection to it there.
+   */
+  private checkDraft(path: string, after: ConfigLine, text: string): string[] {
+    const trimmed = text.trim();
+    if (!trimmed) return [];
+    const files = this.loaded?.files ?? [];
+    const parsed = parseConfig(path, trimmed).lines[0];
+    const problems: string[] = [];
+    if (!parsed) return ['Nothing to add.'];
+    if (parsed.kind === 'command' && parsed.command) {
+      // A command the reference has never heard of is more often a typo than a
+      // command the reference is missing, and RRF answers an unknown code with
+      // an error at boot that nobody is watching for.
+      if (this.index && !this.index.codes.some((c) => c.code === parsed.command)) {
+        problems.push(`${parsed.command} is not in the G-code reference — check the spelling.`);
+      }
+    } else if (parsed.kind === 'note') {
+      // A comment is always safe, and sometimes exactly what is wanted.
+      return [];
+    }
+    problems.push(
+      ...findingsAdded(
+        files,
+        { path, after, text: trimmed, because: '' },
+        this.index,
+        this.axes.map((a) => a.letter),
+      ),
+    );
+    return problems;
+  }
+
+  /** A line's text with its comment marker put on or taken off. */
+  private toggledText(line: ConfigLine): string {
+    if (line.kind === 'disabled') return line.raw.replace(';', '');
+    const at = line.raw.length - line.raw.trimStart().length;
+    return `${line.raw.slice(0, at)};${line.raw.slice(at)}`;
+  }
+
   private jump(path: string, index: number): void {
     this.closed.delete(path);
     this.requestUpdate();
@@ -661,7 +847,9 @@ export class ConfigPanel extends PanelElement {
     const appliedCount = new Set(
       [...this.applied.keys()].map((k) => k.slice(0, k.lastIndexOf(':'))),
     ).size;
-    const adds = this.adding.size + this.newCommands.size;
+    const adds =
+      this.adding.size + this.newCommands.size + this.inserts.size +
+      this.toggled.size + this.removing.size;
     if (
       !pending.length && !appliedCount && !adds &&
       !this.applyError && !this.saveError && !this.saved.length
@@ -700,7 +888,7 @@ export class ConfigPanel extends PanelElement {
                appear, which is not a discoverable way to save a file. -->
           ${adds
             ? html`<span class="cfg-state pending"
-                >${adds} line${adds === 1 ? '' : 's'} to add</span
+                >${adds} line${adds === 1 ? '' : 's'} to write</span
               >`
             : nothing}
           ${pending.length || appliedCount || adds
@@ -745,12 +933,7 @@ export class ConfigPanel extends PanelElement {
         ${cautions.map((c) => html`<div class="cfg-apply-note">${c}</div>`)}
         ${this.saved.map(
           (r) => html`<div class="cfg-apply-note ok">
-            Saved ${r.path}${r.lines.length
-              ? html` — line${r.lines.length === 1 ? '' : 's'} ${r.lines.join(', ')} changed`
-              : nothing}${r.added.length
-              ? html`${r.lines.length ? ',' : ' —'} line${r.added.length === 1 ? '' : 's'}
-                ${r.added.join(', ')} added`
-              : nothing}.
+            Saved ${r.path}${describeSave(r)}.
             ${r.backup ? html`Previous contents kept in <code>${r.backup}</code>.` : nothing}
           </div>`,
         )}
@@ -893,6 +1076,31 @@ function paramHelp(entry: { params: Array<{ letter: string; text: string }> } | 
   if (!entry) return '';
   const p = entry.params.find((x) => x.letter.toUpperCase().startsWith(letter));
   return p ? `${p.letter} — ${p.text}` : '';
+}
+
+/**
+ * What a save did, in words: "— line 3 changed, line 5 added, line 6 removed".
+ *
+ * Every number here is a line an operator can go and look at, which is the
+ * point. "Saved config-axes.g" on its own is a claim; this is a receipt.
+ */
+function describeSave(r: SaveReport): string {
+  const plural = (n: number) => (n === 1 ? 'line' : 'lines');
+  const parts: string[] = [];
+  if (r.lines.length) parts.push(`${plural(r.lines.length)} ${r.lines.join(', ')} changed`);
+  if (r.added.length) parts.push(`${plural(r.added.length)} ${r.added.join(', ')} added`);
+  // Removals get a count and no numbers. Changed and added lines can be gone
+  // and looked at; a removed one has no number any more, and the number it had
+  // is in the old file's numbering — printing both next to each other produced
+  // "line 5 added, line 5 removed", which is two true statements that read as
+  // one contradiction.
+  if (r.removed.length) parts.push(`${r.removed.length} ${plural(r.removed.length)} removed`);
+  return parts.length ? ` — ${parts.join(', ')}` : '';
+}
+
+/** The line an op is anchored to, by index. */
+function anchorIndex(op: FileOp): number {
+  return op.kind === 'insert' ? op.after.index : op.line.index;
 }
 
 customElements.define('cnc-config', ConfigPanel);
