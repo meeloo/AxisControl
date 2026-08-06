@@ -1762,6 +1762,18 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
   padding-top: 2px; }
 .cfg-code { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; }
 .cfg-cmd { font-family: var(--mono); font-size: 12px; font-weight: 700; color: var(--code-cmd, var(--accent)); }
+/* The command opens its own documentation. Styled as text rather than as a
+   button — it is the thing being read, and a row of buttons down the left of a
+   config file would look like a toolbar. The dotted underline is the only
+   signal it needs, and it is the one the rest of the web uses for this. */
+button.cfg-cmd { background: none; border: none; padding: 0; font: inherit; cursor: pointer;
+  border-bottom: 1px dotted transparent; }
+button.cfg-cmd:hover, button.cfg-cmd:focus-visible { border-bottom-color: currentColor; }
+button.cfg-cmd.unknown { color: var(--bad); }
+.cfg-doc { margin-top: 6px; padding: 8px 10px; border-left: 2px solid var(--border);
+  background: var(--bg-sunken, transparent); border-radius: 0 4px 4px 0; }
+.cfg-doc .gc-entry-head { display: none; }
+
 .cfg-param { font-family: var(--mono); font-size: 12px; color: var(--text-dim); }
 .cfg-param em { font-style: normal; color: var(--text); font-weight: 600; }
 .cfg-raw { font-family: var(--mono); font-size: 12px; color: var(--text-faint); }

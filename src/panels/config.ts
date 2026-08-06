@@ -62,6 +62,7 @@ import {
 } from '../config/parse.js';
 import { actions } from '../core/store.js';
 import { loadIndex } from '../docs/load.js';
+import { renderEntry } from '../docs/entry.js';
 import type { GcodeIndex } from '../docs/types.js';
 
 export class ConfigPanel extends PanelElement {
@@ -102,6 +103,8 @@ export class ConfigPanel extends PanelElement {
   private toggled = new Set<string>();
   /** Lines to remove entirely, keyed by file:line. */
   private removing = new Set<string>();
+  /** Lines whose documentation is open, keyed by file:line. */
+  private docs = new Set<string>();
   /** Which line's insert field is open, and what has been typed into it. */
   private inserting: string | null = null;
   private draft = '';
@@ -213,7 +216,12 @@ export class ConfigPanel extends PanelElement {
         for (const p of line.params) {
           const key = editKey(path, line, p.letter);
           const value = this.edits.get(key);
-          if (value !== undefined) this.applied.set(key, { value, raw: line.raw });
+          if (value === undefined) continue;
+          // A value sent back to what the file already says is not "applied,
+          // not saved" — there is nothing left to save, and the badge would be
+          // reporting a difference that no longer exists.
+          if (sameValue(value, p.text)) this.applied.delete(key);
+          else this.applied.set(key, { value, raw: line.raw });
         }
       }
       this.edits.clear();
@@ -486,7 +494,14 @@ export class ConfigPanel extends PanelElement {
         }}
         @change=${(e: Event) => {
           const raw = (e.target as HTMLInputElement).value.trim();
-          if (raw === '' || raw === p.text) this.edits.delete(key);
+          // Against what is in force, not against what the file says. On a line
+          // that has already been applied those are two different numbers, and
+          // comparing with the file meant typing the file's own value back
+          // dropped the edit — leaving the machine running the applied one with
+          // nothing on screen offering to send anything. The panel could see the
+          // disagreement, said so in the live badge, and had no button for it.
+          const current = applied?.value ?? p.text;
+          if (raw === '' || sameValue(raw, current)) this.edits.delete(key);
           else this.edits.set(key, raw);
           this.applyError = null;
           this.requestUpdate();
@@ -510,7 +525,18 @@ export class ConfigPanel extends PanelElement {
         <div class="cfg-body">
           <div class="cfg-code">
             ${line.command
-              ? html`<code class="cfg-cmd" title=${entry?.title ?? ''}>${line.command}</code>`
+              ? html`<button
+                  class="cfg-cmd ${entry ? '' : 'unknown'}"
+                  title=${entry
+                    ? `${entry.title} — click for the reference`
+                    : `${line.command} is not in the G-code reference`}
+                  @click=${() => {
+                    const at = `${path}:${line.index}`;
+                    if (this.docs.has(at)) this.docs.delete(at);
+                    else this.docs.add(at);
+                    this.requestUpdate();
+                  }}
+                >${line.command}</button>`
               : nothing}
             ${line.params.map((p) => this.renderParam(path, line, p, entry))}
             ${!line.command ? html`<span class="cfg-raw">${line.raw.trim()}</span>` : nothing}
@@ -531,6 +557,9 @@ export class ConfigPanel extends PanelElement {
           ${entry ? html`<div class="cfg-title">${entry.title}</div>` : nothing}
           ${line.comment && line.kind === 'command'
             ? html`<div class="cfg-comment">${line.comment}</div>`
+            : nothing}
+          ${this.docs.has(`${path}:${line.index}`) && entry
+            ? html`<div class="cfg-doc">${renderEntry(entry)}</div>`
             : nothing}
           ${this.renderDraft(path, line)}
           ${found.map(
@@ -1096,6 +1125,24 @@ function describeSave(r: SaveReport): string {
   // one contradiction.
   if (r.removed.length) parts.push(`${r.removed.length} ${plural(r.removed.length)} removed`);
   return parts.length ? ` — ${parts.join(', ')}` : '';
+}
+
+/**
+ * Whether two written values mean the same number.
+ *
+ * "6000" and "6000.00" are the same setting written two ways, and this panel
+ * has to answer both questions about them: textually they differ, so writing
+ * one where the file has the other is a real change to the file; numerically
+ * they agree, so a machine running one is not disagreeing with a file that says
+ * the other. Everything here is the second question. Values that are not
+ * numbers at all — pin names, driver lists — fall back to comparing the text,
+ * which is the only thing that means anything for them.
+ */
+function sameValue(a: string, b: string): boolean {
+  if (a === b) return true;
+  const x = Number(a);
+  const y = Number(b);
+  return a.trim() !== '' && b.trim() !== '' && isFinite(x) && isFinite(y) && x === y;
 }
 
 /** The line an op is anchored to, by index. */

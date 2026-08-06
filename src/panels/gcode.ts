@@ -9,9 +9,10 @@
 // for endstops" starts from the words. One box does both, because deciding
 // which mode you are in before you type is the friction being removed.
 
-import { html, nothing, type TemplateResult } from 'lit';
+import { html, type TemplateResult } from 'lit';
 import { PanelElement, registerPanel } from '../ui/panel.js';
 import { searchCodes, type GcodeEntry, type GcodeIndex } from '../docs/types.js';
+import { renderEntry } from '../docs/entry.js';
 import { loadIndex } from '../docs/load.js';
 
 export class GcodePanel extends PanelElement {
@@ -97,47 +98,7 @@ export class GcodePanel extends PanelElement {
     row?.focus({ preventScroll: true });
   }
 
-  private renderEntry(entry: GcodeEntry): TemplateResult {
-    return html`
-      <div class="gc-entry">
-        <div class="gc-entry-head">
-          <strong>${entry.code}</strong>
-          <span>${entry.title}</span>
-        </div>
-        ${entry.support ? html`<div class="gc-support">${entry.support}</div>` : nothing}
 
-        ${entry.params.length
-          ? html`<div class="gc-section">Parameters</div>
-              <div class="gc-params">
-                ${entry.params.map(
-                  (p) => html`
-                    <code class="gc-param ${p.required ? 'req' : ''}">${p.letter}</code>
-                    <span>${p.text}${p.required ? html`<em> — required</em>` : nothing}</span>
-                  `,
-                )}
-              </div>`
-          : nothing}
-
-        ${entry.examples.length
-          ? html`<div class="gc-section">Examples</div>
-              <pre class="gc-examples">${entry.examples.join('\n')}</pre>`
-          : nothing}
-
-        ${entry.notes.length
-          ? html`<div class="gc-section">Notes</div>
-              <ul class="gc-notes">
-                ${entry.notes.map((n) => html`<li>${n}</li>`)}
-              </ul>`
-          : nothing}
-
-        ${entry.url
-          ? html`<a class="hint gc-link" href=${entry.url} target="_blank" rel="noreferrer">
-              Read it on docs.duet3d.com
-            </a>`
-          : nothing}
-      </div>
-    `;
-  }
 
   protected override render(): TemplateResult {
     if (this.error) {
@@ -183,7 +144,7 @@ export class GcodePanel extends PanelElement {
           </div>
           <div class="gc-detail">
             ${this.selected
-              ? this.renderEntry(this.selected)
+              ? renderEntry(this.selected)
               : html`<div class="pack-note">
                   ${this.index.codes.length} codes. Type a number to look one up, or a word to find
                   out which one you want.
