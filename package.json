@@ -19,7 +19,8 @@
     "typecheck": "tsc --noEmit",
     "camera-proxy": "node tools/camera-proxy.mjs",
     "gcode-index": "node tools/build-gcode-index.mjs",
-    "merge-oracle": "node tools/merge-oracle.mjs"
+    "merge-oracle": "node tools/merge-oracle.mjs",
+    "rewrite-check": "node tools/rewrite-check.mjs"
   },
   "dependencies": {
     "clipper-lib": "^6.4.2",

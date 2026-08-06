@@ -63,9 +63,15 @@ export function backupPath(path: string): string {
  * LF it uses and whether or not it ends with a newline. Splitting on /\r?\n/ and
  * joining with '\n' would quietly convert a whole file's line endings on the
  * first save, which is a diff nobody asked for.
+ *
+ * The separator has to be the same one parseConfig splits on, down to the lone
+ * `\r` it deliberately does not treat as a line break. A splitter that is even
+ * slightly more generous than the parser numbers the lines differently, and
+ * "line 8" would then mean two things in the one function that has to compare
+ * them.
  */
 function splitKeeping(text: string): string[] {
-  return text.split(/(\r\n|\n|\r)/);
+  return text.split(/(\r?\n)/);
 }
 
 const lineAt = (parts: string[], index: number): string | undefined => parts[index * 2];
