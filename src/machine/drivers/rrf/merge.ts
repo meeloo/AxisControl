@@ -12,6 +12,18 @@
 // One RRF-specific wrinkle: a shortened array in a patch means items were
 // removed (e.g. a tool was deleted), so we truncate to the patch length. A
 // `null` array element means "no change to this element".
+//
+// That last sentence is the one unverified claim in this file, and it is the
+// only place this merge disagrees with @duet3d/objectmodel, which reads a null
+// element as "there is nothing at this index now" and overwrites. Neither
+// reading is documented. `npm run merge-oracle` runs both implementations over
+// the same patches and reports it; the comment there says which observation
+// settles it and what to change if the reference turns out to be right.
+//
+// It matters less than it sounds: an element that is null from the start ends
+// up null under both readings, so the machines this runs on agree today. The
+// two only part company when an element goes from present to null, which is an
+// item being deleted while connected.
 
 export function mergeInto<T>(target: T, patch: unknown): T {
   if (patch === null || patch === undefined) return target;
