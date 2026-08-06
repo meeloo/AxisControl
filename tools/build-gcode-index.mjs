@@ -28,7 +28,7 @@
 import { writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = dirname(fileURLToPath(import.meta.url)).replace(/\/tools$/, '');
 const args = process.argv.slice(2);
@@ -178,6 +178,19 @@ function headingCode(heading) {
 }
 
 /**
+ * Whether a parameter's tail is made only of value placeholders.
+ *
+ * Every run of letters has to be three or more of the same character — `bbb`,
+ * `aaa`, `nnn` — with anything non-alphabetic between them, so `aaa:bbb` and
+ * `nnn:nnn...` pass and `epRapFirmware` does not.
+ */
+function isPlaceholderRuns(tail) {
+  const runs = tail.match(/[A-Za-z]+/g) ?? [];
+  if (!runs.length) return false;
+  return runs.every((run) => run.length >= 3 && new Set(run.toLowerCase()).size === 1);
+}
+
+/**
  * A parameter bullet, split into the letter and what it does.
  *
  * The docs write these as `Tnn (required) Logical trigger number…` or
@@ -199,15 +212,29 @@ function parseParam(line) {
   // which is noise in the reference and a wrong suggestion in the editor.
   //
   // A parameter is a letter and, at most, a placeholder for its value: Xnnn,
-  // Tnn, R1, S, P"pin_name", E[0]. A second English word means prose.
-  // Trailing punctuation is the docs' own, not the parameter's: several are
-  // written "Pnn:" or "Xnnn," and dropping them for it would lose real ones.
+  // Tnn, R1, S, P"pin_name", E[0], Lbbb, Laaa:bbb. A second English word means
+  // prose. Trailing punctuation is the docs' own, not the parameter's: several
+  // are written "Pnn:" or "Xnnn," and dropping them for it would lose real ones.
   const head = match[1].replace(/[,:]+$/, '');
+  const tail = head.slice(1);
   const isParam =
     /^[A-Za-z]"/.test(match[1]) ||
-    // A letter, then only placeholders — n, digits, brackets, punctuation. A
-    // second English letter after the first means it is a word, not a code.
-    (!/^[GgMmTt]\d/.test(head) && !/[a-mo-zA-MO-Z]/.test(head.slice(1)));
+    (!/^[GgMmTt]\d/.test(head) &&
+      // Two shapes of placeholder, and the second was missing.
+      //
+      //   n-only:  Xnnn, Tnn, Dn, S, R1, Ennn:nnn...   the docs' usual form
+      //   any run: Lbbb, Laaa:bbb, Sxxx                M950's spindle L, and
+      //                                                anywhere else the page
+      //                                                needed a second letter
+      //                                                to name a second thing
+      //
+      // The n-only form allows a single n because Dn and En are real. The
+      // general form needs three of the same character, which is the line
+      // between a placeholder and an English word: "All", "See", "Off" and
+      // "Add" all end in a doubled letter and would walk straight in at two.
+      // Nothing in English runs a letter three times, and nothing in the docs
+      // writes a placeholder shorter than that unless it is n.
+      (!/[a-mo-zA-MO-Z]/.test(tail) || isPlaceholderRuns(tail)));
   if (!isParam) return null;
 
   const required = /\(required\)/i.test(match[2]);
@@ -374,6 +401,17 @@ function inspect(html) {
 
 // --- Go ---------------------------------------------------------------------
 
+// Importable for tools/gcode-params-check.mjs, which exercises parseParam
+// against bullets copied from the page. Without this guard, importing it would
+// fetch the docs and rewrite the committed index as a side effect of a test.
+export { parseParam, isPlaceholderRuns };
+
+// Run only when this file is the program. Imported — by the parser test — the
+// definitions above are all that was wanted, and fetching the docs and
+// rewriting the committed index as a side effect of a test would be a bad
+// trade for a shorter file.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+
 const fetched = await loadPage();
 
 // A change to this file changes the index even when the page has not moved, so
@@ -444,3 +482,5 @@ if (currentIndex() === body) {
 
 writeFileSync(out, body);
 console.log(`[gcode-index] wrote ${out.replace(`${root}/`, '')}`);
+
+}

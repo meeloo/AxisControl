@@ -106,7 +106,13 @@ function documented(index: GcodeIndex | null, command: string): Set<string> | nu
     // Some entries list several letters in one line — M584's "Unnn Vnnn, Wnnn,
     // Annn, ..." and M950's "or Snn" — so the alternatives are read out of the
     // start of the description too.
-    for (const m of `${p.letter} ${p.text.slice(0, 60)}`.matchAll(/\b([A-Z])(?:n{1,3}\b|"nnn")/g)) {
+    for (const m of `${p.letter} ${p.text.slice(0, 60)}`.matchAll(
+      // The same two placeholder shapes the index builder recognises: n-only
+      // (Snn, Dn) and a run of any letter three or more long (Lbbb, Laaa:bbb).
+      // Reading only the first meant a command whose alternative was written
+      // with a different letter had that alternative called unrecognised.
+      /\b([A-Z])(?:n{1,3}\b|"nnn"|([a-z])\2{2,}\b)/g,
+    )) {
       out.add(m[1]!);
     }
   }
