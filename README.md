@@ -201,16 +201,34 @@ Open <http://localhost:8081> and it connects to itself.
 
 ## Deploying to the controller
 
-Either host it anywhere on the LAN and point it at the controller, or copy
-`dist/` onto the SD card:
+Easiest is the **Install** panel, which copies the running copy across for you
+and writes the redirect described below. By hand, either host it anywhere on
+the LAN and point it at the controller, or copy `dist/` onto the SD card:
 
 ```
 cp -r dist/* /path/to/sd/www/axis/
 ```
 
-then browse to `http://<controller>/axis/`. Ship the `.gz` files alongside the
-originals; the Duet serves them when the browser sends `Accept-Encoding: gzip`,
-which matters because it reads off the SD card single-threaded.
+then browse to `http://<controller>/axis/index.html` — **`index.html` and not
+just `/axis/`**. RRF maps `/` to `/www/index.html`, which is how browsing to a
+Duet gets you DWC, but it does not do the same for any other directory: a
+request for `/axis/` is a request for a file called `axis/`, and there is no
+such file.
+
+Two ways round it, if typing the whole path is tiresome:
+
+- Put a one-line redirect beside the directory, at `/www/axis.html`, so
+  `http://<controller>/axis.html` works. This is what the Install panel's
+  shortcut option writes — a `<meta http-equiv="refresh">`, which needs no
+  scripting and is understood by everything.
+- Or replace DWC outright by copying `dist/` into `/www` itself, after which
+  `/` serves this instead. Worth thinking twice about: DWC is the fallback for
+  when *this* is the thing that is broken, and firmware updates and network
+  setup are still its job.
+
+Ship the `.gz` files alongside the originals; the Duet serves them when the
+browser sends `Accept-Encoding: gzip`, which matters because it reads off the
+SD card single-threaded.
 
 Served from anywhere other than the controller, cross-origin rules apply, so
 the controller needs `M586 C"*"` in its network config. Note what that does
