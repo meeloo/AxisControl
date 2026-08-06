@@ -828,10 +828,44 @@ const server = createServer(async (req, res) => {
   res.end('not found');
 });
 
+/**
+ * Per-axis tuning commands, applied for real.
+ *
+ * The config panel sends these to try a value out and then reads the object
+ * model back to say whether it took. A mock that accepted them and changed
+ * nothing would let that whole path pass while doing nothing on a real board.
+ */
+const AXIS_SETTERS = {
+  M92: 'stepsPerMm',
+  M201: 'acceleration',
+  M203: 'speed',
+  M566: 'jerk',
+  M906: 'current',
+};
+
+function applyAxisSetting(upper) {
+  const cmd = /^(M92|M201|M203|M566|M906)\b/.exec(upper);
+  if (!cmd) return false;
+  const field = AXIS_SETTERS[cmd[1]];
+  for (const m of upper.matchAll(/([XYZUVWABC])(-?\d+(?:\.\d+)?)/g)) {
+    const axis = axes.find((a) => a.letter === m[1]);
+    if (axis) axis[field] = Number(m[2]);
+  }
+  // Speeds, accelerations and currents are not in the frequently-changing set,
+  // so a client polling d99fn never sees them move. RRF answers that by
+  // advancing move's sequence number, which is a client's signal to re-read the
+  // whole key — without this the mock changes a value that no client can
+  // observe, and anything testing "did it take" passes while doing nothing.
+  bumpSeq('move');
+  return true;
+}
+
 function handleGcode(gcode) {
   const cmds = gcode.split('\n').map((c) => c.trim()).filter(Boolean);
   for (const cmd of cmds) {
     const upper = cmd.toUpperCase();
+
+    if (applyAxisSetting(upper)) continue;
 
     if (upper.startsWith('M997')) {
       // The firmware refuses to flash unless the files it named are actually

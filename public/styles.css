@@ -1786,3 +1786,31 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .cfg-finding.order { border-left-color: var(--warn, #b8860b); }
 .cfg-finding button.link { font-size: 11px; margin-left: 4px; }
 .cfg-note { padding: 10px 12px; }
+
+/* An editable value sits in the code where the number was, rather than in a
+   form somewhere else: the line you are reading is the line you are changing. */
+.cfg-param.edit { display: inline-flex; align-items: baseline; gap: 1px; }
+/* No spinners: they cost 20px of a value that is already narrow, and the pair
+   of arrows invites nudging a motor current by one milliamp at a time. */
+.cfg-param.edit input {
+  width: 6.5ch; min-height: 22px; padding: 1px 4px; font-family: var(--mono); font-size: 12px;
+  font-weight: 600; background: var(--bg-input); border-color: var(--border);
+  appearance: textfield; -moz-appearance: textfield;
+}
+.cfg-param.edit input::-webkit-outer-spin-button,
+.cfg-param.edit input::-webkit-inner-spin-button { appearance: none; margin: 0; }
+.cfg-param.edit input:focus { border-color: var(--accent); }
+.cfg-param.edit.pending input { border-color: var(--accent); background: var(--tint-accent); }
+.cfg-param.edit.applied input { border-color: var(--good); }
+
+.cfg-state { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+  padding: 0 5px; border-radius: 3px; white-space: nowrap; font-weight: 700; }
+.cfg-state.pending { background: var(--accent); color: var(--on-accent); }
+.cfg-state.applied { background: var(--good); color: #fff; }
+
+.cfg-apply { padding: 8px 12px; background: var(--bg-raised);
+  border-bottom: 1px solid var(--border); position: sticky; top: 41px; z-index: 1; }
+.cfg-apply-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
+.cfg-apply-row strong { font-size: 12px; }
+.cfg-apply-note { font-size: 11px; color: var(--text-dim); margin-top: 5px; line-height: 1.45; }
+.cfg-apply-note.bad { color: var(--bad); font-weight: 600; }
