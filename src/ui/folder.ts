@@ -17,9 +17,10 @@
 // made the second panel drag the first along with it. Two of a kind are only
 // the same thing if you never needed two.
 //
-// The key is the instance id, which the layout persists, so a folder survives
-// a reload. The first instance of a kind has an id equal to its kind, so
-// anything chosen before this changed still reads back.
+// The key is the page and the instance id, both of which the layout persists,
+// so a folder survives a reload. The page is part of it because an instance id
+// is only unique within its page — every page's first Files panel is called
+// "files".
 
 import { html, nothing, type TemplateResult } from 'lit';
 import { PanelElement } from './panel.js';
@@ -29,19 +30,45 @@ import type { FileEntry } from '../machine/types.js';
 
 const KEY = (panel: string) => `dir.${panel}`;
 
+/** The key this panel used before folders were per page: the instance id alone. */
+function legacyKey(panel: string): string | null {
+  const slash = panel.indexOf('/');
+  return slash < 0 ? null : KEY(panel.slice(slash + 1));
+}
+
+/**
+ * What is stored for this panel, or null.
+ *
+ * Reads the old key when the new one has never been written, so a folder
+ * pinned before the key gained a page is still there afterwards. Every page's
+ * panel of that kind inherits it, which is what they shared before anyway;
+ * they part company the moment one of them is changed.
+ */
+function stored(panel: string): string | null {
+  const own = loadSetting<string | null>(KEY(panel), null);
+  if (typeof own === 'string') return own;
+  const old = legacyKey(panel);
+  const legacy = old ? loadSetting<string | null>(old, null) : null;
+  return typeof legacy === 'string' ? legacy : null;
+}
+
 /** The folder this panel should open in, or `fallback` when none was chosen. */
 export function panelDir(panel: string, fallback: string | null): string | null {
-  const saved = loadSetting<string | null>(KEY(panel), null);
+  const saved = stored(panel);
   return saved && saved.startsWith('/') ? saved : fallback;
 }
 
 /** Remember a folder for this panel; null goes back to the controller's default. */
 export function setPanelDir(panel: string, dir: string | null): void {
   saveSetting(KEY(panel), dir);
+  // Drop the pre-page key as well, or Reset would clear this panel's folder and
+  // then read the old one straight back and look like it had done nothing.
+  const old = legacyKey(panel);
+  if (old) saveSetting(old, null);
 }
 
 export function hasPanelDir(panel: string): boolean {
-  return typeof loadSetting<string | null>(KEY(panel), null) === 'string';
+  return stored(panel) !== null;
 }
 
 /**

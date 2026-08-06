@@ -17,22 +17,46 @@ export class PanelElement extends LitElement {
   instanceId = '';
   /** Which kind of panel this is, assigned by the layout host. */
   panelType = '';
+  /** Page this instance lives on, assigned by the layout host. */
+  pageId = '';
 
   /**
    * Key for anything this instance remembers of its own — see ui/folder.ts.
    *
-   * The instance id, so two panels of the same kind on a page each keep their
-   * own. It falls back to the panel type for an element built outside the
-   * layout, and the first instance of a kind has an id equal to its type
-   * anyway, so a setting stored before this existed still reads back.
+   * Page and instance together, because an instance id is only unique within
+   * its page: every page's first Files panel is called "files", so the page
+   * has to be part of the name or two of them are one panel as far as their
+   * settings are concerned.
+   *
+   * Falls back to the panel type for an element built outside the layout,
+   * which is only tests — anything real is created by the layout host.
    */
   protected get panelKey(): string {
-    return this.instanceId || this.panelType || this.tagName.toLowerCase();
+    const own = this.instanceId || this.panelType || this.tagName.toLowerCase();
+    return this.pageId ? `${this.pageId}/${own}` : own;
   }
 
   /** Render into light DOM — see note above. */
   protected override createRenderRoot(): HTMLElement | DocumentFragment {
     return this;
+  }
+
+  /**
+   * Re-render whenever the element comes back.
+   *
+   * A panel that is not the visible tab gets detached, and detaching disposes
+   * its effects — so everything that changed while it was away was missed, and
+   * the DOM it still carries is a snapshot of whenever it was last on screen.
+   * Lit does not re-render on reconnect by itself, and the panel's own
+   * connectedCallback only re-subscribes, which fires on the NEXT change.
+   *
+   * The Console tab on a page laid out before the machine connected therefore
+   * said "Not connected" for the rest of the session, with a disabled input,
+   * while every panel that had been on screen at the time was live.
+   */
+  override connectedCallback(): void {
+    super.connectedCallback();
+    if (this.hasUpdated) this.requestUpdate();
   }
 
   /**

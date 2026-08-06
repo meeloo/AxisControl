@@ -186,19 +186,30 @@ export class DashboardHost extends PanelElement {
 
   // --- Dockview plumbing --------------------------------------------------
 
-  /** Wrap a panel custom element as a dockview content renderer. */
-  private renderer(instanceId: string, panelId: string): IContentRenderer {
+  /**
+   * Wrap a panel custom element as a dockview content renderer.
+   *
+   * Cached by page AND instance id, not by instance id alone. Each page is its
+   * own dockview, so ids are only unique within one: the Console sits on both
+   * Control and Advanced and is called "console" on each. Keyed by id alone,
+   * those two tabs shared a single element — and since an element can only be
+   * in one place at a time, switching pages physically moved it. It looked
+   * like it worked because only one page is on screen at once.
+   */
+  private renderer(pageId: string, instanceId: string, panelId: string): IContentRenderer {
     const def = panelDefinition(panelId);
     const wrapper = document.createElement('div');
     wrapper.className = 'dv-panel';
 
     if (def) {
-      let el = this.elements.get(instanceId);
+      const key = `${pageId}/${instanceId}`;
+      let el = this.elements.get(key);
       if (!el) {
         el = document.createElement(def.tag) as PanelElement;
         el.instanceId = instanceId;
         el.panelType = panelId;
-        this.elements.set(instanceId, el);
+        el.pageId = pageId;
+        this.elements.set(key, el);
       }
       wrapper.appendChild(el);
     } else {
@@ -216,7 +227,7 @@ export class DashboardHost extends PanelElement {
   private createView(page: PageState, host: HTMLElement): DockviewApi {
     const api = createDockview(host, {
       // The panel id is the instance id; `name` carries the panel type.
-      createComponent: (options) => this.renderer(options.id, options.name),
+      createComponent: (options) => this.renderer(page.id, options.id, options.name),
       disableFloatingGroups: true,
       theme: dvTheme(theme.peek()),
     });
