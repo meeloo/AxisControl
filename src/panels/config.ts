@@ -34,10 +34,26 @@ import { activeDriver, connected, machine } from '../core/store.js';
 import { empty } from '../ui/widgets.js';
 import { loadConfig, type LoadedConfig } from '../config/load.js';
 import { checkConfig, type Finding } from '../config/check.js';
-import { comparable, compareLine, describe, type LiveValue } from '../config/live.js';
+import {
+  comparable,
+  comparableCommands,
+  compareLine,
+  describe,
+  type LiveValue,
+} from '../config/live.js';
 import { blockedBy, caution, commandFor, editKey, liveAppliable } from '../config/apply.js';
-import { saveFile, type LineEdit, type SaveReport } from '../config/save.js';
-import { editable, type ConfigFile, type ConfigLine } from '../config/parse.js';
+import { saveFile, type FileOp, type SaveReport } from '../config/save.js';
+import {
+  appendParams,
+  commentColumn,
+  findingsAdded,
+  lineFor,
+  missingAxes,
+  missingCommands,
+  placeFor,
+  type Addition,
+} from '../config/add.js';
+import { editable, rewriteLine, type ConfigFile, type ConfigLine } from '../config/parse.js';
 import { actions } from '../core/store.js';
 import { loadIndex } from '../docs/load.js';
 import type { GcodeIndex } from '../docs/types.js';
@@ -70,6 +86,10 @@ export class ConfigPanel extends PanelElement {
   private saveError: string | null = null;
   /** What the last save actually did, so the panel can say it rather than imply it. */
   private saved: SaveReport[] = [];
+  /** Parameters to append to an existing line, keyed by file:line. */
+  private adding = new Map<string, Addition[]>();
+  /** Commands to write a whole new line for. */
+  private newCommands = new Set<string>();
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -92,6 +112,54 @@ export class ConfigPanel extends PanelElement {
 
   /** Lines whose values this panel is willing to touch. */
   private static readonly EDITABLE = new Set(['M92', 'M201', 'M203', 'M208', 'M566', 'M906']);
+
+  /**
+   * Lines a new axis-configuration line belongs beside.
+   *
+   * Wider than EDITABLE because it is answering a different question. This is
+   * not "what may be changed" but "where do lines like this one live in this
+   * particular file", and M584 and M350 mark that group just as well as M203
+   * does — better, since a file may have no M203 at all, which is exactly the
+   * case a new line is being added for.
+   */
+  private static readonly FAMILY = new Set([
+    'M92', 'M201', 'M203', 'M208', 'M350', 'M566', 'M574', 'M584', 'M906',
+  ]);
+
+  private get axes() {
+    return machine.get().axes;
+  }
+
+  /** Commands the machine can be read back for that no line ever sets. */
+  private missing(): string[] {
+    if (!this.loaded) return [];
+    return missingCommands(this.loaded.files, new Set(comparableCommands()));
+  }
+
+  /**
+   * A new line for `command`: where it goes, what it says, and what the checker
+   * makes of it.
+   *
+   * The validation is the point. Rather than a second set of placement rules
+   * written for this one job, the proposed file is re-checked by the same code
+   * that reports on everything else — so a line put somewhere that would be
+   * refused at boot is caught by the rule that already knows why.
+   */
+  private plan(command: string):
+    | { path: string; op: Extract<FileOp, { kind: 'insert' }>; because: string; problems: string[] }
+    | { refused: string } {
+    const files = this.loaded?.files ?? [];
+    const spot = placeFor(files, command, '', ConfigPanel.FAMILY);
+    if ('refused' in spot) return spot;
+    const file = files.find((f) => f.path === spot.path)!;
+    const text = lineFor(command, this.axes, describe(command)?.label ?? command, commentColumn(file));
+    if (!text) {
+      return { refused: `The machine reports no ${describe(command)?.label ?? command} to write down.` };
+    }
+    const place = { ...spot, text };
+    const problems = findingsAdded(files, place, this.index, this.axes.map((a) => a.letter));
+    return { path: spot.path, op: { kind: 'insert', after: spot.after, text }, because: spot.because, problems };
+  }
 
   /** Every pending edit, grouped into the lines they belong to. */
   private pendingLines(): Array<{ path: string; line: ConfigLine }> {
@@ -174,10 +242,10 @@ export class ConfigPanel extends PanelElement {
    * into config.g is a number that has been tried, not one that has been typed.
    * The two never overlap — applying moves a value from one map to the other.
    */
-  private settled(): Array<{ file: ConfigFile; edits: LineEdit[] }> {
-    const out: Array<{ file: ConfigFile; edits: LineEdit[] }> = [];
+  private settled(): Array<{ file: ConfigFile; edits: FileOp[] }> {
+    const out: Array<{ file: ConfigFile; edits: FileOp[] }> = [];
     for (const file of this.loaded?.files ?? []) {
-      const edits: LineEdit[] = [];
+      const edits: FileOp[] = [];
       for (const line of file.lines) {
         if (!this.canEdit(line)) continue;
         const values = new Map<string, string>();
@@ -185,7 +253,23 @@ export class ConfigPanel extends PanelElement {
           const v = this.applied.get(editKey(file.path, line, p.letter));
           if (v !== undefined) values.set(p.letter, v.value);
         }
-        if (values.size) edits.push({ line, values });
+        const extra = this.adding.get(`${file.path}:${line.index}`) ?? [];
+        if (extra.length) {
+          // Append first, then substitute. Appending only touches the line at
+          // or after its last parameter, so every parameter offset still points
+          // where it did — do it the other way round and a value that changed
+          // width would have moved the end of the line out from under this.
+          const appended = appendParams(line, extra);
+          const text = values.size ? rewriteLine({ ...line, raw: appended }, values) : appended;
+          edits.push({ kind: 'replace', line, text });
+        } else if (values.size) {
+          edits.push({ kind: 'set', line, values });
+        }
+      }
+      for (const command of this.newCommands) {
+        const planned = this.plan(command);
+        if ('refused' in planned || planned.problems.length || planned.path !== file.path) continue;
+        edits.push(planned.op);
       }
       if (edits.length) out.push({ file, edits });
     }
@@ -230,8 +314,19 @@ export class ConfigPanel extends PanelElement {
       for (const { file, edits } of groups) {
         this.saved.push(await saveFile(driver, file, edits));
         // Only the lines that made it to disk stop being "applied, not saved".
-        for (const { line, values } of edits) {
-          for (const letter of values.keys()) this.applied.delete(editKey(file.path, line, letter));
+        for (const op of edits) {
+          if (op.kind === 'insert') continue;
+          this.adding.delete(`${file.path}:${op.line.index}`);
+          const letters =
+            op.kind === 'set'
+              ? [...op.values.keys()]
+              : op.line.params.map((prm) => prm.letter);
+          for (const letter of letters) this.applied.delete(editKey(file.path, op.line, letter));
+        }
+        for (const op of edits) {
+          if (op.kind !== 'insert') continue;
+          const cmd = /^([GM]\d+(?:\.\d+)?)/.exec(op.text.trim())?.[1];
+          if (cmd) this.newCommands.delete(cmd.toUpperCase());
         }
       }
     } catch (err) {
@@ -401,6 +496,7 @@ export class ConfigPanel extends PanelElement {
               ? html`<span class="cfg-off" title="Inside an if or while, so it may not run at all">conditional</span>`
               : nothing}
             ${this.lineState(path, line)}
+            ${this.renderAdd(path, line)}
           </div>
           ${entry ? html`<div class="cfg-title">${entry.title}</div>` : nothing}
           ${line.comment && line.kind === 'command'
@@ -445,6 +541,106 @@ export class ConfigPanel extends PanelElement {
     return nothing;
   }
 
+  /**
+   * The offer to write down an axis this line says nothing about.
+   *
+   * Only ever an offer, and only for a value the machine is already running.
+   * A file that sets X, Y and Z on a machine that has since grown a U axis is
+   * not wrong so much as out of date, and the number to put there is not a
+   * guess — it is what U is doing right now.
+   */
+  private renderAdd(path: string, line: ConfigLine): TemplateResult | typeof nothing {
+    if (!this.canEdit(line)) return nothing;
+    const key = `${path}:${line.index}`;
+    const queued = this.adding.get(key);
+    if (queued?.length) {
+      return html`<button
+        class="cfg-state pending"
+        title="Written into the line when you save. Click to drop it."
+        @click=${() => {
+          this.adding.delete(key);
+          this.requestUpdate();
+        }}
+      >
+        adding ${queued.map((a) => a.letter + a.text).join(' ')}
+      </button>`;
+    }
+    const gaps = missingAxes(line, this.axes);
+    if (!gaps.length) return nothing;
+    return html`<button
+      class="cfg-add"
+      title=${`This line says nothing about ${gaps.map((g) => g.letter).join(', ')}. The machine is running ${gaps
+        .map((g) => g.letter + g.text)
+        .join(' ')} — put that on the end of the line.`}
+      @click=${() => {
+        this.adding.set(key, gaps);
+        this.requestUpdate();
+      }}
+    >
+      + ${gaps.map((g) => g.letter).join(' ')}
+    </button>`;
+  }
+
+  /**
+   * Settings this configuration never makes at all.
+   *
+   * Each one is offered with the exact line that would be written and the
+   * position it would go in, both visible before anything is agreed to. Where
+   * the checker objects to the placement, the objection is shown in place of
+   * the button: a line this cannot put somewhere defensible is one to add by
+   * hand, and saying so is more use than putting it somewhere and hoping.
+   */
+  private renderMissing(): TemplateResult | typeof nothing {
+    const missing = this.missing();
+    if (!missing.length) return nothing;
+    return html`
+      <div class="cfg-missing">
+        <strong>Never set in this configuration</strong>
+        <div class="cfg-missing-note">
+          The machine is running a value for each of these, set by a default or at the console. A
+          restart takes them back to whatever RRF starts with.
+        </div>
+        ${missing.map((cmd) => {
+          const planned = this.plan(cmd);
+          const label = describe(cmd)?.label ?? cmd;
+          const queued = this.newCommands.has(cmd);
+          return html`<div class="cfg-missing-row">
+            <code class="cfg-cmd">${cmd}</code>
+            <span class="cfg-missing-label">${label}</span>
+            ${'refused' in planned
+              ? html`<span class="cfg-missing-no">${planned.refused}</span>`
+              : planned.problems.length
+                ? html`<span class="cfg-missing-no">
+                    Not offered — putting it there would mean: ${planned.problems.join('; ')}
+                  </span>`
+                : queued
+                  ? html`<span class="cfg-state pending">to be added ${planned.because}</span>
+                      <button
+                        class="tiny ghost"
+                        @click=${() => {
+                          this.newCommands.delete(cmd);
+                          this.requestUpdate();
+                        }}
+                      >
+                        Undo
+                      </button>`
+                  : html`<code class="cfg-new">${planned.op.text.trim()}</code>
+                      <button
+                        class="tiny"
+                        title=${`Write it ${planned.because}`}
+                        @click=${() => {
+                          this.newCommands.add(cmd);
+                          this.requestUpdate();
+                        }}
+                      >
+                        Add
+                      </button>`}
+          </div>`;
+        })}
+      </div>
+    `;
+  }
+
   private jump(path: string, index: number): void {
     this.closed.delete(path);
     this.requestUpdate();
@@ -465,7 +661,11 @@ export class ConfigPanel extends PanelElement {
     const appliedCount = new Set(
       [...this.applied.keys()].map((k) => k.slice(0, k.lastIndexOf(':'))),
     ).size;
-    if (!pending.length && !appliedCount && !this.applyError && !this.saveError && !this.saved.length)
+    const adds = this.adding.size + this.newCommands.size;
+    if (
+      !pending.length && !appliedCount && !adds &&
+      !this.applyError && !this.saveError && !this.saved.length
+    )
       return nothing;
 
     const cautions = [...new Set(pending.map((p) => caution(p.line.command)).filter(Boolean))];
@@ -498,9 +698,14 @@ export class ConfigPanel extends PanelElement {
                tried yet or not. Gating this on having applied first meant the
                button did not exist until somebody had guessed that it would
                appear, which is not a discoverable way to save a file. -->
-          ${pending.length || appliedCount
+          ${adds
+            ? html`<span class="cfg-state pending"
+                >${adds} line${adds === 1 ? '' : 's'} to add</span
+              >`
+            : nothing}
+          ${pending.length || appliedCount || adds
             ? html`<button
-                class=${appliedCount && !pending.length ? 'primary tiny' : 'tiny'}
+                class=${(appliedCount || adds) && !pending.length ? 'primary tiny' : 'tiny'}
                 ?disabled=${this.saving || this.applying || blocked !== null}
                 title=${blocked ??
                 `Write ${saveFiles.join(', ')}${
@@ -540,11 +745,16 @@ export class ConfigPanel extends PanelElement {
         ${cautions.map((c) => html`<div class="cfg-apply-note">${c}</div>`)}
         ${this.saved.map(
           (r) => html`<div class="cfg-apply-note ok">
-            Saved ${r.path} line${r.lines.length === 1 ? '' : 's'} ${r.lines.join(', ')}.
+            Saved ${r.path}${r.lines.length
+              ? html` — line${r.lines.length === 1 ? '' : 's'} ${r.lines.join(', ')} changed`
+              : nothing}${r.added.length
+              ? html`${r.lines.length ? ',' : ' —'} line${r.added.length === 1 ? '' : 's'}
+                ${r.added.join(', ')} added`
+              : nothing}.
             ${r.backup ? html`Previous contents kept in <code>${r.backup}</code>.` : nothing}
           </div>`,
         )}
-        ${pending.length || appliedCount
+        ${pending.length || appliedCount || adds
           ? html`<div class="cfg-apply-note">
               Saving changes only the numbers you edited. Everything else on the line — the
               comment, the spacing, the other axes — is left exactly as it is, and the file as it
@@ -665,6 +875,8 @@ export class ConfigPanel extends PanelElement {
             `;
           })}
         </div>
+
+        ${this.renderMissing()}
 
         <div class="param-note cfg-note">
           Editing a value sends it to the machine and nothing more — a restart forgets it. Once a

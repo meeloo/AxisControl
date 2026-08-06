@@ -137,8 +137,8 @@ function trimmedAt(container: string, from: number): number {
   return from + (rest.length - rest.trimStart().length);
 }
 
-/** Where the comment starts, ignoring `;` inside a quoted string. */
-function commentAt(line: string): number {
+/** Where the comment starts, ignoring `;` inside a quoted string. -1 for none. */
+export function commentAt(line: string): number {
   let quoted = false;
   for (let i = 0; i < line.length; i++) {
     if (line[i] === '"') quoted = !quoted;

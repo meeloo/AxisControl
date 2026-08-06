@@ -23,8 +23,22 @@
 import { rewriteLine, type ConfigFile, type ConfigLine } from './parse.js';
 import type { MachineDriver } from '../machine/driver.js';
 
-/** New values for one line, keyed by parameter letter. */
-export type LineEdit = { line: ConfigLine; values: Map<string, string> };
+/**
+ * One change to make to a file.
+ *
+ * `set` replaces named values inside a line and touches nothing else. `replace`
+ * puts a whole new text in a line's place — used where the line grows, such as
+ * a parameter appended to the end of it. `insert` puts a new line after an
+ * existing one. All three name the ConfigLine they were built from, so all
+ * three get the same guard: the file must still read the way it was parsed.
+ */
+export type FileOp =
+  | { kind: 'set'; line: ConfigLine; values: Map<string, string> }
+  | { kind: 'replace'; line: ConfigLine; text: string }
+  | { kind: 'insert'; after: ConfigLine; text: string };
+
+/** The line each op is anchored to — the one that has to still be as parsed. */
+const anchor = (op: FileOp): ConfigLine => (op.kind === 'insert' ? op.after : op.line);
 
 export interface SaveReport {
   path: string;
@@ -32,6 +46,8 @@ export interface SaveReport {
   backup: string | null;
   /** Line numbers as an operator counts them, 1-based. */
   lines: number[];
+  /** Lines added rather than changed, by the number they end up at. */
+  added: number[];
 }
 
 /**
@@ -86,9 +102,9 @@ const lineAt = (parts: string[], index: number): string | undefined => parts[ind
 export async function saveFile(
   driver: MachineDriver,
   file: ConfigFile,
-  edits: LineEdit[],
+  ops: FileOp[],
 ): Promise<SaveReport> {
-  if (!edits.length) throw new Error(`nothing to save in ${file.path}`);
+  if (!ops.length) throw new Error(`nothing to save in ${file.path}`);
 
   const originalBytes = await driver.readFile(file.path);
   const original = new TextDecoder().decode(originalBytes);
@@ -96,7 +112,8 @@ export async function saveFile(
 
   // Rule 2, before anything is written anywhere. Checked for every line first
   // so that a file with one stale line is refused whole, rather than half saved.
-  for (const { line } of edits) {
+  for (const op of ops) {
+    const line = anchor(op);
     const current = lineAt(parts, line.index);
     if (current === undefined) {
       throw new Error(
@@ -110,9 +127,32 @@ export async function saveFile(
     }
   }
 
-  for (const { line, values } of edits) {
-    parts[line.index * 2] = rewriteLine(line, values);
+  // Changes to existing lines first: they do not move anything, so every index
+  // still means what it meant when the file was parsed.
+  for (const op of ops) {
+    if (op.kind === 'set') parts[op.line.index * 2] = rewriteLine(op.line, op.values);
+    else if (op.kind === 'replace') parts[op.line.index * 2] = op.text;
   }
+
+  // Then the insertions, from the bottom up, so that each one is placed before
+  // anything above it has shifted.
+  const inserts = ops.filter((o): o is Extract<FileOp, { kind: 'insert' }> => o.kind === 'insert')
+    .sort((a, b) => b.after.index - a.after.index);
+  const added: number[] = [];
+  const separator = /\r\n/.test(original) ? '\r\n' : '\n';
+  for (const op of inserts) {
+    const at = op.after.index * 2;
+    if (parts[at + 1] !== undefined) {
+      // The line has a newline after it: reuse it, and give the new line one of
+      // the same kind so a CRLF file stays a CRLF file.
+      parts.splice(at + 2, 0, op.text, parts[at + 1]!);
+    } else {
+      // Inserting after the file's last line, which has no newline of its own.
+      parts.push(separator, op.text);
+    }
+    added.push(op.after.index + 2);
+  }
+
   const updated = parts.join('');
   if (updated === original) throw new Error(`${file.path} is already what you are saving`);
 
@@ -136,5 +176,10 @@ export async function saveFile(
     );
   }
 
-  return { path: file.path, backup, lines: edits.map((e) => e.line.index + 1) };
+  return {
+    path: file.path,
+    backup,
+    lines: ops.filter((o) => o.kind !== 'insert').map((o) => anchor(o).index + 1),
+    added: added.sort((a, b) => a - b),
+  };
 }

@@ -40,6 +40,19 @@ export function comparable(command: string | null): boolean {
   return command !== null && command in AXIS_FIELD;
 }
 
+/** What the machine currently runs for this command on this axis, if anything. */
+export function liveValue(command: string, axis: Axis): number | null {
+  const spec = AXIS_FIELD[command];
+  if (!spec) return null;
+  const v = axis[spec.field];
+  return typeof v === 'number' && isFinite(v) ? v : null;
+}
+
+/** Every command this module can read back, in a stable order. */
+export function comparableCommands(): string[] {
+  return Object.keys(AXIS_FIELD);
+}
+
 export function describe(command: string): { label: string; unit: string } | null {
   const spec = AXIS_FIELD[command];
   return spec ? { label: spec.label, unit: spec.unit } : null;
