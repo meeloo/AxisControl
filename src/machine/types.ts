@@ -56,6 +56,17 @@ export interface Axis {
   maxFeed: number;
   /** Live offset applied on top of the work offset (RRF babystep), mm. */
   babystep: number;
+  /* The tuning values, as the controller currently holds them. Zero means the
+     controller does not report it — these exist so the config panel can say
+     whether a file's M201/M203/M566/M92/M906 is actually in force. */
+  /** M201, mm/s². */
+  acceleration: number;
+  /** M566 instantaneous speed change, mm/min. */
+  jerk: number;
+  /** M92, steps per mm. */
+  stepsPerMm: number;
+  /** M906 motor current, mA. */
+  current: number;
 }
 
 export interface Spindle {

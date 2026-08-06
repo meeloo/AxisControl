@@ -1723,3 +1723,66 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
     transparent calc(4px + var(--gutter, 4ch))
   );
 }
+
+/* ---------- Configuration ---------- */
+
+.cfg { overflow: auto; }
+.cfg-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; padding: 8px 12px;
+  border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--bg-panel); z-index: 2; }
+.cfg-toggle { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim);
+  white-space: nowrap; flex: none; }
+.cfg-toggle input { width: 15px; height: 15px; min-height: 0; }
+.cfg-count { margin-left: auto; font-size: 11px; color: var(--text-faint); white-space: nowrap;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+.cfg-summary { padding: 8px 12px; font-size: 12px; color: var(--text-dim);
+  background: var(--tint-warn, var(--bg-raised)); border-bottom: 1px solid var(--border); }
+.cfg-summary.ok { background: transparent; color: var(--text-faint); }
+.cfg-chip { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 999px;
+  font-size: 11px; font-weight: 600; background: var(--bg-raised); color: var(--text-dim); }
+.cfg-chip.conflict { background: var(--bad); color: #fff; }
+.cfg-chip.order { background: var(--warn, #b8860b); color: #fff; }
+.cfg-chip.unknown { background: var(--bg-raised); color: var(--text-dim); }
+
+.cfg-file { border-bottom: 1px solid var(--border); }
+.cfg-file-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 12px;
+  background: transparent; border: 0; border-radius: 0; text-align: left; color: var(--text); }
+.cfg-file-head:hover { background: var(--bg-raised); }
+.cfg-file-head strong { font-family: var(--mono); font-size: 12px; font-weight: 600; }
+.cfg-file-head em { font-style: normal; font-size: 11px; color: var(--text-faint); margin-left: auto; }
+.cfg-caret { color: var(--text-faint); font-size: 10px; }
+
+.cfg-lines { padding: 2px 0 8px; }
+/* A line is a fixed-width number and then everything else, so the numbers make
+   a column the eye can run down against the file open in the editor. */
+.cfg-line { display: grid; grid-template-columns: 3.5ch minmax(0, 1fr); gap: 8px;
+  padding: 3px 12px; align-items: start; }
+.cfg-line.flagged { background: var(--tint-accent); }
+.cfg-num { font-family: var(--mono); font-size: 11px; color: var(--text-faint); text-align: right;
+  padding-top: 2px; }
+.cfg-code { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; }
+.cfg-cmd { font-family: var(--mono); font-size: 12px; font-weight: 700; color: var(--code-cmd, var(--accent)); }
+.cfg-param { font-family: var(--mono); font-size: 12px; color: var(--text-dim); }
+.cfg-param em { font-style: normal; color: var(--text); font-weight: 600; }
+.cfg-raw { font-family: var(--mono); font-size: 12px; color: var(--text-faint); }
+.cfg-title { font-size: 11px; color: var(--text-faint); }
+.cfg-comment { font-size: 11px; color: var(--text-faint); font-style: italic; }
+.cfg-line.disabled .cfg-cmd, .cfg-line.disabled .cfg-param, .cfg-line.disabled .cfg-param em {
+  color: var(--text-faint); font-weight: 400; text-decoration: line-through; }
+.cfg-off { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-faint); border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; }
+
+/* "in force" is the quiet one and the disagreement is the loud one: agreement
+   is the expected case and does not need to compete with the code beside it. */
+.cfg-live { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; padding: 0 5px;
+  border-radius: 3px; white-space: nowrap; }
+.cfg-live.ok { color: var(--good); border: 1px solid var(--good); opacity: 0.65; }
+.cfg-live.bad { background: var(--bad); color: #fff; font-weight: 700; }
+
+.cfg-finding { font-size: 11px; line-height: 1.45; margin-top: 2px; padding: 3px 7px;
+  border-radius: var(--radius); background: var(--bg-raised); color: var(--text-dim);
+  border-left: 3px solid var(--border); }
+.cfg-finding.conflict { border-left-color: var(--bad); }
+.cfg-finding.order { border-left-color: var(--warn, #b8860b); }
+.cfg-finding button.link { font-size: 11px; margin-left: 4px; }
+.cfg-note { padding: 10px 12px; }

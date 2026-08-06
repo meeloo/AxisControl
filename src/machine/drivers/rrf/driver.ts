@@ -275,6 +275,10 @@ export class RrfDriver implements MachineDriver {
       // Already mm/min — this one the firmware converts for us.
       maxFeed: a.speed ?? 0,
       babystep: a.babystep ?? 0,
+      acceleration: a.acceleration ?? 0,
+      jerk: a.jerk ?? 0,
+      stepsPerMm: a.stepsPerMm ?? 0,
+      current: a.current ?? 0,
     }));
 
     const spindleOm = omSpindles.find((s) => s.max > 0) ?? omSpindles[0] ?? null;

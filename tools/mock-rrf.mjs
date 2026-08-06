@@ -34,10 +34,10 @@ const seqs = {
 // positive numbers in that frame, and a mock with the sign the other way round
 // makes every one of them look impossible.
 const axes = [
-  { speed: 6000, letter: 'X', babystep: 0, machinePosition: 260, userPosition: 260, workplaceOffsets: [0,0,0,0,0,0,0,0,0], homed: true, min: 0, max: 524, visible: true },
-  { speed: 6000, letter: 'Y', babystep: 0, machinePosition: 600, userPosition: 600, workplaceOffsets: [0,0,0,0,0,0,0,0,0], homed: true, min: 0, max: 1290, visible: true },
-  { speed: 2000, letter: 'Z', babystep: 0, machinePosition: 115, userPosition: 115, workplaceOffsets: [0,0,0,0,0,0,0,0,0], homed: true, min: 0, max: 135, visible: true },
-  { speed: 8000, letter: 'U', babystep: 0, machinePosition: 30, userPosition: 30, workplaceOffsets: [0,0,0,0,0,0,0,0,0], homed: true, min: 0, max: 70, visible: true },
+  { speed: 6000, letter: 'X', babystep: 0, acceleration: 250, jerk: 500, stepsPerMm: 80, current: 2400, machinePosition: 260, userPosition: 260, workplaceOffsets: [0,0,0,0,0,0,0,0,0], homed: true, min: 0, max: 524, visible: true },
+  { speed: 6000, letter: 'Y', babystep: 0, acceleration: 250, jerk: 500, stepsPerMm: 80, current: 2400, machinePosition: 600, userPosition: 600, workplaceOffsets: [0,0,0,0,0,0,0,0,0], homed: true, min: 0, max: 1290, visible: true },
+  { speed: 2000, letter: 'Z', babystep: 0, acceleration: 100, jerk: 50, stepsPerMm: 400, current: 2400, machinePosition: 115, userPosition: 115, workplaceOffsets: [0,0,0,0,0,0,0,0,0], homed: true, min: 0, max: 135, visible: true },
+  { speed: 8000, letter: 'U', babystep: 0, acceleration: 500, jerk: 1000, stepsPerMm: 800, current: 1500, machinePosition: 30, userPosition: 30, workplaceOffsets: [0,0,0,0,0,0,0,0,0], homed: true, min: 0, max: 70, visible: true },
 ];
 
 /** Probing grid set by M557, and the compensation G29 turns on. */
@@ -214,6 +214,42 @@ const FILE_CONTENT = {
   // Anything that checks whether the tool changer is actually loaded has to
   // see the normal case here, not a permanent warning.
   '/sys/config.g': `; Configuration file for Duet\nglobal systemSettingsVersion={1.2}\nM98 P"config-network.g"\nM98 P"config-axes.g"\nM98 P"config-axes-limits.g"\nM98 P"atcConfig.g"\nM98 P"dustShoeConfig.g"\nM453 ; CNC mode\nM501\n`,
+  // Modelled on the real config-axes.g, quirks included: commented-out previous
+  // values sitting directly above their live replacements, comments after the
+  // parameters, and a driver list with dotted CAN addresses.
+  //
+  // With three faults planted for the checker, all of which occur in real
+  // configs. M203 is set twice, so the first one silently does nothing. M92
+  // runs before the M584 that creates the axes. And M201 carries a W parameter
+  // no such command takes.
+  '/sys/config-axes.g': [
+    '; Axes configuration executed by config.g',
+    'M92 X80 Y80 Z400 U800                  ; steps per mm',
+    'M584 X0.0 Y0.1:0.2 Z0.3 U0.4           ; set drive mapping',
+    'M906 X2400 Y2400 Z2400 U1500 I50       ; Set motor currents (mA)',
+    'M350 X16 Y16 Z16 U16 I1                ; Configure microstepping',
+    ';M203 X7000 Y7000 Z2500                ; Set maximum speeds (mm/min)',
+    'M203 X4000 Y4000 Z2000.00 U8000.0      ; set maximum speeds (mm/min)',
+    'M203 X6000.00 Y6000.00 Z2000.00 U8000.0',
+    'M566 X500 Y500 Z50 U1000               ; set maximum instantaneous speed changes (mm/min)',
+    'M201 X250 Y250 Z100 U500 W3            ; Set accelerations (mm/s^2)',
+    ';M201 X500.00 Y500.00 Z100.00',
+    'M84 S10                                ; Set idle timeout',
+    '',
+  ].join('\n'),
+  '/sys/config-axes-limits.g': [
+    '; Axis limits',
+    'M208 X0 Y0 Z0 U0 S1                    ; set axis minima',
+    'M208 X524 Y1290 Z135 U70 S0            ; set axis maxima',
+    '',
+  ].join('\n'),
+  '/sys/config-network.g': [
+    '; Network',
+    'M550 P"sebscnc"                        ; set machine name',
+    'M552 S1                                ; enable network',
+    'M586 P0 S1                             ; enable HTTP',
+    '',
+  ].join('\n'),
   // The real file, near enough verbatim — comments after values, a trailing
   // `;` comment on the same line as a number, an expression where a literal
   // would be easier, and a commented-out atcProbeSlot. Anything that reads it
@@ -261,7 +297,18 @@ const FILE_CONTENT = {
     'global atcOffsetX = {global.atcOffset * global.atcDirection * global.atcAlignmentX}',
     'global atcOffsetY = {global.atcOffset * global.atcDirection * global.atcAlignmentY}',
   ].join('\n') + '\n',
-  '/sys/dustShoeConfig.g': `global dustShoeEngaged    = false\nglobal dustShoePrevZ      = move.axes[2].machinePosition\nglobal dustShoeEngagedU   = 30\n`,
+  '/sys/dustShoeConfig.g': [
+    '; Dust shoe configuration',
+    'global dustShoeEngaged    = false',
+    'global dustShoePrevZ      = move.axes[2].machinePosition',
+    'global dustShoeEngagedU   = 30',
+    'global dustShoeUseTrigger = true',
+    '; The real file registers its triggers inside a conditional, and the\n    ; expression it registers is a string full of braces. Both are here so that\n    ; anything reading a config has to meet them.',
+    'if {global.dustShoeUseTrigger}',
+    '\tM581.1 T2 P"global.dustShoeEngaged && abs(move.axes[2].machinePosition - global.dustShoePrevZ) > global.dustShoeBand" R0',
+    'M564 S{global.dustShoeEngagedU > 0 ? 1 : 1} H1   ; limits on, written as an expression on purpose',
+    '',
+  ].join('\n'),
   '/gcodes/spoilboard_surface.nc': generateSurfacingProgram(),
   '/gcodes/bracket_roughing.nc': generateBracketProgram(),
   // A file the size of a real 3D carve, so the download and parse progress

@@ -23,4 +23,5 @@ import './overrides.js';
 import './atc.js';
 import './install.js';
 import './firmware.js';
+import './config.js';
 import './gcode.js';

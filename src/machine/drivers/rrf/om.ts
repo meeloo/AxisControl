@@ -20,6 +20,14 @@ export interface OmAxis {
   babystep?: number;
   /** Maximum feed, mm/MINUTE (M203). Unlike move.currentMove, which is mm/s. */
   speed?: number;
+  /** M201, mm/s². */
+  acceleration?: number;
+  /** M566, mm/min. */
+  jerk?: number;
+  /** M92. */
+  stepsPerMm?: number;
+  /** M906, mA. */
+  current?: number;
 }
 
 export interface OmMove {
