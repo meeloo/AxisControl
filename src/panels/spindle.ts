@@ -251,22 +251,22 @@ export class SpindlePanel extends PanelElement {
     // T<n> runs the machine's own tfree/tpre/tpost chain, which on this config
     // handles the dust shoe and the tool-length probe. Never bypass it.
     if (!confirm(`Change to tool T${n}?\n\nThis runs the full tool-change sequence.`)) return;
-    void actions.send(`T${n}`);
+    void actions.selectTool(n);
   }
 
   private pickup(n: number): void {
     if (!confirm(`Pick up tool ${n} from its slot?\n\nThis does NOT probe tool length.`)) return;
-    void run(`pickup ${n}`, (d) => d.send(`M98 P"/sys/atcPickup.g" S${n}`));
+    void run(`pickup ${n}`, (d) => d.changeTool(n, 'pickup'));
   }
 
   private drop(n: number): void {
     if (!confirm(`Drop the current tool into slot ${n}?`)) return;
-    void run(`drop ${n}`, (d) => d.send(`M98 P"/sys/atcDrop.g" S${n}`));
+    void run(`drop ${n}`, (d) => d.changeTool(n, 'drop'));
   }
 
   private releaseTool(): void {
     if (!confirm('Deselect the current tool (T-1)?')) return;
-    void actions.send('T-1');
+    void actions.selectTool(null);
   }
 
   // --- Render ------------------------------------------------------------

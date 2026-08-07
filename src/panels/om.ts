@@ -12,7 +12,6 @@
 import { html, nothing, type TemplateResult } from 'lit';
 import { PanelElement, registerPanel } from '../ui/panel.js';
 import { activeDriver, capabilities, connected, machine } from '../core/store.js';
-import { actions } from '../core/store.js';
 import type { RrfNative } from '../machine/drivers/rrf/driver.js';
 
 export class ObjectModelPanel extends PanelElement {
@@ -64,7 +63,12 @@ export class ObjectModelPanel extends PanelElement {
     const isBool = raw === 'true' || raw === 'false';
     const literal = isNumber || isBool ? raw : `"${raw.replace(/"/g, '""')}"`;
 
-    void actions.send(`set ${path} = ${literal}`);
+    // Through the native surface, not as a generic command: `set` is RRF's own
+    // expression syntax and this panel is already RRF-only, so it says so
+    // rather than composing G-code that another controller would choke on.
+    const rrf = activeDriver()?.native as RrfNative | undefined;
+    if (!rrf) return;
+    void rrf.setVariable(path, literal);
     this.editing = null;
     this.requestUpdate();
   }

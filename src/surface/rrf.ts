@@ -17,16 +17,10 @@ import { n } from '../cam/format.js';
 /** Where RRF stores the height map by default. */
 export const HEIGHTMAP_PATH = '/sys/heightmap.csv';
 
-export interface ScanArea {
-  x0: number;
-  x1: number;
-  y0: number;
-  y1: number;
-  /** Point spacing, mm. Separate per axis because a long bed rarely needs the
-   *  same density along both. */
-  spacingX: number;
-  spacingY: number;
-}
+// The shape moved to machine/types.ts — a rectangle of table is not RRF's idea
+// of anything, and the driver interface needs to name it.
+export type { ScanArea } from '../machine/types.js';
+import type { ScanArea } from '../machine/types.js';
 
 /** Number of points a scan of this area will probe. */
 export function scanPointCount(area: ScanArea): { x: number; y: number; total: number } {

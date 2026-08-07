@@ -121,11 +121,11 @@ export class ResumePanel extends PanelElement {
       if (!written) return;
 
       await actions.runMacro(path);
-      // M26 needs the file selected by M23 first, and the offset must land on a
-      // command boundary — the parser's per-line offsets already do.
-      await actions.send(`M23 "${program.controllerPath}"`);
-      await actions.send(`M26 S${offset}`);
-      await actions.send('M24');
+      // The offset must land on a command boundary — the parser's per-line
+      // offsets already do. Selecting the file and seeking into it is the
+      // driver's business; the two controllers that can do this at all do not
+      // agree on how.
+      await actions.startJobAt(program.controllerPath, offset);
       appendLog({
         level: 'info',
         text: `Resumed ${basename(program.name)} at line ${this.state.line} (byte ${offset})`,

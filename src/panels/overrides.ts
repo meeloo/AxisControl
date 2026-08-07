@@ -51,7 +51,7 @@ export class OverridesPanel extends PanelElement {
   }
 
   private setFeed(percent: number): void {
-    void actions.send(`M220 S${Math.round(percent)}`);
+    void actions.setFeedOverride(percent);
   }
 
   private applyLift(mm: number): void {
@@ -67,8 +67,7 @@ export class OverridesPanel extends PanelElement {
         return;
       }
     }
-    // R0 = absolute, so repeated presses set the lift rather than accumulating.
-    void actions.send(`M290 R0 Z${mm}`);
+    void actions.babystep('Z', mm);
     this.requestUpdate();
   }
 

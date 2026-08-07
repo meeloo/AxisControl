@@ -26,13 +26,39 @@ import {
   type OmSeqs,
 } from './om.js';
 import { formatBytes, formatDuration, joinPath } from '../../../core/util.js';
+// The height-map commands live here rather than in the panel now: probing a
+// grid is a universal idea, and M557/G29 is one dialect's way of saying it.
+import {
+  CLEAR_COMMAND,
+  applyCommand,
+  defineGridCommand,
+  scanCommand,
+} from '../../../surface/rrf.js';
+import type { HeightMapCommands, ScanArea } from '../../types.js';
 
 /** Exposed through `driver.native` for the object-model browser panel. */
+/**
+ * RepRapFirmware's own surface, reached through `driver.native`.
+ *
+ * Everything here is a thing only this controller has. Nothing else has an
+ * object model to browse, and `set global.x = 1` is RRF's own expression
+ * syntax rather than G-code — so putting these on MachineDriver would define a
+ * vocabulary that no second driver could ever implement, which is the failure
+ * mode a driver layer is supposed to prevent.
+ */
 export interface RrfNative {
   getModel(): ObjectModel;
   /** Fetch a subtree on demand, e.g. "sensors.probes". */
   fetchKey(key: string): Promise<unknown>;
   client(): RrfClient;
+  /**
+   * Assign to a variable in the object model — `set global.atcRPM = 250`.
+   *
+   * `literal` is written into the command as-is, so the caller decides whether
+   * a value is a number, a quoted string or an expression. Quoting it here
+   * would make it impossible to set anything but strings.
+   */
+  setVariable(path: string, literal: string): Promise<void>;
 }
 
 const POLL_INTERVAL_MS = 250;
@@ -58,6 +84,10 @@ export class RrfDriver implements MachineDriver {
     jobFilePosition: true,
     toolChanger: true,
     prompts: true,
+    feedOverride: true,
+    babystep: true,
+    resumeFromOffset: true,
+    toolSelection: true,
     gcodeRoot: '/gcodes',
     configRoot: '/sys',
     macroRoot: '/macros',
@@ -77,6 +107,7 @@ export class RrfDriver implements MachineDriver {
 
   readonly native: RrfNative = {
     getModel: () => this.model,
+    setVariable: (path: string, literal: string) => this.send(`set ${path} = ${literal}`),
     fetchKey: async (key: string) => {
       if (!this.client) throw new Error('not connected');
       return this.client.model(key, 'd99vn');
@@ -533,6 +564,86 @@ export class RrfDriver implements MachineDriver {
     await this.send('M5');
   }
 
+  // --- Live overrides ----------------------------------------------------
+
+  async setFeedOverride(percent: number): Promise<void> {
+    await this.send(`M220 S${Math.round(percent)}`);
+  }
+
+  /**
+   * M290 with R0 — absolute, not cumulative.
+   *
+   * R1 would add to whatever babystep is already applied, so holding a nudge
+   * button would run away. R0 sets it, which is what a slider means.
+   */
+  async babystep(axis: string, delta: number): Promise<void> {
+    await this.send(`M290 R0 ${axis.toUpperCase()}${delta}`);
+  }
+
+  // --- Tools -------------------------------------------------------------
+
+  async selectTool(tool: number | null): Promise<void> {
+    await this.send(`T${tool === null ? -1 : tool}`);
+  }
+
+  /**
+   * The changer's own macros, run directly rather than through a tool change.
+   *
+   * This is the RapidChange installation's `atcPickup.g`/`atcDrop.g`, which is
+   * an RRF-shaped arrangement: the geometry lives in globals and the moves live
+   * in macro files. Another controller with the same physical changer would
+   * emit the moves itself, which is exactly why this is a driver method and not
+   * an M98 composed in the panel.
+   */
+  async changeTool(slot: number, action: 'pickup' | 'drop'): Promise<void> {
+    const macro = action === 'pickup' ? 'atcPickup.g' : 'atcDrop.g';
+    await this.send(`M98 P"/sys/${macro}" S${slot}`);
+  }
+
+  // --- Moves -------------------------------------------------------------
+
+  /**
+   * M120/M121 bracket the move so the modal state the operator was in — G91,
+   * a feed rate, a plane — survives it. Going to the origin should not change
+   * what the next hand-typed command means.
+   */
+  async goToWorkOrigin(options: { clearanceZ?: number; includeZ?: boolean } = {}): Promise<void> {
+    // G53 for the clearance move: a machine coordinate, so it means the same
+    // thing whatever the work offset is.
+    const lift = options.clearanceZ === undefined ? '' : `G53 G0 Z${options.clearanceZ}\n`;
+    const descend = options.includeZ ? 'G0 Z0\n' : '';
+    await this.send(`M120\nG90\n${lift}G0 X0 Y0\n${descend}M121`);
+  }
+
+  // --- Height map --------------------------------------------------------
+
+  async defineProbeGrid(area: ScanArea): Promise<void> {
+    await this.send(defineGridCommand(area));
+  }
+
+  async probeGrid(probe: number): Promise<void> {
+    await this.send(scanCommand(probe));
+  }
+
+  async applyHeightMap(): Promise<void> {
+    await this.send(applyCommand());
+  }
+
+  async clearHeightMap(): Promise<void> {
+    await this.send(CLEAR_COMMAND);
+  }
+
+  describeHeightMap(area: ScanArea, probe: number | null): HeightMapCommands {
+    return {
+      define: defineGridCommand(area),
+      // Nothing to name the probe with yet, and saying so beats printing a
+      // command that would not run.
+      scan: probe === null ? 'G29 K? S0' : scanCommand(probe),
+      apply: applyCommand(),
+      clear: CLEAR_COMMAND,
+    };
+  }
+
   // --- Files -------------------------------------------------------------
 
   async listFiles(dir: string): Promise<FileEntry[]> {
@@ -593,6 +704,19 @@ export class RrfDriver implements MachineDriver {
 
   async runMacro(path: string): Promise<void> {
     await this.send(`M98 P"${path}"`);
+  }
+
+  /**
+   * Select the file, seek into it, resume.
+   *
+   * M26 takes a byte offset, which is the same unit the viewer tracks the
+   * running job in — so the point picked off the drawing is the point the
+   * machine restarts from, with no conversion to get wrong.
+   */
+  async startJobAt(path: string, byteOffset: number): Promise<void> {
+    await this.send(`M23 "${path}"`);
+    await this.send(`M26 S${byteOffset}`);
+    await this.send('M24');
   }
 
   // --- Diagnostics -------------------------------------------------------

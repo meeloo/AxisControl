@@ -14,6 +14,7 @@ import {
   type Capabilities,
   type LogLine,
   type MachineState,
+  type ScanArea,
 } from '../machine/types.js';
 
 const LOG_LIMIT = 500;
@@ -166,6 +167,22 @@ export async function run<T>(what: string, fn: (d: MachineDriver) => Promise<T>)
 
 export const actions = {
   send: (cmd: string) => run(`send ${cmd}`, (d) => d.send(cmd)),
+  setFeedOverride: (percent: number) =>
+    run(`feed override ${percent}%`, (d) => d.setFeedOverride(percent)),
+  babystep: (axis: string, delta: number) =>
+    run(`babystep ${axis}${delta}`, (d) => d.babystep(axis, delta)),
+  selectTool: (tool: number | null) =>
+    run(tool === null ? 'deselect tool' : `select tool ${tool}`, (d) => d.selectTool(tool)),
+  changeTool: (slot: number, action: 'pickup' | 'drop') =>
+    run(`${action} ${slot}`, (d) => d.changeTool(slot, action)),
+  goToWorkOrigin: (options?: { clearanceZ?: number; includeZ?: boolean }) =>
+    run('go to work origin', (d) => d.goToWorkOrigin(options)),
+  startJobAt: (path: string, byteOffset: number) =>
+    run(`start ${path} at ${byteOffset}`, (d) => d.startJobAt(path, byteOffset)),
+  defineProbeGrid: (area: ScanArea) => run('define probe grid', (d) => d.defineProbeGrid(area)),
+  probeGrid: (probe: number) => run('probe grid', (d) => d.probeGrid(probe)),
+  applyHeightMap: () => run('apply height map', (d) => d.applyHeightMap()),
+  clearHeightMap: () => run('clear height map', (d) => d.clearHeightMap()),
   jog: (deltas: Record<string, number>, feedRate: number) =>
     run(`jog ${Object.keys(deltas).join('')}`, (d) => d.jog(deltas, { feedRate })),
   home: (axes?: string[]) => run('home', (d) => d.home(axes)),

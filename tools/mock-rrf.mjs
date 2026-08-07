@@ -677,6 +677,16 @@ const server = createServer(async (req, res) => {
       return sendJson(res, { dir, first: 0, files, next: 0, err: 0 });
     }
 
+    // Not a firmware route. What the board has actually been sent, so a test
+    // can assert on the G-code itself rather than on its effects. That is the
+    // only way to catch a refactor that changes what goes on the wire while
+    // leaving the machine in the same place — a clamped move and a clamped
+    // request look identical from the outside.
+    case '/__sent': {
+      const since = Number(url.searchParams.get('since') ?? 0);
+      return sendJson(res, { sent: sent.slice(since), total: sent.length });
+    }
+
     // Not a firmware route. Puts the SD card back to how it started so a test
     // that writes files can be run twice and mean the same thing both times.
     case '/__reset_files': {

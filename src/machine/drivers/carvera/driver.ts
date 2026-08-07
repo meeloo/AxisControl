@@ -17,7 +17,9 @@ import {
   type DiagnosticSection,
   type FileEntry,
   type LogLine,
+  type HeightMapCommands,
   type MachineState,
+  type ScanArea,
 } from '../../types.js';
 
 function todo(what: string): never {
@@ -106,6 +108,57 @@ export class CarveraDriver implements MachineDriver {
   async setSpindle(_rpm: number, _direction: 'forward' | 'reverse'): Promise<void> {
     todo('setSpindle');
   }
+  // --- Moved off the panels, still to do here ----------------------------
+  //
+  // Grbl-derived controllers do not take M220 for the feed override — it is a
+  // realtime byte outside the G-code stream — so these must not be forwarded
+  // as G-code when they are filled in. The capability flags above are false
+  // until each one is real, and the panels are hidden meanwhile.
+
+  async setFeedOverride(_percent: number): Promise<void> {
+    todo('setFeedOverride');
+  }
+
+  async babystep(_axis: string, _delta: number): Promise<void> {
+    todo('babystep');
+  }
+
+  async selectTool(_tool: number | null): Promise<void> {
+    todo('selectTool');
+  }
+
+  async changeTool(_slot: number, _action: 'pickup' | 'drop'): Promise<void> {
+    todo('changeTool');
+  }
+
+  async goToWorkOrigin(_options?: { clearanceZ?: number; includeZ?: boolean }): Promise<void> {
+    todo('goToWorkOrigin');
+  }
+
+  async startJobAt(_path: string, _byteOffset: number): Promise<void> {
+    todo('startJobAt');
+  }
+
+  async defineProbeGrid(_area: ScanArea): Promise<void> {
+    todo('defineProbeGrid');
+  }
+
+  async probeGrid(_probe: number): Promise<void> {
+    todo('probeGrid');
+  }
+
+  async applyHeightMap(): Promise<void> {
+    todo('applyHeightMap');
+  }
+
+  async clearHeightMap(): Promise<void> {
+    todo('clearHeightMap');
+  }
+
+  describeHeightMap(_area: ScanArea, _probe: number | null): HeightMapCommands {
+    return { define: '', scan: '', apply: '', clear: '' };
+  }
+
   async stopSpindle(): Promise<void> {
     todo('stopSpindle');
   }

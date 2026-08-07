@@ -24,13 +24,12 @@ import { theme } from '../core/theme.js';
 import { diverging } from '../core/oklab.js';
 import { loadProbeMap } from '../probing/types.js';
 import { parseHeightMap, type HeightMap } from '../surface/heightmap.js';
+// The commands themselves now come from the driver — see machine/driver.ts.
+// What is left here is the arithmetic of laying out a grid, which is the same
+// on any machine.
 import {
-  CLEAR_COMMAND,
   HEIGHTMAP_PATH,
-  applyCommand,
-  defineGridCommand,
   estimateScanSeconds,
-  scanCommand,
   scanPointCount,
   type ScanArea,
 } from '../surface/rrf.js';
@@ -122,8 +121,8 @@ export class SurfacePanel extends PanelElement {
     ) {
       return;
     }
-    await actions.send(defineGridCommand(this.area));
-    await actions.send(scanCommand(probe));
+    await actions.defineProbeGrid(this.area);
+    await actions.probeGrid(probe);
     appendLog({
       level: 'info',
       text: `Scanning ${total} points — load the map when the machine goes idle`,
@@ -311,6 +310,12 @@ export class SurfacePanel extends PanelElement {
       </div>`;
     }
 
+    // Asked of the driver rather than composed here: this probes into a
+    // workpiece, and showing the exact command is how an operator checks it
+    // before pressing the button. It has to be the command that will be sent,
+    // not this panel's idea of it.
+    const commands = activeDriver()!.describeHeightMap(this.area, probe);
+
     return html`
       <div class="surface">
         ${active
@@ -341,8 +346,8 @@ export class SurfacePanel extends PanelElement {
           <div class="param-note">
             ${x} × ${y} = <strong>${total} points</strong>, roughly
             ${formatDuration(estimateScanSeconds(total, 5, 400, 3000, Math.min(this.area.spacingX, this.area.spacingY)))}.
-            The grid is <code>${defineGridCommand(this.area)}</code>, scanned with
-            <code>${probe === null ? 'G29 K? S0' : scanCommand(probe)}</code>.
+            The grid is <code>${commands.define}</code>, scanned with
+            <code>${commands.scan}</code>.
           </div>
         </div>
 
@@ -352,10 +357,10 @@ export class SurfacePanel extends PanelElement {
           <button ?disabled=${!live || this.loading} @click=${() => void this.load()}>
             ${this.loading ? 'Loading…' : 'Load map'}
           </button>
-          <button ?disabled=${!live} @click=${() => void actions.send(applyCommand())}>
+          <button ?disabled=${!live} @click=${() => void actions.applyHeightMap()}>
             Apply
           </button>
-          <button ?disabled=${!live || !active} @click=${() => void actions.send(CLEAR_COMMAND)}>
+          <button ?disabled=${!live || !active} @click=${() => void actions.clearHeightMap()}>
             Turn off
           </button>
         </div>

@@ -294,6 +294,20 @@ export interface Capabilities {
   toolChanger: boolean;
   /** Can answer blocking prompts (M291-style). */
   prompts: boolean;
+  /** Can set a live feed-rate override while moving. */
+  feedOverride: boolean;
+  /** Can nudge an axis live without changing the work offset. */
+  babystep: boolean;
+  /**
+   * Can start a job from a byte offset into the file.
+   *
+   * Separate from `jobFilePosition`, which is about *reading* the offset back.
+   * A controller can report where it is without being able to be told where to
+   * begin, and run-from-line needs both.
+   */
+  resumeFromOffset: boolean;
+  /** Selecting a tool by number means something to this controller. */
+  toolSelection: boolean;
   /** Directory the driver considers the natural root for G-code jobs. */
   gcodeRoot: string;
   /** Directory holding controller configuration, if browsable. */
@@ -314,8 +328,41 @@ export function defaultCapabilities(): Capabilities {
     jobFilePosition: false,
     toolChanger: false,
     prompts: false,
+    feedOverride: false,
+    babystep: false,
+    resumeFromOffset: false,
+    toolSelection: false,
     gcodeRoot: '/gcodes',
     configRoot: null,
     macroRoot: null,
   };
+}
+
+/**
+ * A rectangle of the table to probe, and how densely.
+ *
+ * Vendor-neutral: this describes a patch of the machine's bed, which is the
+ * same idea whoever is driving it. Spacing is per axis because a long bed
+ * rarely needs the same density along both.
+ */
+export interface ScanArea {
+  x0: number;
+  x1: number;
+  y0: number;
+  y1: number;
+  spacingX: number;
+  spacingY: number;
+}
+
+/**
+ * The commands a height-map operation will send, for showing before sending.
+ *
+ * This probes into a workpiece, so the panel puts the exact command on screen
+ * and an operator checks it before pressing the button rather than after.
+ */
+export interface HeightMapCommands {
+  define: string;
+  scan: string;
+  apply: string;
+  clear: string;
 }

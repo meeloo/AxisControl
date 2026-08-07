@@ -457,9 +457,10 @@ export class JogPanel extends PanelElement {
    */
   private goWorkZero(withZ: boolean): void {
     const z = machine.get().axes.find((a) => a.letter === 'Z');
-    const lift = z && isFinite(z.max) ? `G53 G0 Z${z.max}\n` : '';
-    const descend = withZ ? 'G0 Z0\n' : '';
-    void actions.send(`M120\nG90\n${lift}G0 X0 Y0\n${descend}M121`);
+    void actions.goToWorkOrigin({
+      clearanceZ: z && isFinite(z.max) ? z.max : undefined,
+      includeZ: withZ,
+    });
   }
 
   /** Every axis the work-zero moves touch has to know where it is. */

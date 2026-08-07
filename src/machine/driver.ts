@@ -13,6 +13,8 @@
 //    and marks the connection degraded rather than tearing it down.
 
 import type {
+  ScanArea,
+  HeightMapCommands,
   Capabilities,
   DiagnosticSection,
   FileEntry,
@@ -111,6 +113,55 @@ export interface MachineDriver {
   setSpindle(rpm: number, direction: 'forward' | 'reverse'): Promise<void>;
   stopSpindle(): Promise<void>;
 
+  // --- Live overrides ----------------------------------------------------
+  /**
+   * Feed rate as a percentage of what the program asked for.
+   *
+   * A driver method rather than a G-code string in the panel because the two
+   * families do not agree on the mechanism at all: RRF takes `M220 S<pct>`,
+   * while Grbl uses realtime bytes outside the G-code stream entirely. A panel
+   * sending M220 would look correct and do nothing.
+   */
+  setFeedOverride(percent: number): Promise<void>;
+  /** Nudge an axis live, without moving where the work origin is. */
+  babystep(axis: string, delta: number): Promise<void>;
+
+  // --- Tools -------------------------------------------------------------
+  /** Select a tool by number, or null to deselect whatever is loaded. */
+  selectTool(tool: number | null): Promise<void>;
+  /**
+   * Drive the tool changer for one slot, without a tool change.
+   *
+   * For setting the changer up and for recovering from a failed change, which
+   * is when you most want to move one half of the operation at a time.
+   */
+  changeTool(slot: number, action: 'pickup' | 'drop'): Promise<void>;
+
+  // --- Moves -------------------------------------------------------------
+  /**
+   * Move to the work origin.
+   *
+   * `clearanceZ` is a *machine* coordinate — the point of it is to get out of
+   * the way of clamps and the workpiece, which is a question about the machine
+   * and not about wherever the work zero happens to be. `includeZ` finishes by
+   * bringing Z to the work origin too, which is a separate decision because it
+   * is the one that can drive a cutter into something.
+   */
+  goToWorkOrigin(options?: { clearanceZ?: number; includeZ?: boolean }): Promise<void>;
+
+  // --- Height map --------------------------------------------------------
+  /**
+   * Only meaningful when `capabilities.surfaceMap`. `describeHeightMap` exists
+   * so the panel can show what it is about to send: this drives a probe into a
+   * workpiece, and showing the command is how an operator checks it before
+   * pressing the button rather than after.
+   */
+  defineProbeGrid(area: ScanArea): Promise<void>;
+  probeGrid(probe: number): Promise<void>;
+  applyHeightMap(): Promise<void>;
+  clearHeightMap(): Promise<void>;
+  describeHeightMap(area: ScanArea, probe: number | null): HeightMapCommands;
+
   // --- Files -------------------------------------------------------------
   listFiles(dir: string): Promise<FileEntry[]>;
   /**
@@ -130,6 +181,11 @@ export interface MachineDriver {
   cancelJob(): Promise<void>;
   /** Run a macro file on the controller. */
   runMacro(path: string): Promise<void>;
+  /**
+   * Start `path` from a byte offset into it — run-from-line, after a broken
+   * cutter. Only when `capabilities.resumeFromOffset`.
+   */
+  startJobAt(path: string, byteOffset: number): Promise<void>;
 
   // --- Diagnostics -------------------------------------------------------
   /**
@@ -145,9 +201,29 @@ export interface MachineDriver {
 
   // --- Escape hatch ------------------------------------------------------
   /**
-   * Controller-specific surface for panels that opt in via `capabilities`.
-   * The object-model browser casts this to RrfNative; other panels must not
-   * touch it. Anything promoted to general use belongs in MachineState instead.
+   * Controller-specific surface, for the things a vendor-neutral API would only
+   * get in the way of.
+   *
+   * This exists deliberately, and it is not a failure when a panel uses it. A
+   * driver layer earns its keep on what several controllers genuinely have in
+   * common; forcing the rest through it produces an abstraction that every
+   * panel has to fight — a `setThing()` that means five different things, or a
+   * generic call so vague nobody can tell what it will do. Better a narrow
+   * common API and an honest door out of it.
+   *
+   * The rules for using it:
+   *
+   *   1. Check `driver.id` first, or a capability that implies the shape. A
+   *      panel that casts `native` without asking whose it is will crash on
+   *      the next controller.
+   *   2. A panel that reaches through here should be one of the panels that is
+   *      *about* this controller — the object-model browser, the RRF
+   *      configuration editor — and should declare that by hiding itself when
+   *      the capability is absent.
+   *   3. Anything two drivers end up implementing belongs in this interface
+   *      instead, and anything two drivers report belongs in MachineState.
+   *
+   * The object-model browser casts this to RrfNative; see src/panels/om.ts.
    */
   readonly native?: unknown;
 }
