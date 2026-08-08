@@ -1882,3 +1882,27 @@ button.cfg-state { border: none; cursor: pointer; font-family: inherit; }
   min-height: 24px; padding: 2px 6px; }
 .cfg-draft .cfg-missing-no { flex: 1 1 100%; }
 .cfg-apply-note code { font-size: 11px; color: inherit; }
+
+/* --- Phones ---------------------------------------------------------------
+   A jog cell may not shrink below its own contents.
+
+   `.jog-cell` is `flex: 1 1 0; min-height: 0`, so the cells divide whatever
+   height the column has. The arrow, the distance and the limit tag inside them
+   do not shrink to match, so on a short screen they overflow their cell and
+   print across the one above — "Z MAX" landing on top of the distance, on the
+   one control in the app where a misread moves the machine.
+
+   The cause is available height rather than width, so this can happen on a
+   short desktop window too. Scoped to phones for now because that is what has
+   been looked at; widening it means re-checking the rose beside it. */
+@media (max-width: 700px) {
+  .jog-cell { min-height: 34px; overflow: hidden; }
+
+  /* And the panel has to be allowed to grow, or the taller columns simply
+     overflow onto the controls underneath — which trades a cramped label for
+     overlapping touch targets on a jog panel, a worse bargain. `.jog` is
+     height-locked to 100% for the desktop layout, where the columns are meant
+     to divide the available height exactly. On a phone there is not enough
+     height to divide, so it scrolls instead. */
+  .jog { height: auto; min-height: 100%; overflow-y: auto; }
+}
