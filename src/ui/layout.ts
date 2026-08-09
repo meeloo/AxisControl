@@ -123,12 +123,14 @@ export class DashboardHost extends PanelElement {
   /**
    * Below this the dashboard stops tiling and stacks instead.
    *
-   * 700px rather than a phone's exact width: a tiled panel needs roughly 350px
-   * before its contents start being cut, so two of them is where tiling stops
-   * paying. A landscape phone and a narrow desktop window get the stack too,
-   * which is the right answer for both.
+   * Width OR height, because a phone turned sideways is neither narrow nor big:
+   * an iPhone in landscape is 844px wide, comfortably past any width-only
+   * breakpoint, and 390px tall — so it was being handed the tiled desktop
+   * layout on a phone. 700px wide is where tiling stops paying, a tiled panel
+   * needing roughly 350px before its contents are cut; 500px tall is a
+   * viewport no desktop window is, and every phone in landscape is.
    */
-  private narrow = window.matchMedia('(max-width: 700px)');
+  private narrow = window.matchMedia('(max-width: 700px), (max-height: 500px)');
   private stacks = new Set<string>();
   /** Which panel each page is showing on a phone, by instance id. */
   private stackTab = new Map<string, string>();

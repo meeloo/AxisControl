@@ -1895,7 +1895,7 @@ button.cfg-state { border: none; cursor: pointer; font-family: inherit; }
    The cause is available height rather than width, so this can happen on a
    short desktop window too. Scoped to phones for now because that is what has
    been looked at; widening it means re-checking the rose beside it. */
-@media (max-width: 700px) {
+@media (max-width: 700px), (max-height: 500px) {
   .jog-cell { min-height: 34px; overflow: hidden; }
 
   /* And the panel has to be allowed to grow, or the taller columns simply
@@ -1947,7 +1947,80 @@ button.cfg-state { border: none; cursor: pointer; font-family: inherit; }
    control that does nothing is worse than one that is absent: it teaches you
    the app is unreliable rather than that the feature is elsewhere. Arrange the
    page on a big screen; the phone shows what the page already holds. */
-@media (max-width: 700px) {
+@media (max-width: 700px), (max-height: 500px) {
   .page-actions .tiny,
   .page-add { display: none; }
+}
+
+/* --- At the machine ------------------------------------------------------
+   Position and jogging on one screen. Sized for a phone held in one hand, and
+   laid out differently depending on which way it is turned: portrait puts the
+   readout above the pad, landscape beside it, because an iPhone in landscape
+   leaves about 330px of height once the top bar and the panel strip are gone
+   and stacked would make the pad two centimetres tall. */
+.hand { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px;
+  height: 100%; min-height: 0; }
+
+.hand-dro { display: flex; flex-direction: column; gap: 2px; }
+.hand-axis { display: grid; grid-template-columns: 1.4em 1fr auto; align-items: baseline;
+  gap: 8px; padding: 2px 0; }
+.hand-letter { font-weight: 700; color: var(--text-dim); font-size: 15px; }
+/* Big, monospaced and tabular: this is read at arm's length, and digits that
+   change width make a moving number jump about. */
+.hand-work { font-family: var(--mono); font-size: 26px; font-weight: 700;
+  text-align: right; font-variant-numeric: tabular-nums; }
+.hand-machine { font-family: var(--mono); font-size: 12px; color: var(--text-faint);
+  font-variant-numeric: tabular-nums; min-width: 6.5ch; text-align: right; }
+.hand-axis.unhomed .hand-work { color: var(--text-faint); }
+
+.hand-controls { display: flex; gap: 10px; align-items: stretch; flex: 1 1 auto;
+  min-height: 0; }
+/* flex-basis 0 and min-width 0, or the grid's own content width becomes the
+   basis and the pad takes the whole row — pushing the Z and U columns off the
+   right edge, where the one control that lifts the cutter cannot be reached. */
+.hand-pad { display: grid; grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr); gap: 6px; flex: 1 1 0; min-width: 0;
+  aspect-ratio: 1; max-height: 100%; }
+.hand-col { display: flex; flex-direction: column; gap: 6px; flex: 0 0 62px; }
+.hand-col-name { text-align: center; font-weight: 700; font-size: 13px;
+  color: var(--text-dim); }
+.hand-col .hand-key { flex: 1 1 0; }
+
+/* 44px is the floor for a target you hit without looking, which is what this
+   panel is for — eyes on the cutter, thumb on the phone. */
+.hand-key { min-height: 44px; min-width: 44px; border: 1px solid var(--border);
+  border-radius: 8px; background: var(--bg); color: var(--text); font-size: 20px;
+  cursor: pointer; touch-action: manipulation; }
+.hand-key:active:not(:disabled) { background: var(--tint-accent); border-color: var(--accent); }
+.hand-key:disabled { opacity: 0.35; }
+
+.hand-step-badge { display: flex; flex-direction: column; align-items: center;
+  justify-content: center; font-family: var(--mono); font-weight: 700; font-size: 16px;
+  color: var(--text-dim); }
+.hand-step-badge em { font-style: normal; font-size: 10px; font-weight: 400; }
+
+.hand-steps { display: flex; gap: 6px; }
+.hand-step { flex: 1 1 0; min-height: 40px; border: 1px solid var(--border);
+  border-radius: 8px; background: var(--bg); color: var(--text-dim);
+  font-family: var(--mono); font-size: 14px; font-weight: 600; cursor: pointer;
+  touch-action: manipulation; }
+.hand-steps .hand-step.on, .hand-steps .hand-step.on:hover,
+.hand-steps .hand-step.on:active {
+  background: var(--accent); border-color: var(--accent); color: var(--on-accent);
+}
+.hand-note { font-size: 11px; color: var(--warn); text-align: center; }
+
+/* Landscape, or any screen too short to stack: everything in one row.
+   The step sizes become a column on the end rather than a row underneath —
+   underneath there is no room, and wrapping them to a second line pushed them
+   off the bottom of the panel where they could not be reached at all. */
+@media (max-height: 560px) {
+  .hand { flex-direction: row; align-items: stretch; gap: 8px; }
+  .hand-dro { flex: 1 1 140px; justify-content: center; }
+  .hand-controls { flex: 0 0 auto; }
+  .hand-steps { flex: 0 0 54px; flex-direction: column; }
+  .hand-step { flex: 1 1 0; min-height: 0; }
+  /* The readout carries the panel's height here, so the pad follows it rather
+     than the other way round. */
+  .hand-pad { aspect-ratio: 1; height: 100%; flex: 0 0 auto; }
 }

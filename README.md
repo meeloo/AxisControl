@@ -82,6 +82,22 @@ parser that discards offsets can draw a toolpath but can never follow a job.
 Run-from-line picks the restart point off the drawing, which is what you want
 after a broken cutter.
 
+### It works on the phone in your pocket
+
+Below 700px wide — or 500px tall, which is a phone turned sideways — the
+dashboard stops tiling. A strip of panel names replaces the layout and the
+panel you tap gets the whole screen, which is what makes the jog rose legible
+at 390px rather than merely uncut.
+
+There is a panel built for exactly that moment: **At the machine** puts the
+position readout and an eight-direction jog pad on one screen, with the other
+axes as columns beside it and the step size a row of five buttons. Portrait
+stacks them, landscape puts them side by side. Nothing else — no speed slider,
+no coordinate systems. You are standing at the machine holding a phone in one
+hand, and the only two things that matter are where it is and moving it a bit.
+
+Installed to the home screen it runs full screen with no address bar.
+
 ### It is honest about what it cannot do
 
 Panels hide themselves when the controller cannot back them, rather than
@@ -93,10 +109,12 @@ jobs and are never conflated.
 
 ## The panels
 
-Twenty-four, arranged onto pages you lay out yourself.
+Twenty-five, arranged onto pages you lay out yourself.
 
 - **Motion** — a jog rose of concentric rings, eight directions each, with
   distances that are always numbers a person would choose
+- **At the machine** — position and jogging on one phone screen, in either
+  orientation
 - **Configuration** — the above
 - **Toolpath** — WebGL viewer with live cutter tracking, a time slider,
   run-from-line picking, and the actual cutter drawn to size
