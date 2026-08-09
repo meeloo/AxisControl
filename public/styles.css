@@ -1928,3 +1928,14 @@ button.cfg-state { border: none; cursor: pointer; font-family: inherit; }
    below it — a panel filling the screen exactly looks like the only one. */
 .stack-body { min-height: 260px; max-height: 78vh; overflow: auto; position: relative; }
 .stack-body > * { display: block; height: 100%; }
+
+/* No adding panels from the stacked layout.
+   Adding one goes through dockview's addPanel, and below the breakpoint there
+   is no dockview — so the button was still there and silently did nothing. A
+   control that does nothing is worse than one that is absent: it teaches you
+   the app is unreliable rather than that the feature is elsewhere. Arrange the
+   page on a big screen; the phone shows what the page already holds. */
+@media (max-width: 700px) {
+  .page-actions .tiny,
+  .page-add { display: none; }
+}
