@@ -1906,3 +1906,25 @@ button.cfg-state { border: none; cursor: pointer; font-family: inherit; }
      height to divide, so it scrolls instead. */
   .jog { height: auto; min-height: 100%; overflow-y: auto; }
 }
+
+/* The phone layout: panels stacked, page scrolls. See DashboardHost.createStack.
+   Deliberately plain — no drag handles, no tabs, no close buttons. A phone is
+   for reading the machine and nudging it, and every control that exists to
+   rearrange a dashboard is one more thing to hit by accident beside a running
+   spindle. */
+.stack-host { display: flex; flex-direction: column; gap: 10px; height: 100%;
+  overflow-y: auto; -webkit-overflow-scrolling: touch; padding-bottom: 24px; }
+/* flex: 0 0 auto, or the sections shrink to divide the host's height between
+   them instead of overflowing it — which is the whole point of a scrolling
+   stack. Left at the default they compressed to about 110px each and every
+   panel showed one row of itself. */
+.stack-panel { display: flex; flex-direction: column; flex: 0 0 auto;
+  border: 1px solid var(--border); border-radius: 6px; overflow: hidden;
+  background: var(--bg); }
+.stack-head { font-size: 11px; font-weight: 700; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--text-dim); padding: 8px 10px;
+  border-bottom: 1px solid var(--border); background: var(--bg-sunken, transparent); }
+/* Tall enough to be usable, short enough that the next panel is discoverable
+   below it — a panel filling the screen exactly looks like the only one. */
+.stack-body { min-height: 260px; max-height: 78vh; overflow: auto; position: relative; }
+.stack-body > * { display: block; height: 100%; }

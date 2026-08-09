@@ -120,6 +120,16 @@ export class DashboardHost extends PanelElement {
   /** One element per panel instance id, reused across drags and page switches. */
   private elements = new Map<string, PanelElement>();
   private resizeObserver: ResizeObserver | null = null;
+  /**
+   * Below this the dashboard stops tiling and stacks instead.
+   *
+   * 700px rather than a phone's exact width: a tiled panel needs roughly 350px
+   * before its contents start being cut, so two of them is where tiling stops
+   * paying. A landscape phone and a narrow desktop window get the stack too,
+   * which is the right answer for both.
+   */
+  private narrow = window.matchMedia('(max-width: 700px)');
+  private stacks = new Set<string>();
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -132,6 +142,8 @@ export class DashboardHost extends PanelElement {
     this.publishTabs();
     this.bind(() => panelPickerOpen.get());
     window.addEventListener('keydown', this.onKeyDown);
+    this.narrow.addEventListener('change', this.onBreakpoint);
+    this.onDispose(() => this.narrow.removeEventListener('change', this.onBreakpoint));
     this.onDispose(() => {
       if (host === this) host = null;
       window.removeEventListener('keydown', this.onKeyDown);
@@ -202,16 +214,7 @@ export class DashboardHost extends PanelElement {
     wrapper.className = 'dv-panel';
 
     if (def) {
-      const key = `${pageId}/${instanceId}`;
-      let el = this.elements.get(key);
-      if (!el) {
-        el = document.createElement(def.tag) as PanelElement;
-        el.instanceId = instanceId;
-        el.panelType = panelId;
-        el.pageId = pageId;
-        this.elements.set(key, el);
-      }
-      wrapper.appendChild(el);
+      wrapper.appendChild(this.elementFor(pageId, instanceId, panelId));
     } else {
       wrapper.textContent = `Unknown panel: ${panelId}`;
     }
@@ -222,6 +225,81 @@ export class DashboardHost extends PanelElement {
         /* the element is already populated */
       },
     };
+  }
+
+  /**
+   * The element for one panel instance, created once and reused.
+   *
+   * Shared by the tiled layout and the stacked one, which is what lets a phone
+   * rotate — or a window cross the breakpoint — without a panel losing what it
+   * had read, typed or scrolled to.
+   */
+  private elementFor(pageId: string, instanceId: string, panelId: string): PanelElement {
+    const key = `${pageId}/${instanceId}`;
+    let el = this.elements.get(key);
+    if (!el) {
+      const def = panelDefinition(panelId)!;
+      el = document.createElement(def.tag) as PanelElement;
+      el.instanceId = instanceId;
+      el.panelType = panelId;
+      el.pageId = pageId;
+      this.elements.set(key, el);
+    }
+    return el;
+  }
+
+  /**
+   * Which panels a page holds, without needing a dockview to ask.
+   *
+   * On a phone there is never a dockview to ask, so this reads the saved
+   * layout's own panel table — dockview serialises one keyed by instance id —
+   * and falls back to the page's defaults on a first run.
+   */
+  private panelsOf(page: PageState): Array<{ instanceId: string; panelId: string; title: string }> {
+    const saved = page.layout as {
+      panels?: Record<string, { id: string; component?: string; title?: string }>;
+    } | null;
+    const entries = saved?.panels ? Object.values(saved.panels) : null;
+    if (entries?.length) {
+      return entries
+        .map((p) => ({
+          instanceId: p.id,
+          panelId: p.component ?? p.id,
+          title: p.title ?? p.id,
+        }))
+        .filter((p) => panelDefinition(p.panelId));
+    }
+    const def = DEFAULT_PAGES.find((d) => d.id === page.id);
+    const ids = def ? [...def.panels, ...Object.keys(def.stacked ?? {})] : [];
+    return ids
+      .filter((id) => panelDefinition(id))
+      .map((id) => ({ instanceId: id, panelId: id, title: panelDefinition(id)!.title }));
+  }
+
+  /**
+   * The phone layout: every panel full width, in a column, page scrolls.
+   *
+   * Not a dockview at all. Tiling is the thing that does not work on a 390px
+   * screen — the DRO gets clipped mid-digit and half the tool changer sits off
+   * the edge — and dockview's whole job is tiling, so below the breakpoint it
+   * is simply not used. The saved tiled layout is left untouched, so widening
+   * the window puts it back exactly as it was.
+   */
+  private createStack(page: PageState, host: HTMLElement): void {
+    host.textContent = '';
+    host.className = 'stack-host';
+    for (const { instanceId, panelId, title } of this.panelsOf(page)) {
+      const section = document.createElement('section');
+      section.className = 'stack-panel';
+      const head = document.createElement('div');
+      head.className = 'stack-head';
+      head.textContent = title;
+      const body = document.createElement('div');
+      body.className = 'stack-body';
+      body.appendChild(this.elementFor(page.id, instanceId, panelId));
+      section.append(head, body);
+      host.appendChild(section);
+    }
   }
 
   private createView(page: PageState, host: HTMLElement): DockviewApi {
@@ -330,6 +408,29 @@ export class DashboardHost extends PanelElement {
     if (!container) return;
 
     const active = this.page;
+
+    // Crossing the breakpoint tears everything down and builds the other kind.
+    // The panel elements survive it — they live in `elements`, not in whichever
+    // container is holding them — so nothing loses its state on a rotation.
+    const wantStack = this.narrow.matches;
+    if (wantStack !== this.stacks.has(active.id) && (this.views.has(active.id) || this.stacks.has(active.id))) {
+      this.teardown(active.id);
+    }
+
+    if (wantStack) {
+      if (!this.stacks.has(active.id)) {
+        const host = document.createElement('div');
+        container.appendChild(host);
+        this.createStack(active, host);
+        this.stacks.add(active.id);
+        this.stackHosts.set(active.id, host);
+      }
+      for (const [id, h] of this.stackHosts) h.style.display = id === active.id ? '' : 'none';
+      for (const v of this.views.values()) v.host.style.display = 'none';
+      return;
+    }
+    for (const h of this.stackHosts.values()) h.style.display = 'none';
+
     if (!this.views.has(active.id)) {
       const host = document.createElement('div');
       host.className = 'dv-host';
@@ -353,6 +454,31 @@ export class DashboardHost extends PanelElement {
     // becomes visible or it renders collapsed.
     requestAnimationFrame(() => this.layoutActive());
   }
+
+  private stackHosts = new Map<string, HTMLElement>();
+
+  /** Drop whichever container a page is currently using, keeping its panels. */
+  private teardown(pageId: string): void {
+    const view = this.views.get(pageId);
+    if (view) {
+      view.api.dispose();
+      view.host.remove();
+      this.views.delete(pageId);
+    }
+    const stack = this.stackHosts.get(pageId);
+    if (stack) {
+      stack.remove();
+      this.stackHosts.delete(pageId);
+      this.stacks.delete(pageId);
+    }
+  }
+
+  /** Rotating a phone, or dragging a window past the breakpoint. */
+  private onBreakpoint = (): void => {
+    this.requestUpdate();
+    // After the render, so syncViews sees the container it is going to fill.
+    void this.updateComplete.then(() => this.syncViews());
+  };
 
   private layoutActive(): void {
     const container = this.querySelector('.dv-container') as HTMLElement | null;
