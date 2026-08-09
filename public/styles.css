@@ -1907,27 +1907,39 @@ button.cfg-state { border: none; cursor: pointer; font-family: inherit; }
   .jog { height: auto; min-height: 100%; overflow-y: auto; }
 }
 
-/* The phone layout: panels stacked, page scrolls. See DashboardHost.createStack.
-   Deliberately plain — no drag handles, no tabs, no close buttons. A phone is
-   for reading the machine and nudging it, and every control that exists to
-   rearrange a dashboard is one more thing to hit by accident beside a running
-   spindle. */
-.stack-host { display: flex; flex-direction: column; gap: 10px; height: 100%;
-  overflow-y: auto; -webkit-overflow-scrolling: touch; padding-bottom: 24px; }
-/* flex: 0 0 auto, or the sections shrink to divide the host's height between
-   them instead of overflowing it — which is the whole point of a scrolling
-   stack. Left at the default they compressed to about 110px each and every
-   panel showed one row of itself. */
-.stack-panel { display: flex; flex-direction: column; flex: 0 0 auto;
-  border: 1px solid var(--border); border-radius: 6px; overflow: hidden;
-  background: var(--bg); }
-.stack-head { font-size: 11px; font-weight: 700; letter-spacing: 0.08em;
-  text-transform: uppercase; color: var(--text-dim); padding: 8px 10px;
-  border-bottom: 1px solid var(--border); background: var(--bg-sunken, transparent); }
-/* Tall enough to be usable, short enough that the next panel is discoverable
-   below it — a panel filling the screen exactly looks like the only one. */
-.stack-body { min-height: 260px; max-height: 78vh; overflow: auto; position: relative; }
-.stack-body > * { display: block; height: 100%; }
+/* The phone layout: a strip of panel names, and one panel below it filling the
+   screen. See DashboardHost.createStack.
+
+   Deliberately plain — no drag handles, no close buttons, no reordering. A
+   phone is for reading the machine and nudging it, and every control that
+   exists to rearrange a dashboard is one more thing to hit by accident beside
+   a running spindle. */
+.stack-host { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+
+/* The strip scrolls sideways rather than wrapping: a page can hold nine
+   panels, and a strip that wraps to three rows eats the screen the panel
+   needs. */
+.stack-tabs { display: flex; gap: 4px; overflow-x: auto; flex: 0 0 auto;
+  padding: 6px 8px; border-bottom: 1px solid var(--border);
+  scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.stack-tabs::-webkit-scrollbar { display: none; }
+.stack-tab { flex: 0 0 auto; min-height: 38px; padding: 0 12px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--bg); color: var(--text-dim);
+  font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+/* Specific enough to beat the global button :hover/:active, which otherwise
+   greys the selected tab out the moment it is tapped — on a touch screen that
+   state lingers, so the tab you just chose looks like the one that is off. */
+.stack-tabs .stack-tab.on,
+.stack-tabs .stack-tab.on:hover,
+.stack-tabs .stack-tab.on:active {
+  background: var(--accent); border-color: var(--accent); color: var(--on-accent);
+}
+
+/* min-height: 0 so the panel's own scrolling works instead of the flex item
+   growing to fit its contents and pushing the strip off the top. */
+.stack-view { flex: 1 1 auto; min-height: 0; position: relative; overflow: auto;
+  -webkit-overflow-scrolling: touch; }
+.stack-view > * { display: block; height: 100%; }
 
 /* No adding panels from the stacked layout.
    Adding one goes through dockview's addPanel, and below the breakpoint there

@@ -130,6 +130,8 @@ export class DashboardHost extends PanelElement {
    */
   private narrow = window.matchMedia('(max-width: 700px)');
   private stacks = new Set<string>();
+  /** Which panel each page is showing on a phone, by instance id. */
+  private stackTab = new Map<string, string>();
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -277,29 +279,55 @@ export class DashboardHost extends PanelElement {
   }
 
   /**
-   * The phone layout: every panel full width, in a column, page scrolls.
+   * The phone layout: one panel at a time, chosen from a strip of names.
    *
-   * Not a dockview at all. Tiling is the thing that does not work on a 390px
-   * screen — the DRO gets clipped mid-digit and half the tool changer sits off
-   * the edge — and dockview's whole job is tiling, so below the breakpoint it
-   * is simply not used. The saved tiled layout is left untouched, so widening
-   * the window puts it back exactly as it was.
+   * Not a dockview at all. Tiling is what does not work on a 390px screen — it
+   * cut the DRO off mid-digit — and tiling is dockview's whole job, so below
+   * the breakpoint it is simply not used. The saved tiled layout is left
+   * untouched, so widening the window puts it back exactly as it was.
+   *
+   * One panel rather than a scrolling stack because of what this is for. On a
+   * phone you are standing at the machine wanting the jog rose or the DRO now,
+   * and scrolling past four other panels to reach it is the wrong shape for
+   * that. The strip is the whole navigation: one tap, no menu, and the panel
+   * you land on gets the entire screen.
    */
   private createStack(page: PageState, host: HTMLElement): void {
-    host.textContent = '';
     host.className = 'stack-host';
-    for (const { instanceId, panelId, title } of this.panelsOf(page)) {
-      const section = document.createElement('section');
-      section.className = 'stack-panel';
-      const head = document.createElement('div');
-      head.className = 'stack-head';
-      head.textContent = title;
-      const body = document.createElement('div');
-      body.className = 'stack-body';
-      body.appendChild(this.elementFor(page.id, instanceId, panelId));
-      section.append(head, body);
-      host.appendChild(section);
-    }
+    const render = (): void => {
+      const panels = this.panelsOf(page);
+      if (!panels.length) {
+        host.textContent = '';
+        return;
+      }
+      const chosen = this.stackTab.get(page.id);
+      const current = panels.find((p) => p.instanceId === chosen) ?? panels[0]!;
+
+      host.textContent = '';
+      const tabs = document.createElement('div');
+      tabs.className = 'stack-tabs';
+      for (const p of panels) {
+        const tab = document.createElement('button');
+        tab.className = `stack-tab${p.instanceId === current.instanceId ? ' on' : ''}`;
+        tab.textContent = p.title;
+        tab.addEventListener('click', () => {
+          this.stackTab.set(page.id, p.instanceId);
+          render();
+        });
+        tabs.appendChild(tab);
+      }
+
+      const view = document.createElement('div');
+      view.className = 'stack-view';
+      view.appendChild(this.elementFor(page.id, current.instanceId, current.panelId));
+      host.append(tabs, view);
+
+      // Keep the chosen tab in sight — with nine panels the one you are on is
+      // often off the end of the strip after a reload.
+      const on = tabs.querySelector('.stack-tab.on');
+      on?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    };
+    render();
   }
 
   private createView(page: PageState, host: HTMLElement): DockviewApi {
