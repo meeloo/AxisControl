@@ -781,7 +781,7 @@ customElements.define('cnc-import', ImportPanel);
 
 registerPanel({
   id: 'import',
-  title: 'Import',
+  title: '2D Vector',
   tag: 'cnc-import',
   defaultWidth: 5,
   defaultHeight: 560,

@@ -22,7 +22,7 @@
 
 import { html, nothing, type TemplateResult } from 'lit';
 import { createDockview, type DockviewApi, type DockviewTheme, type IContentRenderer } from 'dockview-core';
-import { PanelElement, panelDefinition, panelDefinitions } from './panel.js';
+import { PanelElement, panelDefinition, panelDefinitions, type PanelDefinition } from './panel.js';
 import { capabilities, loadSetting, saveSetting } from '../core/store.js';
 import { signal } from '../core/signal.js';
 import { theme } from '../core/theme.js';
@@ -79,6 +79,26 @@ export const renamingPage = signal<string | null>(null);
 /** Whether the add-a-panel picker is showing. */
 export const panelPickerOpen = signal(false);
 
+/**
+ * Which group a picked panel joins, by dockview group id.
+ *
+ * The button that opens the picker lives on a tab bar, so "add a panel" has an
+ * obvious answer to "where" — beside these tabs. Null means the caller had no
+ * particular group in mind and dockview should place it, which is what the
+ * phone's single-panel stack wants: there is only one place it can go.
+ */
+let pickerGroup: string | null = null;
+
+export function openPanelPicker(groupId: string | null): void {
+  pickerGroup = groupId;
+  panelPickerOpen.set(true);
+}
+
+export function closePanelPicker(): void {
+  pickerGroup = null;
+  panelPickerOpen.set(false);
+}
+
 let host: DashboardHost | null = null;
 
 export function selectPage(index: number): void {
@@ -134,6 +154,8 @@ export class DashboardHost extends PanelElement {
   private stacks = new Set<string>();
   /** Which panel each page is showing on a phone, by instance id. */
   private stackTab = new Map<string, string>();
+  /** Redraws a page's phone strip, by page id. See createStack. */
+  private stackRender = new Map<string, () => void>();
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -306,8 +328,15 @@ export class DashboardHost extends PanelElement {
       const current = panels.find((p) => p.instanceId === chosen) ?? panels[0]!;
 
       host.textContent = '';
+      // Two elements, not one: the names scroll and the "+" does not. As one
+      // scrolling row the button sat after the last tab, which on the Control
+      // page put it 130px past the right edge of a 390px phone — present,
+      // focusable, and impossible to see or reach without knowing to swipe the
+      // strip first. That is the same bug as having it in the top bar, moved.
       const tabs = document.createElement('div');
       tabs.className = 'stack-tabs';
+      const row = document.createElement('div');
+      row.className = 'stack-tabrow';
       for (const p of panels) {
         const tab = document.createElement('button');
         tab.className = `stack-tab${p.instanceId === current.instanceId ? ' on' : ''}`;
@@ -316,8 +345,11 @@ export class DashboardHost extends PanelElement {
           this.stackTab.set(page.id, p.instanceId);
           render();
         });
-        tabs.appendChild(tab);
+        row.appendChild(tab);
       }
+      // Same control the desktop tab bars get, at the same end of the strip.
+      // There is only one group in this layout, so it has no group to name.
+      tabs.append(row, this.addButton(() => null).element);
 
       const view = document.createElement('div');
       view.className = 'stack-view';
@@ -326,16 +358,57 @@ export class DashboardHost extends PanelElement {
 
       // Keep the chosen tab in sight — with nine panels the one you are on is
       // often off the end of the strip after a reload.
-      const on = tabs.querySelector('.stack-tab.on');
+      const on = row.querySelector('.stack-tab.on');
       on?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     };
+    // Kept so anything that changes what the page holds can redraw the strip.
+    // The host's own requestUpdate does not reach in here: this layout is built
+    // by hand rather than by Lit, precisely so the panel elements survive.
+    this.stackRender.set(page.id, render);
     render();
+  }
+
+  /**
+   * The "+" that opens the panel picker, as a bare DOM element.
+   *
+   * Shared by dockview's header-actions slot and by the phone stack's own tab
+   * strip, so the control is the same object in both layouts rather than two
+   * that drift. `groupId` is a function because dockview builds this once per
+   * group and the id is not interesting until it is pressed.
+   */
+  private addButton(groupId: () => string | null): {
+    element: HTMLElement;
+    init(): void;
+    dispose(): void;
+  } {
+    const button = document.createElement('button');
+    button.className = 'tab-add';
+    button.type = 'button';
+    button.title = 'Add a panel here';
+    button.setAttribute('aria-label', 'Add a panel here');
+    button.textContent = '+';
+    button.addEventListener('click', (e) => {
+      // The tab bar is a drag handle and a click target for selecting groups;
+      // without this the press does both.
+      e.stopPropagation();
+      openPanelPicker(groupId());
+    });
+    return { element: button, init: () => {}, dispose: () => {} };
   }
 
   private createView(page: PageState, host: HTMLElement): DockviewApi {
     const api = createDockview(host, {
       // The panel id is the instance id; `name` carries the panel type.
       createComponent: (options) => this.renderer(page.id, options.id, options.name),
+      // A "+" at the right of every tab bar, rather than one in the top bar.
+      //
+      // Two reasons. It says where the panel will go — the group you pressed —
+      // instead of leaving that to dockview and to guesswork. And the top bar
+      // is the one strip that has to hold the machine status, the stop button
+      // and the page tabs at any width, so it was the wrong place for a control
+      // that is per-group anyway: on a phone it was pushed off the end entirely
+      // and the app could not be rearranged at all.
+      createRightHeaderActionComponent: (group) => this.addButton(() => group.id),
       disableFloatingGroups: true,
       theme: dvTheme(theme.peek()),
     });
@@ -519,14 +592,90 @@ export class DashboardHost extends PanelElement {
 
   // --- Panels & pages -----------------------------------------------------
 
+  /**
+   * Add a panel to a page that has no live dockview — the phone layout.
+   *
+   * Below the breakpoint the page is a tab strip, not a dockview, so there is
+   * no api to call. The layout is still dockview's format though, and hand
+   * editing that JSON to splice in a panel would be inventing a second, worse
+   * implementation of something dockview already does correctly.
+   *
+   * So it builds one offscreen, from the layout as saved, adds the panel
+   * through the real API, takes the JSON back and throws the dockview away.
+   * The page then re-renders its strip from the new layout. It is a heavier
+   * operation than it looks, and it happens once per press.
+   *
+   * This is why adding a panel used to be hidden on a phone. Hiding it was the
+   * honest thing to do while it did nothing, but "arrange the page on a big
+   * screen" is not an answer for somebody standing at the machine with only a
+   * phone in their hand.
+   */
+  private addPanelOffscreen(page: PageState, panelId: string, def: PanelDefinition): void {
+    const scratch = document.createElement('div');
+    // Off-screen rather than display:none — dockview measures itself on
+    // construction, and a zero-sized container makes it lay out into nothing.
+    scratch.style.cssText = 'position:absolute;left:-10000px;top:0;width:1200px;height:800px';
+    document.body.appendChild(scratch);
+    try {
+      const api = createDockview(scratch, {
+        createComponent: () => ({ element: document.createElement('div'), init: () => {} }),
+        disableFloatingGroups: true,
+        theme: dvTheme(theme.peek()),
+      });
+      if (page.layout) {
+        try {
+          api.fromJSON(page.layout as never);
+        } catch {
+          api.clear();
+        }
+      }
+      if (!api.panels.length) {
+        // A page that has never been opened wide has no saved layout, only the
+        // defaults its strip is showing. Seed those first, or adding one panel
+        // would replace every panel the operator can currently see.
+        for (const p of this.panelsOf(page)) {
+          api.addPanel({ id: p.instanceId, component: p.panelId, title: p.title });
+        }
+      }
+      const id = api.getPanel(panelId) ? `${panelId}~${Date.now().toString(36)}` : panelId;
+      api.addPanel({ id, component: panelId, title: def.title });
+      page.layout = api.toJSON() as unknown as PageState['layout'];
+      this.stackTab.set(page.id, id);
+      api.dispose();
+    } finally {
+      scratch.remove();
+    }
+  }
+
   private addPanel(panelId: string): void {
     const view = this.views.get(this.page.id);
     const def = panelDefinition(panelId);
-    if (!view || !def) return;
+    if (!def) return;
+    if (!view) {
+      // The stacked phone layout. See addPanelOffscreen.
+      this.addPanelOffscreen(this.page, panelId, def);
+      closePanelPicker();
+      this.persist();
+      this.stackRender.get(this.page.id)?.();
+      return;
+    }
     // A panel already on this page gets a fresh instance id so it can appear twice.
     const id = view.api.getPanel(panelId) ? `${panelId}~${Date.now().toString(36)}` : panelId;
-    view.api.addPanel({ id, component: panelId, title: def.title });
-    panelPickerOpen.set(false);
+    // Into the group whose "+" was pressed. Without this the panel lands
+    // wherever dockview feels like putting it, which after a press on a
+    // specific tab bar is the wrong answer to a question the operator has
+    // already answered by choosing which "+" to press.
+    // referenceGroup takes the id directly, so a group that has since been
+    // closed simply falls through to dockview's own placement rather than
+    // throwing on a stale handle.
+    const group = pickerGroup && view.api.getGroup(pickerGroup) ? pickerGroup : null;
+    view.api.addPanel({
+      id,
+      component: panelId,
+      title: def.title,
+      ...(group ? { position: { referenceGroup: group } } : {}),
+    });
+    closePanelPicker();
     this.persist();
   }
 

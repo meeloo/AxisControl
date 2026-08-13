@@ -1950,19 +1950,26 @@ button.cfg-state { border: none; cursor: pointer; font-family: inherit; }
 /* The strip scrolls sideways rather than wrapping: a page can hold nine
    panels, and a strip that wraps to three rows eats the screen the panel
    needs. */
-.stack-tabs { display: flex; gap: 4px; overflow-x: auto; flex: 0 0 auto;
-  padding: 6px 8px; border-bottom: 1px solid var(--border);
-  scrollbar-width: none; -webkit-overflow-scrolling: touch; }
-.stack-tabs::-webkit-scrollbar { display: none; }
-.stack-tab { flex: 0 0 auto; min-height: 38px; padding: 0 12px; border-radius: 6px;
+.stack-tabs { display: flex; align-items: stretch; gap: 4px; flex: 0 0 auto;
+  padding: 6px 8px; border-bottom: 1px solid var(--border); }
+/* Only the names scroll. The "+" is pinned beside them, because the Control
+   page has six panels and a 390px phone shows about three — so a button after
+   the last tab was 130px off the right edge, reachable only by somebody who
+   already knew to swipe a strip that gives no sign it scrolls. */
+.stack-tabrow { display: flex; gap: 4px; overflow-x: auto; flex: 1 1 auto;
+  min-width: 0; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.stack-tabrow::-webkit-scrollbar { display: none; }
+.stack-tabs .tab-add { flex: 0 0 auto; min-height: 38px; min-width: 38px;
+  border: 1px solid var(--border); border-radius: 6px; font-size: 18px; }
+.stack-tabrow .stack-tab { flex: 0 0 auto; min-height: 38px; padding: 0 12px; border-radius: 6px;
   border: 1px solid var(--border); background: var(--bg); color: var(--text-dim);
   font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer; }
 /* Specific enough to beat the global button :hover/:active, which otherwise
    greys the selected tab out the moment it is tapped — on a touch screen that
    state lingers, so the tab you just chose looks like the one that is off. */
-.stack-tabs .stack-tab.on,
-.stack-tabs .stack-tab.on:hover,
-.stack-tabs .stack-tab.on:active {
+.stack-tabrow .stack-tab.on,
+.stack-tabrow .stack-tab.on:hover,
+.stack-tabrow .stack-tab.on:active {
   background: var(--accent); border-color: var(--accent); color: var(--on-accent);
 }
 
@@ -1972,16 +1979,12 @@ button.cfg-state { border: none; cursor: pointer; font-family: inherit; }
   -webkit-overflow-scrolling: touch; }
 .stack-view > * { display: block; height: 100%; }
 
-/* No adding panels from the stacked layout.
-   Adding one goes through dockview's addPanel, and below the breakpoint there
-   is no dockview — so the button was still there and silently did nothing. A
-   control that does nothing is worse than one that is absent: it teaches you
-   the app is unreliable rather than that the feature is elsewhere. Arrange the
-   page on a big screen; the phone shows what the page already holds. */
-@media (max-width: 700px), (max-height: 500px) {
-  .page-actions .tiny,
-  .page-add { display: none; }
-}
+/* Adding a panel works on a phone now. It used to be hidden here, because
+   below the breakpoint there is no dockview to call addPanel on and the button
+   silently did nothing — hiding it was the honest thing to do at the time, but
+   "arrange the page on a big screen" is no answer for somebody standing at the
+   machine with only a phone. The button now builds the layout through a
+   dockview created off-screen; see DashboardHost.addPanelOffscreen. */
 
 /* --- At the machine ------------------------------------------------------
    Position and jogging on one screen. Sized for a phone held in one hand, and
@@ -2092,3 +2095,14 @@ button.cfg-state { border: none; cursor: pointer; font-family: inherit; }
    right edge rather than jumping about with the length of the font name. */
 .txt-fontname { flex: 1 1 auto; min-width: 0; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; }
+
+/* The "+" on a dockview tab bar. Sized to the header rather than to the text so
+   it lines up with the tabs beside it, and quiet until pointed at: it is on
+   every group, and four accent-coloured buttons across a page would read as the
+   most important thing on screen. */
+.tab-add {
+  flex: 0 0 auto; padding: 0 10px; border: 0; background: transparent;
+  color: var(--text-faint); font-size: 16px; line-height: 1; cursor: pointer;
+  align-self: stretch;
+}
+.tab-add:hover { color: var(--accent); background: var(--bg-raised); }

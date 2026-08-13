@@ -24,7 +24,6 @@ import { DRIVERS, driverInfo } from '../machine/registry.js';
 import {
   addPage,
   pageTabs,
-  panelPickerOpen,
   removePage,
   renamePage,
   renamingPage,
@@ -67,7 +66,6 @@ export class TopBar extends PanelElement {
       theme.get();
       pageTabs.get();
       renamingPage.get();
-      panelPickerOpen.get();
     });
   }
 
@@ -264,21 +262,17 @@ export class TopBar extends PanelElement {
         })}
       </nav>
 
-      <!-- Outside the scroller on purpose. These two were the last children of
-           .pages, which scrolls horizontally with a hidden scrollbar, so on a
-           narrow window they slid off the end and there was no visible way to
-           get to them — the one control that adds a panel, unreachable exactly
-           when the screen is small enough that you need to rearrange. Only the
-           tabs scroll now; the actions stay put. -->
+      <!-- Outside the scroller on purpose: .pages scrolls horizontally with a
+           hidden scrollbar, so a control placed inside it slides off the end on
+           a narrow window. Only the tabs scroll; this stays put.
+
+           Adding a PANEL is not here any more. It belongs on a tab bar, where
+           it can say which group the panel joins, and where it survives a phone
+           screen — this strip has to hold the status, the stop button and the
+           page tabs at any width, and the panel button was the thing that got
+           squeezed out. See DashboardHost.addButton. -->
       <div class="page-actions">
         <button class="page-add" title="Add a page" @click=${() => addPage()}>+</button>
-        <button
-          class="tiny"
-          title="Add a panel to this page"
-          @click=${() => panelPickerOpen.set(!panelPickerOpen.peek())}
-        >
-          ${panelPickerOpen.get() ? 'Close' : '+ Panel'}
-        </button>
       </div>
     `;
   }
