@@ -15,7 +15,7 @@ const dir = await mkdtemp(join(tmpdir(), 'hershey-'));
 const out = join(dir, 'h.mjs');
 await build({ entryPoints: [join(root, 'src/text/hershey.ts')], bundle: true,
   format: 'esm', outfile: out, logLevel: 'error' });
-const { textToPolylines, boundsOf } = await import(pathToFileURL(out).href);
+const { textToPolylines, boundsOf, faces } = await import(pathToFileURL(out).href);
 process.on('exit', () => { void rm(dir, { recursive: true, force: true }); });
 
 const fails = [];
@@ -92,6 +92,29 @@ ok(missing.length === 0, 'every printable ASCII character draws something',
 // than the letter being absent.
 ok(textToPolylines('é', { size: 10 }).length === 0, 'and a character it lacks draws nothing');
 ok(textToPolylines('Aé B', { size: 10 }).length > 0, 'without taking the rest of the line with it');
+
+// --- Every face, not just the default --------------------------------------
+//
+// Six faces from one parser: a glyph line that the simplex face never produces
+// — a longer vertex run, a different bearing — is exactly what the script and
+// blackletter faces are full of.
+const all = faces();
+ok(all.length >= 6, 'six faces are offered', `${all.length}: ${all.map((f) => f.id).join(' ')}`);
+for (const face of all) {
+  const missing = [];
+  for (let c = 33; c <= 126; c++) {
+    const ch = String.fromCharCode(c);
+    if (textToPolylines(ch, { size: 10, face: face.id }).length === 0) missing.push(ch);
+  }
+  ok(missing.length === 0, `${face.id} draws every printable character`, missing.join('') || 'none missing');
+  const b = boundsOf(textToPolylines('H', { size: 10, face: face.id }));
+  // Every Hershey face shares the 21-unit cap height, so a 10mm H is 10mm tall
+  // whichever one is chosen — which is what makes swapping faces safe mid-job.
+  ok(b !== null && near(b.maxY - b.minY, 10, 0.6), `and its 10mm H measures 10mm`,
+     b ? (b.maxY - b.minY).toFixed(2) : 'nothing drawn');
+}
+ok(textToPolylines('A', { size: 10, face: 'nonsense' }).length > 0,
+   'an unknown face falls back rather than throwing');
 
 console.log(fails.length ? `\n${fails.length} FAILED: ${fails.join(', ')}` : '\nall passed');
 process.exit(fails.length ? 1 : 0);

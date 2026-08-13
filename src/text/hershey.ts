@@ -19,7 +19,7 @@
 // A pair of " R" — space, then R — is a pen lift. Y grows downward in the
 // original, as it did on the CRT, so it is flipped on the way out.
 
-import { FUTURAL } from './futural.js';
+import { FACES, type HersheyFace } from './faces.js';
 
 /** A run of points the tool cuts without lifting. Millimetres, Y up. */
 export type Polyline = Array<{ x: number; y: number }>;
@@ -35,6 +35,13 @@ export interface TextOptions {
   lineHeight?: number;
   /** Where the text sits relative to (0,0). */
   align?: 'left' | 'centre' | 'right';
+  /** Which face, by id. Unknown ids fall back to the first rather than throw. */
+  face?: string;
+}
+
+/** The faces available, in the order they should be offered. */
+export function faces(): HersheyFace[] {
+  return FACES;
 }
 
 /**
@@ -81,13 +88,29 @@ function parseGlyph(line: string): Glyph | null {
   return { advance: right - left, strokes };
 }
 
-/** ASCII 32..127, in the order the file stores them. */
-const GLYPHS: Array<Glyph | null> = FUTURAL.split('\n').map(parseGlyph);
+/**
+ * Parsed faces, built on first use and kept.
+ *
+ * Six faces is about 45KB of source and a few thousand small objects once
+ * parsed. Parsing all of them at import would be work done for five faces
+ * nobody selected, on a board that is also trying to run a machine.
+ */
+const parsed = new Map<string, Array<Glyph | null>>();
 
-function glyphFor(ch: string): Glyph | null {
+function glyphsOf(faceId: string): Array<Glyph | null> {
+  const face = FACES.find((f) => f.id === faceId) ?? FACES[0]!;
+  let g = parsed.get(face.id);
+  if (!g) {
+    g = face.data.split('\n').map(parseGlyph);
+    parsed.set(face.id, g);
+  }
+  return g;
+}
+
+function glyphFor(glyphs: Array<Glyph | null>, ch: string): Glyph | null {
   const code = ch.charCodeAt(0);
   if (code < 32 || code > 127) return null;
-  return GLYPHS[code - 32] ?? null;
+  return glyphs[code - 32] ?? null;
 }
 
 /**
@@ -130,6 +153,7 @@ export function textToPolylines(text: string, options: TextOptions): Polyline[] 
   const cos = Math.cos(angle);
   const sin = Math.sin(angle);
   const align = options.align ?? 'left';
+  const glyphs = glyphsOf(options.face ?? FACES[0]!.id);
 
   const out: Polyline[] = [];
   const lines = text.split('\n');
@@ -143,7 +167,7 @@ export function textToPolylines(text: string, options: TextOptions): Polyline[] 
     const placed: Array<Array<{ x: number; y: number }>> = [];
     let penX = 0;
     for (const ch of line) {
-      const g = glyphFor(ch);
+      const g = glyphFor(glyphs, ch);
       if (!g) continue;
       for (const stroke of g.strokes) {
         placed.push(stroke.map((p) => ({ x: penX + p.x * scale, y: p.y * scale })));

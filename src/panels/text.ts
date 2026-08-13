@@ -17,10 +17,11 @@ import { connected, machine } from '../core/store.js';
 import { empty, numberField, selectField, textField } from '../ui/widgets.js';
 import { preview, saveAndRun } from '../ui/program.js';
 import { Gcode, depthLevels, n, type GeneratedProgram } from '../cam/format.js';
-import { boundsOf, textToPolylines, type Polyline } from '../text/hershey.js';
+import { boundsOf, faces, textToPolylines, type Polyline } from '../text/hershey.js';
 
 interface Settings {
   text: string;
+  face: string;
   size: number;
   rotation: number;
   tracking: number;
@@ -35,6 +36,7 @@ interface Settings {
 export class TextPanel extends PanelElement {
   private s: Settings = {
     text: 'AXIS',
+    face: faces()[0]!.id,
     size: 10,
     rotation: 0,
     tracking: 0,
@@ -65,6 +67,7 @@ export class TextPanel extends PanelElement {
       rotation: this.s.rotation,
       tracking: this.s.tracking,
       align: this.s.align,
+      face: this.s.face,
     });
   }
 
@@ -83,7 +86,8 @@ export class TextPanel extends PanelElement {
 
     const g = new Gcode();
     g.header(`Engrave: ${this.s.text.replace(/\n/g, ' / ')}`, [
-      `${n(this.s.size)}mm caps, ${n(this.s.depth)}mm deep`,
+      `${faces().find((f) => f.id === this.s.face)?.name ?? this.s.face}, ` +
+        `${n(this.s.size)}mm caps, ${n(this.s.depth)}mm deep`,
       `X ${n(box.minX)}..${n(box.maxX)}  Y ${n(box.minY)}..${n(box.maxY)} in work coordinates`,
       'Z0 is the surface — set work zero on the top of the material',
     ]);
@@ -201,6 +205,13 @@ export class TextPanel extends PanelElement {
           ${textField('Text', this.s.text, (v) => this.set('text', v), {
             title: 'One line per line. Characters the face has no glyph for are skipped.',
           })}
+          ${selectField(
+            'Face',
+            this.s.face,
+            faces().map((f) => ({ value: f.id, label: f.name })),
+            (v) => this.set('face', v),
+            { title: faces().find((f) => f.id === this.s.face)?.note ?? '' },
+          )}
           ${numberField('Cap height', this.s.size, (v) => this.set('size', v), { suffix: 'mm', min: 0.5 })}
           ${numberField('Rotation', this.s.rotation, (v) => this.set('rotation', v), { suffix: '°' })}
           ${numberField('Tracking', this.s.tracking, (v) => this.set('tracking', v), { suffix: 'mm' })}
