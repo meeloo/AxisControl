@@ -2042,3 +2042,29 @@ button.cfg-state { border: none; cursor: pointer; font-family: inherit; }
 .txt-preview polyline { fill: none; stroke: var(--text); stroke-width: 1.5;
   stroke-linecap: round; stroke-linejoin: round; }
 .txt-origin { fill: var(--accent); }
+
+/* V-carve preview. The letter outline drops back to a hint and the rings are
+   drawn over it, shaded by depth — the outline says where the letter is and the
+   rings say how deep it goes, which is the question a V-carve actually raises
+   and the one an outline cannot answer. */
+.txt-preview polyline.txt-ghost { stroke: var(--text-faint); stroke-width: 1; }
+.txt-preview polyline.txt-ring { stroke: var(--accent); stroke-width: 1; }
+
+/* Fonts stored on the controller. */
+.txt-manage { padding: 0 12px; }
+.txt-fonts { display: flex; flex-direction: column; gap: 8px; }
+.txt-drop {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 4px; margin: 0 12px; padding: 18px 16px; cursor: pointer;
+  border: 2px dashed var(--border-strong); border-radius: var(--radius);
+  background: var(--bg-raised); text-align: center;
+}
+.txt-drop:hover { border-color: var(--accent); }
+.txt-drop input { display: none; }
+.txt-fontlist { list-style: none; margin: 0; padding: 0 12px; display: flex;
+  flex-direction: column; gap: 4px; }
+.txt-fontlist li { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+/* The name takes the slack so the size and the delete button stay put down the
+   right edge rather than jumping about with the length of the font name. */
+.txt-fontname { flex: 1 1 auto; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
