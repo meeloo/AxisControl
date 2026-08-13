@@ -17,6 +17,7 @@
 // created if missing and only files named in the build manifest are written, so
 // a mistake cannot take DWC with it.
 
+import { normaliseControllerUrl } from '../core/util.js';
 import type { MachineDriver } from './driver.js';
 import { BUILD, type BuildStamp } from '../core/build.js';
 
@@ -77,7 +78,19 @@ export async function readManifest(base: string): Promise<BuildManifest | null> 
 export async function probeManifest(
   base: string,
 ): Promise<{ manifest: BuildManifest | null; reason: string | null }> {
-  const url = new URL('build.json', base).href;
+  let url: string;
+  try {
+    url = new URL('build.json', base).href;
+  } catch {
+    // Reported rather than thrown. This is the failure the whole function
+    // exists to describe, and a raw TypeError out of here lands in the panel as
+    // a message about URL parsing with no hint that the address box is where
+    // the fix is.
+    return {
+      manifest: null,
+      reason: `"${base}" is not a usable address — it needs a scheme, as in http://${base.replace(/^\/+/, '')}`,
+    };
+  }
   let res: Response;
   try {
     res = await fetch(url, { cache: 'no-store' });
@@ -207,10 +220,17 @@ export function totalBytes(files: Map<string, Uint8Array>): number {
  */
 export function installedUrl(controllerUrl: string, dir = INSTALL_DIR): string {
   const path = dir.replace(/^\/www/, '');
+  // Normalised rather than trusted. The catch below used to hand back the
+  // address with the path glued on, which for an address typed without a
+  // scheme — `192.168.1.9`, the normal thing to type — is a string that is not
+  // a URL at all. Everything downstream then failed inside `new URL`, a long
+  // way from the address box, and the Install panel read that as the machine
+  // refusing to serve files it had just accepted.
+  const base = normaliseControllerUrl(controllerUrl);
   try {
-    return new URL(`${path}/`, controllerUrl).href;
+    return new URL(`${path}/`, base).href;
   } catch {
-    return `${controllerUrl.replace(/\/+$/, '')}${path}/`;
+    return `${base}${path}/`;
   }
 }
 
@@ -250,10 +270,11 @@ export function shortcutPath(dir = INSTALL_DIR): string {
 
 export function shortcutUrl(controllerUrl: string, dir = INSTALL_DIR): string {
   const path = shortcutPath(dir).replace(/^\/www/, '');
+  const base = normaliseControllerUrl(controllerUrl);
   try {
-    return new URL(path, controllerUrl).href;
+    return new URL(path, base).href;
   } catch {
-    return `${controllerUrl.replace(/\/+$/, '')}${path}`;
+    return `${base}${path}`;
   }
 }
 

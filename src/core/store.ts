@@ -5,6 +5,7 @@
 // driver reference or subscribe to it directly, which is what keeps swapping
 // controllers a one-line change.
 
+import { normaliseControllerUrl } from './util.js';
 import { batch, signal } from './signal.js';
 import type { MachineDriver } from '../machine/driver.js';
 import { driverInfo } from '../machine/registry.js';
@@ -26,8 +27,17 @@ export const connecting = signal(false);
 export const connectionError = signal<string | null>(null);
 export const log = signal<LogLine[]>([], () => false);
 export const driverId = signal<string>(loadSetting('driverId', 'rrf'));
+/**
+ * Where the controller is, always with a scheme on it.
+ *
+ * Normalised on the way in — including on load, so an address saved before this
+ * existed is repaired rather than carried forward. Everything downstream builds
+ * URLs against this string, and a base with no scheme fails in `new URL` rather
+ * than in the request, which puts the error a long way from its cause. See
+ * normaliseControllerUrl.
+ */
 export const controllerUrl = signal<string>(
-  loadSetting('controllerUrl', defaultControllerUrl()),
+  normaliseControllerUrl(loadSetting('controllerUrl', defaultControllerUrl())),
 );
 
 let driver: MachineDriver | null = null;
@@ -69,6 +79,9 @@ export async function connect(url: string, id: string, password = ''): Promise<v
   connecting.set(true);
   connectionError.set(null);
   saveSetting('driverId', id);
+  // Saved and published in the form every consumer can build a URL against,
+  // not in the form it was typed. The driver is handed the same string.
+  url = normaliseControllerUrl(url);
   saveSetting('controllerUrl', url);
   driverId.set(id);
   controllerUrl.set(url);

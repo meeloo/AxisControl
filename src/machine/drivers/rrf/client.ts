@@ -1,3 +1,4 @@
+import { normaliseControllerUrl } from '../../../core/util.js';
 // RepRapFirmware HTTP transport (standalone mode).
 //
 // Endpoint reference:
@@ -419,11 +420,9 @@ export class RrfClient {
   }
 }
 
-function normaliseBase(url: string): string {
-  let u = url.trim();
-  if (!/^https?:\/\//i.test(u)) u = `http://${u}`;
-  return u.replace(/\/+$/, '');
-}
+/** Kept as a call rather than a copy: a driver should not assume its caller
+ *  tidied the address, and doing it twice costs nothing. */
+const normaliseBase = normaliseControllerUrl;
 
 /** Served from the controller itself? Then CORS doesn't apply at all. */
 function isSameOrigin(base: string): boolean {

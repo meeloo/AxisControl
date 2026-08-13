@@ -65,3 +65,32 @@ export function parentPath(path: string): string {
 export function basename(path: string): string {
   return path.slice(path.lastIndexOf('/') + 1);
 }
+
+/**
+ * A controller address with a scheme on it, ready to build URLs against.
+ *
+ * Typing `192.168.1.9` or `sebscnc.local` into the address box is the normal
+ * thing to do, and it worked — for connecting. The RepRapFirmware client
+ * prepended `http://` privately before it built any request, so the connection,
+ * the polling and every upload went to the right place, and the raw string the
+ * operator typed was what got saved and published to the rest of the app.
+ *
+ * Everything that builds a URL from that string rather than making a request
+ * with it then got a base with no scheme. `new URL('build.json', '192.168.1.9/
+ * AxisControl/')` does not throw a useful error, it throws TypeError — and the
+ * Install panel, which reads its own manifest back off the machine to confirm
+ * the copy landed, reported that as the machine refusing to serve the files it
+ * had just accepted. Uploads worked; only the reading back failed; and the
+ * message blamed the SD card.
+ *
+ * So it is normalised once, where the address is stored, and every consumer
+ * gets a string that `new URL` accepts. Idempotent, so applying it twice is
+ * harmless — the client still calls it too, since a driver should not depend on
+ * having been handed tidy input.
+ */
+export function normaliseControllerUrl(url: string): string {
+  const trimmed = url.trim();
+  if (!trimmed) return trimmed;
+  const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+  return withScheme.replace(/\/+$/, '');
+}
