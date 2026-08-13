@@ -4,6 +4,7 @@
 import './dro.js';
 import './wcs.js';
 import './hand.js';
+import './text.js';
 import './jog.js';
 import './spindle.js';
 import './job.js';
