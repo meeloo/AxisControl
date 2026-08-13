@@ -98,6 +98,18 @@ hand, and the only two things that matter are where it is and moving it a bit.
 
 Installed to the home screen it runs full screen with no address bar.
 
+### It engraves text without going near CAM
+
+A name on a fixture, a scale beside a slot, "MAX 24V" under a socket. Type it,
+see it drawn to scale with the work origin marked, cut it — six single-stroke
+faces from Hershey's 1967 set, which suit this exactly because a Hershey glyph
+is *already* a sequence of pen-up and pen-down moves. The toolpath IS the
+letter, so nothing is offset or approximated on the way to G-code, and no font
+file is loaded: 45KB of glyph data ships inside the app and works with the
+machine unplugged from the world.
+
+Outline fonts and V-carving are a different operation and are not built yet.
+
 ### It is honest about what it cannot do
 
 Panels hide themselves when the controller cannot back them, rather than
@@ -109,12 +121,13 @@ jobs and are never conflated.
 
 ## The panels
 
-Twenty-five, arranged onto pages you lay out yourself.
+Twenty-six, arranged onto pages you lay out yourself.
 
 - **Motion** — a jog rose of concentric rings, eight directions each, with
   distances that are always numbers a person would choose
 - **At the machine** — position and jogging on one phone screen, in either
   orientation
+- **Text** — engrave a line of text, six single-stroke faces, no CAM
 - **Configuration** — the above
 - **Toolpath** — WebGL viewer with live cutter tracking, a time slider,
   run-from-line picking, and the actual cutter drawn to size
@@ -352,6 +365,7 @@ the repo and check the things whose failures are silent:
 npm run merge-oracle    # our object-model merge against Duet3D's own implementation
 npm run rewrite-check   # the in-place config edit: offsets, widths, line endings
 npm run gcode-params    # which doc bullets are parameters and which are prose
+npm run hershey-check   # text layout: sizes, rotation, alignment, every glyph
 ```
 
 `rewrite-check` takes a directory and will sweep real config files for the

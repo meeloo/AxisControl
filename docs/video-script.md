@@ -168,6 +168,12 @@ let the validation refuse it.*
 > Jogging is a compass rose — direction and distance in one press, and the
 > distances are always numbers a person would choose. Ten, five, one, not 12.7.
 
+*Text panel. Type a name, pick Gothic, press Preview.*
+
+> And there is a text panel, which is the one people ask for. Six single-stroke
+> engraving faces, no CAM step — type it, see it, cut it. Labelling a fixture
+> used to be twenty minutes through CAD; it is about thirty seconds here.
+
 *Probing panel.*
 
 > Probing keeps tool length, workpiece zero and feature finding as three
