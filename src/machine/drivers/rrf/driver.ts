@@ -600,6 +600,23 @@ export class RrfDriver implements MachineDriver {
     await this.send(`M120\nG91\n${prefix}G1 ${words} F${opts.feedRate}\nM121`);
   }
 
+  async moveToMachine(
+    targets: Record<string, number>,
+    opts: { feedRate?: number } = {},
+  ): Promise<void> {
+    const words = Object.entries(targets)
+      .map(([axis, v]) => `${axis.toUpperCase()}${v.toFixed(3)}`)
+      .join(' ');
+    if (!words) return;
+    // G53 G90: absolute, in machine coordinates, so the target means one place
+    // on the machine regardless of the work offset or an active G68 rotation.
+    // G1 rather than G0 for the same reason as jog — in CNC mode RRF runs G0 at
+    // the M203 maximum and ignores F entirely, so a G0 here would take every
+    // axis at its limit instead of at the speed asked for.
+    const feed = opts.feedRate && opts.feedRate > 0 ? opts.feedRate : 1000;
+    await this.send(`M120\nG90\nG53 G1 ${words} F${feed}\nM121`);
+  }
+
   async home(axes?: string[]): Promise<void> {
     if (!axes || axes.length === 0) return this.send('G28');
     await this.send(`G28 ${axes.map((a) => a.toUpperCase()).join(' ')}`);

@@ -2106,3 +2106,23 @@ button.cfg-state { border: none; cursor: pointer; font-family: inherit; }
   align-self: stretch;
 }
 .tab-add:hover { color: var(--accent); background: var(--bg-raised); }
+
+/* --- Driving the machine from the readout --------------------------------
+   Double-click a position to type one, drag sideways to scrub to one. Both
+   MOVE the axis, so the affordance is deliberately quiet until pointed at: a
+   readout that looks like a row of controls invites pressing, and every press
+   here is a move. */
+.dro-table td.num.settable { cursor: ew-resize; touch-action: none; user-select: none; }
+.dro-table td.num.settable:hover { background: var(--bg-raised); border-radius: 4px; }
+/* Not a cursor change on an axis that cannot be driven — an unhomed axis is
+   refused, and offering the grab cursor there would be a lie. */
+.dro-table td.num.scrubbing { background: var(--tint-accent); border-radius: 4px; }
+/* How far the scrub has come, beside the value it is heading for. The absolute
+   number is what gets sent; the delta is what tells you whether you are close. */
+.scrub-delta { margin-left: 8px; font-size: 11px; color: var(--accent); font-variant-numeric: tabular-nums; }
+.dro-table td.num.editing { padding: 0; }
+.dro-table td.num.editing input {
+  width: 100%; text-align: right; font-family: var(--mono);
+  font-size: inherit; padding: 2px 4px;
+  border: 1px solid var(--accent); border-radius: 4px; background: var(--bg-input);
+}

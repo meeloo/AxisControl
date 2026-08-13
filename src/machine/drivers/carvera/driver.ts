@@ -80,6 +80,12 @@ export class CarveraDriver implements MachineDriver {
   async jog(_deltas: Record<string, number>, _opts: JogOptions): Promise<void> {
     todo('jog');
   }
+  async moveToMachine(
+    _targets: Record<string, number>,
+    _opts?: { feedRate?: number },
+  ): Promise<void> {
+    todo('moveToMachine');
+  }
   async home(_axes?: string[]): Promise<void> {
     todo('home');
   }

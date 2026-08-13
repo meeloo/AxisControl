@@ -76,6 +76,24 @@ export interface MachineDriver {
    * @param deltas signed millimetres per axis letter, e.g. { X: 5, Y: -5 }
    */
   jog(deltas: Record<string, number>, opts: JogOptions): Promise<void>;
+  /**
+   * Move axes to absolute positions in MACHINE coordinates.
+   *
+   * Machine rather than work, and that is the whole reason this is not just
+   * `jog` with the arithmetic done at the call site. A relative move is only
+   * unambiguous while no coordinate rotation is active: under G68 a relative XY
+   * move is rotated with everything else, so "go 40mm to the right" lands
+   * somewhere else entirely. An absolute machine position means one place on
+   * the machine whatever else is switched on.
+   *
+   * One call rather than one per axis, for the reason jog takes a map: separate
+   * commands trace an L through whatever is in the corner.
+   *
+   * The caller is responsible for the target being inside the axis limits — the
+   * driver does not clamp, because silently cutting a move short is worse than
+   * refusing it and every caller knows the limits.
+   */
+  moveToMachine(targets: Record<string, number>, opts?: { feedRate?: number }): Promise<void>;
   home(axes?: string[]): Promise<void>;
   /**
    * Set the work offset for `axis` so the current position reads `value`.

@@ -198,6 +198,13 @@ export const actions = {
   clearHeightMap: () => run('clear height map', (d) => d.clearHeightMap()),
   jog: (deltas: Record<string, number>, feedRate: number) =>
     run(`jog ${Object.keys(deltas).join('')}`, (d) => d.jog(deltas, { feedRate })),
+  moveToMachine: (targets: Record<string, number>, feedRate?: number) =>
+    run(
+      `move to ${Object.entries(targets)
+        .map(([a, v]) => `${a}${v.toFixed(3)}`)
+        .join(' ')}`,
+      (d) => d.moveToMachine(targets, { feedRate }),
+    ),
   home: (axes?: string[]) => run('home', (d) => d.home(axes)),
   setWorkZero: (axis: string, value = 0, wcs?: number) =>
     run(`zero ${axis}`, (d) => d.setWorkZero(axis, value, wcs)),
