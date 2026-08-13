@@ -32,6 +32,15 @@ interface EditSession {
   pending: Map<string, number>;
 }
 
+/**
+ * The axes Tab cycles between. See DroPanel.tabRing.
+ *
+ * Not derived from the object model's `visible` flag, which is about whether an
+ * axis is shown at all rather than whether it is one of the three you fill in
+ * together — the dust-shoe axis on this machine is perfectly visible.
+ */
+const PRIMARY = new Set(['X', 'Y', 'Z']);
+
 /** Statuses during which an axis must not be driven from the readout. */
 const BUSY = new Set(['running', 'paused', 'pausing', 'resuming', 'homing', 'tool-change', 'halted']);
 
@@ -148,9 +157,30 @@ export class DroPanel extends PanelElement {
   // A number on a readout that is not where the axis is is a lie unless it is
   // marked as one.
 
-  /** The axes in the order Tab walks them — the order they are on screen. */
+  /** Every axis on the readout, in the order it is drawn. */
   private get axes(): Axis[] {
     return machine.peek().axes;
+  }
+
+  /**
+   * The axes Tab walks, which is not the same as the axes you can edit.
+   *
+   * X, Y and Z are the ones a position is set for together — you type all three
+   * or you type two of them, and Tab is how you get from one to the next.
+   * Anything else on the machine is an auxiliary: on this one U is the dust
+   * shoe, set once and not touched again for hours, and putting it in the ring
+   * costs a Tab press every time round for an axis nobody was filling in.
+   *
+   * It stays fully editable — double-click it, scrub it, it joins the same
+   * pending set and goes out in the same coordinated move. It is just not on
+   * the way from Z back to X.
+   *
+   * A machine with none of X, Y or Z falls back to all of its axes, because a
+   * ring with nothing in it would make Tab do nothing at all.
+   */
+  private get tabRing(): Axis[] {
+    const primary = this.axes.filter((a) => PRIMARY.has(a.letter.toUpperCase()));
+    return primary.length ? primary : this.axes;
   }
 
   /** Take whatever is in the open box and remember it, without sending it. */
@@ -174,13 +204,17 @@ export class DroPanel extends PanelElement {
     const s = this.session;
     if (!s || !s.editing) return;
     this.stash(raw);
-    const letters = this.axes.map((a) => a.letter);
+    const letters = this.tabRing.map((a) => a.letter);
     const at = letters.indexOf(s.editing);
-    if (at < 0) return;
-    // Wrapping, so the last axis leads back to the first and the first back to
-    // the last. On a three-axis machine that is Z to X exactly; on one with a
-    // fourth axis the fourth is in the ring too, because an axis you cannot
-    // reach by Tab is an axis this feature does not have.
+    // Tabbing out of an auxiliary axis joins the ring at its start rather than
+    // doing nothing, which is what "not in the ring" would otherwise mean for
+    // somebody who began the set by double-clicking U.
+    if (at < 0) {
+      s.editing = letters[delta > 0 ? 0 : letters.length - 1]!;
+      this.requestUpdate();
+      return;
+    }
+    // Wrapping, so Z leads back to X and X back to Z.
     s.editing = letters[(at + delta + letters.length) % letters.length]!;
     // Stay in the column the session started in. Tabbing from a machine
     // coordinate into a work coordinate would change what the number means
