@@ -2199,3 +2199,22 @@ button.cfg-state { border: none; cursor: pointer; font-family: inherit; }
    for something stricter still wins: the jog rose, the toolpath canvas and the
    DRO numbers all set `none` for their own drags and keep it. */
 *, *::before, *::after { touch-action: manipulation; }
+
+/* iOS zooms the page in when a form field takes focus and its text is under
+   16px. That is NOT the double-tap gesture and touch-action does nothing to
+   it — which is why the readout still zoomed after double-tap zoom had been
+   turned off: the second tap opened the box, the box took focus, and Safari
+   zoomed to it. Every input in this app was 13px.
+
+   16px only where the pointer is coarse, so a desktop keeps its density. The
+   rule is deliberately not `!important`: a control that has a reason to be
+   smaller can still say so, and take the zoom that comes with it. */
+@media (pointer: coarse) {
+  input, select, textarea { font-size: 16px; }
+  /* Named as well, because it sets font-size: inherit to match the readout it
+     sits in, and a class chain beats a bare element selector however late the
+     element selector appears. The page-wide sweep in the test did not catch
+     this one: the box does not exist until a tap creates it, so there was
+     nothing on the page to sweep. */
+  .dro-table td.num.editing input { font-size: 16px; }
+}

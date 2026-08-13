@@ -58,7 +58,9 @@ export function suppressDoubleTapZoom(): void {
       lastY = touch.clientY;
     },
     // Not passive: preventDefault is the entire purpose, and a passive listener
-    // is not allowed to call it.
-    { passive: false },
+    // is not allowed to call it. Capturing, so a handler somewhere in the tree
+    // calling stopPropagation on a touchend cannot quietly disarm this — the
+    // guard has to see every tap or it is not a guard.
+    { passive: false, capture: true },
   );
 }
