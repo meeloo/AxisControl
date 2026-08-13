@@ -548,7 +548,7 @@ export class TextPanel extends PanelElement {
     return html`
       <div class="txt-fonts">
         <label
-          class="txt-drop"
+          class="txt-drop ${fonts.length ? 'compact' : ''}"
           @dragover=${(e: DragEvent) => e.preventDefault()}
           @drop=${(e: DragEvent) => {
             e.preventDefault();

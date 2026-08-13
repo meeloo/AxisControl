@@ -2060,10 +2060,14 @@ button.cfg-state { border: none; cursor: pointer; font-family: inherit; }
 }
 
 /* --- Text ---------------------------------------------------------------- */
-.txt-preview { width: 100%; height: 150px; background: var(--bg-input);
+/* flex: 0 0 auto, or the preview is the thing that gives. .pack is a flex
+   column and a flex item shrinks below its stated height by default, so a long
+   font list squeezed the drawing down to a sliver — the one part of this panel
+   that has to be looked at. */
+.txt-preview { width: 100%; height: 150px; flex: 0 0 auto; background: var(--bg-input);
   border: 1px solid var(--border); border-radius: 6px; display: block; }
-.txt-preview.empty { display: flex; align-items: center; justify-content: center;
-  color: var(--text-faint); font-size: 12px; height: 150px; }
+.txt-preview.empty { display: flex; flex: 0 0 auto; align-items: center;
+  justify-content: center; color: var(--text-faint); font-size: 12px; height: 150px; }
 /* Stroke, never fill: these are cuts, and a filled letter would look like the
    material coming out rather than the path going in. */
 .txt-preview polyline { fill: none; stroke: var(--text); stroke-width: 1.5;
@@ -2079,7 +2083,7 @@ button.cfg-state { border: none; cursor: pointer; font-family: inherit; }
 
 /* Fonts stored on the controller. */
 .txt-manage { padding: 0 12px; }
-.txt-fonts { display: flex; flex-direction: column; gap: 8px; }
+.txt-fonts { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
 .txt-drop {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 4px; margin: 0 12px; padding: 18px 16px; cursor: pointer;
@@ -2088,8 +2092,31 @@ button.cfg-state { border: none; cursor: pointer; font-family: inherit; }
 }
 .txt-drop:hover { border-color: var(--accent); }
 .txt-drop input { display: none; }
-.txt-fontlist { list-style: none; margin: 0; padding: 0 12px; display: flex;
-  flex-direction: column; gap: 4px; }
+/* Bounded and scrolling. A machine's /fonts directory is a collection, not a
+   handful — dropping in a system font folder puts thirty in there — and an
+   unbounded list pushed the preview, the parameters and the Save button off the
+   panel one font at a time. Eight rows is enough to browse without the list
+   becoming the panel; the rest scrolls.
+
+   min-height: 0 as well, because a flex item will not shrink below its content
+   without it and the max-height alone would be ignored inside .txt-fonts. */
+.txt-fontlist { list-style: none; margin: 0 12px; padding: 4px 8px; display: flex;
+  flex-direction: column; gap: 4px;
+  max-height: calc(8 * 26px); min-height: 0; overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  /* Drawn as its own box, with a visible scrollbar. A region that scrolls but
+     gives no sign of it is half a fix: the panel is short enough that three of
+     twenty-four fonts are showing, and without an edge and a bar there is
+     nothing to say the other twenty-one exist. */
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-input); scrollbar-width: thin; }
+.txt-fontlist li { flex: 0 0 auto; }
+/* Compact once there are fonts to look at. The drop target is what matters on
+   an empty machine and it is worth its full size then; afterwards it is a
+   28-pixel-tall reminder that dropping works, not the main event. */
+.txt-drop.compact { padding: 8px 12px; }
+.txt-drop.compact strong { font-size: 12px; font-weight: 600; }
+.txt-drop.compact .hint { display: none; }
 .txt-fontlist li { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 /* The name takes the slack so the size and the delete button stay put down the
    right edge rather than jumping about with the length of the font name. */
