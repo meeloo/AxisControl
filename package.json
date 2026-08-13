@@ -21,7 +21,8 @@
     "gcode-index": "node tools/build-gcode-index.mjs",
     "merge-oracle": "node tools/merge-oracle.mjs",
     "rewrite-check": "node tools/rewrite-check.mjs",
-    "gcode-params": "node tools/gcode-params-check.mjs"
+    "gcode-params": "node tools/gcode-params-check.mjs",
+    "hershey-check": "node tools/hershey-check.mjs"
   },
   "dependencies": {
     "clipper-lib": "^6.4.2",
