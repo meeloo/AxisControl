@@ -367,6 +367,9 @@ for (const entries of Object.values(FILES)) {
 // outlives a test run, so a test that writes to /sys leaves the next run
 // starting from its output — which has twice now produced a pass that only
 // meant "the previous run already did this".
+/** How many times each object-model key has been asked for. */
+const keyRequests = {};
+
 const PRISTINE_CONTENT = { ...FILE_CONTENT };
 const PRISTINE_LISTING = JSON.stringify(FILES);
 
@@ -668,6 +671,11 @@ const server = createServer(async (req, res) => {
     case '/rr_model': {
       const key = url.searchParams.get('key') ?? '';
       const flags = url.searchParams.get('flags') ?? '';
+      // Counted so a test can assert how often a client asks. Free space is the
+      // one key whose cost is on the board rather than on the wire — it walks
+      // the FAT — so "how many times was volumes requested during an upload" is
+      // a question worth being able to answer.
+      keyRequests[key] = (keyRequests[key] ?? 0) + 1;
 
       // Asking for the WHOLE model verbose is the largest response the firmware
       // can be made to produce, and a real board can simply fail to deliver it.
@@ -726,6 +734,9 @@ const server = createServer(async (req, res) => {
 
     // Not a firmware route. Puts the SD card back to how it started so a test
     // that writes files can be run twice and mean the same thing both times.
+    case '/__key_requests':
+      return sendJson(res, keyRequests);
+
     case '/__reset_files': {
       for (const k of Object.keys(FILE_CONTENT)) delete FILE_CONTENT[k];
       Object.assign(FILE_CONTENT, PRISTINE_CONTENT);

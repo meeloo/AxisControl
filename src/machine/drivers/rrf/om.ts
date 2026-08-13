@@ -266,13 +266,28 @@ export const TRACKED_KEYS = [
   'spindles',
   'state',
   'tools',
-  // Free space is not in the frequently-changing subset the poll's cheap
-  // request returns, so without tracking the key it would be read once at
-  // connect and then never move — which is worse than not showing it, since a
-  // stale "2.1 GB free" is exactly the number somebody would rely on before
-  // uploading a large job.
-  'volumes',
 ] as const;
+
+/**
+ * Why `volumes` is NOT in the list above.
+ *
+ * It belongs there by the same logic as the rest — free space is not in the
+ * frequently-changing subset the cheap poll returns, so its sequence number is
+ * the only signal that it moved. It was there for one commit, and it broke
+ * installing the app.
+ *
+ * Reading `volumes` verbosely makes the firmware compute free space, and that
+ * means walking the FAT and holding the SD card while it does. RRF bumps the
+ * volumes sequence number every time a file is written, so an install — which
+ * writes twenty-odd files back to back — turned into a free-space walk between
+ * every one of them, competing for the card with the uploads themselves.
+ *
+ * So the sequence number is still what says "this changed", because that much
+ * is free in the cheap poll. What it triggers is a request no more often than
+ * VOLUMES_MIN_INTERVAL_MS, and never while this driver has a file transfer of
+ * its own in flight. See RrfDriver.refreshVolumes.
+ */
+export const VOLUMES_KEY = 'volumes';
 
 /**
  * Map RRF's status string onto the neutral model.

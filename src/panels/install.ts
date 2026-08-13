@@ -25,6 +25,7 @@ import {
   installedUrl,
   isSameBuild,
   ownOrigin,
+  probeManifest,
   readManifest,
   sealInstall,
   shortcutPath,
@@ -232,11 +233,27 @@ export class InstallPanel extends PanelElement {
 
     // Confirm by reading it back off the machine rather than by assuming the
     // uploads that returned success added up to a working copy.
+    //
+    // Retried, and the retry is not padding. Twenty-odd files have just gone
+    // onto the card and the board may still be finishing with it, so the first
+    // request can fail on a copy that is perfectly complete — which then reads
+    // as a failed install and sends somebody looking for a fault that is not
+    // there.
     const url = controllerUrl.peek();
-    this.installed = await readManifest(installedUrl(url));
+    let probe = await probeManifest(installedUrl(url));
+    for (let attempt = 0; !probe.manifest && attempt < 3; attempt++) {
+      this.step('confirming the copy on the machine', attempt + 1, 4);
+      await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+      probe = await probeManifest(installedUrl(url));
+    }
+    this.installed = probe.manifest;
     if (!this.installed) {
+      // Say what actually happened. The old wording asserted a cause it had not
+      // checked — "/www is missing, or the card is full" — and both are rare
+      // next to a board that was simply still busy.
       throw new Error(
-        'Everything uploaded, but the machine will not serve it back. Check that /www is on the SD card and that there is space left.',
+        `Everything uploaded, but the copy could not be read back: ${probe.reason ?? 'no reason given'}. ` +
+          'The files may well be there — try Install again, or open that URL in a tab to see what the machine answers.',
       );
     }
     // And the part that files-uploaded-successfully does not cover: that the

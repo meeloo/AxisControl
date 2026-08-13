@@ -17,6 +17,7 @@ import { RrfClient, SessionLostError } from './client.js';
 import { mergeInto } from './merge.js';
 import {
   TRACKED_KEYS,
+  VOLUMES_KEY,
   expandAxisControls,
   mapPromptMode,
   mapSpindleState,
@@ -64,6 +65,16 @@ export interface RrfNative {
 const POLL_INTERVAL_MS = 250;
 /** Back off to this while the machine is idle to spare the board's sockets. */
 const IDLE_POLL_INTERVAL_MS = 500;
+/**
+ * Shortest gap between two free-space reads, ms.
+ *
+ * Asking for `volumes` verbosely makes the firmware walk the FAT to total up
+ * free space, holding the SD card while it does. Ten seconds is far more often
+ * than a card's free space matters and far less often than the poll would
+ * otherwise ask — the sequence number moves on every file written, and an
+ * install writes twenty of them back to back.
+ */
+const VOLUMES_MIN_INTERVAL_MS = 10_000;
 
 export class RrfDriver implements MachineDriver {
   readonly id = 'rrf';
@@ -102,6 +113,19 @@ export class RrfDriver implements MachineDriver {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private polling = false;
   private stopped = true;
+  /**
+   * File transfers this driver currently has in flight.
+   *
+   * The poll loop runs on its own timer, so it is concurrent with any upload or
+   * download a panel is doing. Anything that touches the SD card from the poll
+   * has to stand out of the way while that is true, or it is competing with the
+   * transfer for the one card.
+   */
+  private transfers = 0;
+  /** True when the volumes sequence number has moved since the last read. */
+  private volumesStale = true;
+  /** When the last free-space read finished, from performance.now(). */
+  private volumesReadAt = -Infinity;
   private config: ConnectionConfig | null = null;
   private consecutiveFailures = 0;
 
@@ -180,6 +204,11 @@ export class RrfDriver implements MachineDriver {
     this.client = null;
     this.model = {};
     this.seqs = {};
+    // A reconnect is a different card as far as this is concerned — possibly
+    // literally, if somebody swapped it while the app was pointed elsewhere.
+    this.transfers = 0;
+    this.volumesStale = true;
+    this.volumesReadAt = -Infinity;
     if (c) {
       try {
         await c.disconnect();
@@ -202,6 +231,55 @@ export class RrfDriver implements MachineDriver {
   }
 
   // --- Poll loop ---------------------------------------------------------
+
+  /**
+   * Re-read free space, if it has changed and it is a reasonable moment to ask.
+   *
+   * Three guards, and the middle one is the one that matters. Asking for
+   * `volumes` verbosely makes the firmware total up free space by walking the
+   * FAT, which holds the SD card for as long as it takes — and RRF advances the
+   * volumes sequence number on every file written. Without the guards, an
+   * install put a free-space walk between every one of its twenty uploads,
+   * competing with the uploads for the card and leaving the app's own files
+   * unservable by the time it went to read them back.
+   *
+   * Failure is swallowed on purpose. Free space is the least important thing
+   * this driver reports, and a board that declines to compute it should not
+   * cost the poll its other work.
+   */
+  private async refreshVolumes(): Promise<void> {
+    if (!this.volumesStale || !this.client) return;
+    if (this.transfers > 0) return;
+    if (performance.now() - this.volumesReadAt < VOLUMES_MIN_INTERVAL_MS) return;
+
+    this.volumesReadAt = performance.now();
+    this.volumesStale = false;
+    try {
+      const subtree = await this.client.model(VOLUMES_KEY, 'd99vn');
+      this.model = mergeInto(this.model, { [VOLUMES_KEY]: subtree });
+    } catch {
+      // Try again on the next change rather than hammering a board that said no.
+    }
+  }
+
+  /**
+   * Run a file transfer, with the poll's SD-card reads held off while it does.
+   *
+   * Every path in and out of the card goes through here so that nothing on the
+   * poll loop can decide to walk the filesystem in the middle of an upload.
+   */
+  private async transfer<T>(fn: () => Promise<T>): Promise<T> {
+    this.transfers++;
+    try {
+      return await fn();
+    } finally {
+      this.transfers--;
+      // A write changed the card, so the figure on screen is now wrong. Mark it
+      // rather than read it: the next poll picks it up once the interval is up,
+      // and a burst of writes still costs one read rather than one each.
+      this.volumesStale = true;
+    }
+  }
 
   private schedule(delay: number): void {
     if (this.stopped) return;
@@ -227,6 +305,13 @@ export class RrfDriver implements MachineDriver {
         this.model = mergeInto(this.model, { [key]: subtree });
         this.seqs[key] = next[key];
       }
+
+      // 2b. Free space, on its own much slower clock. See refreshVolumes.
+      if (next[VOLUMES_KEY] !== undefined && next[VOLUMES_KEY] !== this.seqs[VOLUMES_KEY]) {
+        this.seqs[VOLUMES_KEY] = next[VOLUMES_KEY];
+        this.volumesStale = true;
+      }
+      await this.refreshVolumes();
 
       // 3. seqs.reply advancing means buffered console output is waiting.
       if (next.reply !== undefined && next.reply !== this.seqs.reply) {
@@ -660,7 +745,7 @@ export class RrfDriver implements MachineDriver {
   // --- Files -------------------------------------------------------------
 
   async listFiles(dir: string): Promise<FileEntry[]> {
-    const entries = await this.requireClient().filelist(dir);
+    const entries = await this.transfer(() => this.requireClient().filelist(dir));
     return entries
       .map((e) => ({
         name: e.name,
@@ -682,19 +767,19 @@ export class RrfDriver implements MachineDriver {
     path: string,
     onProgress?: (loaded: number, total: number | null) => void,
   ): Promise<Uint8Array> {
-    return this.requireClient().download(path, onProgress);
+    return this.transfer(() => this.requireClient().download(path, onProgress));
   }
 
   writeFile(path: string, data: Uint8Array): Promise<void> {
-    return this.requireClient().uploadFile(path, data);
+    return this.transfer(() => this.requireClient().uploadFile(path, data));
   }
 
   deleteFile(path: string): Promise<void> {
-    return this.requireClient().delete(path);
+    return this.transfer(() => this.requireClient().delete(path));
   }
 
   makeDirectory(path: string): Promise<void> {
-    return this.requireClient().mkdir(path);
+    return this.transfer(() => this.requireClient().mkdir(path));
   }
 
   // --- Jobs --------------------------------------------------------------

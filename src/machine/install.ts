@@ -61,14 +61,45 @@ function isManifest(value: unknown): value is BuildManifest {
  * because "not installed yet" is the normal first answer.
  */
 export async function readManifest(base: string): Promise<BuildManifest | null> {
+  return (await probeManifest(base)).manifest;
+}
+
+/**
+ * Read a manifest and, when there isn't one, say why.
+ *
+ * readManifest collapses every failure into null, which is right for "is
+ * anything installed here" and wrong immediately afterwards: an install that
+ * cannot read its own work back needs to tell the operator whether the file was
+ * missing, the board refused the request, or the browser never got an answer at
+ * all. Those have nothing to do with each other, and guessing at one of them in
+ * the error message sends people to check the wrong thing.
+ */
+export async function probeManifest(
+  base: string,
+): Promise<{ manifest: BuildManifest | null; reason: string | null }> {
+  const url = new URL('build.json', base).href;
+  let res: Response;
   try {
-    const res = await fetch(new URL('build.json', base).href, { cache: 'no-store' });
-    if (!res.ok) return null;
-    const json: unknown = await res.json();
-    return isManifest(json) ? json : null;
-  } catch {
-    return null;
+    res = await fetch(url, { cache: 'no-store' });
+  } catch (err) {
+    return { manifest: null, reason: `${url} could not be reached (${(err as Error).message})` };
   }
+  if (!res.ok) {
+    return { manifest: null, reason: `${url} answered HTTP ${res.status}` };
+  }
+  let json: unknown;
+  try {
+    json = await res.json();
+  } catch {
+    // RepRapFirmware answers a path it cannot resolve by serving /www/index.html
+    // rather than a 404, so a missing file arrives as a page of HTML with a 200
+    // on it. Saying "not JSON" here is what stops that looking like corruption.
+    return { manifest: null, reason: `${url} did not return JSON — the file is probably not there` };
+  }
+  if (!isManifest(json)) {
+    return { manifest: null, reason: `${url} is not a build manifest` };
+  }
+  return { manifest: json, reason: null };
 }
 
 /** Fetch every file a manifest names, from the copy that published it. */
