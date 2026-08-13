@@ -8,6 +8,7 @@ import { html, nothing, type TemplateResult } from 'lit';
 import { PanelElement, registerPanel } from '../ui/panel.js';
 import { actions, appendLog, capabilities, connected, machine } from '../core/store.js';
 import { fixed } from '../core/util.js';
+import { handFeed } from '../core/motion.js';
 import { empty } from '../ui/widgets.js';
 import type { Axis } from '../machine/types.js';
 
@@ -138,10 +139,11 @@ export class DroPanel extends PanelElement {
     // Nothing to do, and worth not doing: an empty move still takes the
     // machine out of idle and back, which flickers every control gated on it.
     if (Math.abs(target - axis.machine) < 0.001) return;
-    // The axis's own maximum, because this is a positioning move rather than a
-    // cut and the operator is waiting for it. maxFeed is 0 when the controller
-    // does not say, in which case the driver's own default applies.
-    void actions.moveToMachine({ [axis.letter]: target }, axis.maxFeed || undefined);
+    // At the speed on the Motion panel's cursor, not at the axis maximum.
+    // Driving the machine by typing a position is the same act as pressing a
+    // jog sector, and a machine that answers one control at the speed you set
+    // and the other at full tilt is a machine with two personalities.
+    void actions.moveToMachine({ [axis.letter]: target }, handFeed([axis.letter]));
   }
 
   // --- Editing across axes --------------------------------------------------
@@ -229,7 +231,6 @@ export class DroPanel extends PanelElement {
     if (raw !== undefined) this.stash(raw);
 
     const targets: Record<string, number> = {};
-    const feeds: number[] = [];
     for (const [letter, value] of s.pending) {
       const axis = this.axes.find((a) => a.letter === letter);
       if (!axis) continue;
@@ -243,16 +244,16 @@ export class DroPanel extends PanelElement {
       const target = Math.min(axis.max, Math.max(axis.min, this.toMachine(axis, s.column, value)));
       if (Math.abs(target - axis.machine) < 0.001) continue;
       targets[letter] = target;
-      if (axis.maxFeed > 0) feeds.push(axis.maxFeed);
     }
 
     this.session = null;
     this.requestUpdate();
-    if (!Object.keys(targets).length) return;
-    // The slowest axis involved sets the feed: a coordinated move runs at one
-    // rate, and taking the fastest would ask the others to exceed their own
-    // maximum on the way.
-    void actions.moveToMachine(targets, feeds.length ? Math.min(...feeds) : undefined);
+    const letters = Object.keys(targets);
+    if (!letters.length) return;
+    // The operator's chosen speed, capped by the slowest axis in the move: a
+    // coordinated move runs at one rate, so asking for more than the slowest
+    // can sustain would ask the others to exceed their own maximum on the way.
+    void actions.moveToMachine(targets, handFeed(letters));
   }
 
   private cancel(): void {

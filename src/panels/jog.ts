@@ -28,13 +28,18 @@
 
 import { html, nothing, svg, type SVGTemplateResult, type TemplateResult } from 'lit';
 import { PanelElement, registerPanel } from '../ui/panel.js';
-import { actions, connected, loadSetting, machine, saveSetting } from '../core/store.js';
+import { actions, connected, machine } from '../core/store.js';
+import {
+  axisFeedLimit,
+  loadJogSettings,
+  saveJogSettings,
+  type JogSettings,
+} from '../core/motion.js';
 import { BUSY_STATES } from '../machine/types.js';
 import { empty } from '../ui/widgets.js';
 import {
   feedLadder,
   STEP_LADDER,
-  nearestStep,
   ringSteps,
   stepAtMost,
   stepLabel,
@@ -100,14 +105,9 @@ const OCTANTS: Array<{ dx: number; dy: number; angle: number; name: string }> = 
   { dx: 1, dy: -1, angle: 315, name: 'X+ Y−' },
 ];
 
-interface JogSettings {
-  /** Index into STEP_LADDER of the outermost ring. */
-  maxStep: number;
-  feed: number;
-  rings: number;
-}
-
-const DEFAULTS: JogSettings = { maxStep: nearestStep(10), feed: 1000, rings: 4 };
+// The settings themselves live in core/motion.ts: the readout drives the
+// machine too, and the speed the operator set has to mean the same thing to
+// both. This panel presents the cursor that sets it; it no longer owns it.
 
 /** Point on the rose at radius `r` and maths-convention angle `deg`. */
 function polar(r: number, deg: number): [number, number] {
@@ -153,7 +153,7 @@ function sectorPath(rInner: number, rOuter: number, deg: number, half: number): 
 }
 
 export class JogPanel extends PanelElement {
-  private settings: JogSettings = { ...DEFAULTS, ...loadSetting<Partial<JogSettings>>('jog', {}) };
+  private settings: JogSettings = loadJogSettings();
   private repeatTimer: ReturnType<typeof setTimeout> | null = null;
   private repeatInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -247,7 +247,7 @@ export class JogPanel extends PanelElement {
   /** NOT `update` — that is a LitElement lifecycle method. */
   private patchSettings(patch: Partial<JogSettings>): void {
     this.settings = { ...this.settings, ...patch };
-    saveSetting('jog', this.settings);
+    saveJogSettings(this.settings);
     this.requestUpdate();
   }
 
@@ -259,11 +259,7 @@ export class JogPanel extends PanelElement {
    * will not honour makes the cursor a lie.
    */
   private feedLimit(axes: string[]): number {
-    const limits = machine
-      .get()
-      .axes.filter((a) => axes.includes(a.letter) && a.maxFeed > 0)
-      .map((a) => a.maxFeed);
-    return limits.length ? Math.min(...limits) : Infinity;
+    return axisFeedLimit(axes);
   }
 
   // --- Motion -------------------------------------------------------------
