@@ -15,7 +15,7 @@ import { html, nothing, svg, type TemplateResult } from 'lit';
 import { PanelElement, registerPanel } from '../ui/panel.js';
 import { connected, machine } from '../core/store.js';
 import { empty, numberField, selectField, textField } from '../ui/widgets.js';
-import { preview, saveAndRun } from '../ui/program.js';
+import { AutoPreview, preview, saveAndRun } from '../ui/program.js';
 import { Gcode, depthLevels, n, type GeneratedProgram } from '../cam/format.js';
 import { boundsOf, faces, textToPolylines, type Polyline } from '../text/hershey.js';
 
@@ -48,12 +48,18 @@ export class TextPanel extends PanelElement {
     safeZ: 5,
   };
 
+  private auto = new AutoPreview('text');
+
   override connectedCallback(): void {
     super.connectedCallback();
     this.bind(() => {
       connected.get();
       machine.get();
     });
+  }
+
+  protected override updated(): void {
+    this.auto.schedule(() => this.build());
   }
 
   private set<K extends keyof Settings>(key: K, value: Settings[K]): void {
@@ -245,6 +251,7 @@ export class TextPanel extends PanelElement {
         ${program?.warnings.map((w) => html`<div class="warn-banner">${w}</div>`)}
 
         <div class="pack-actions">
+          ${this.auto.field(() => this.requestUpdate())}
           <button ?disabled=${!program} @click=${() => program && preview(program)}>Preview</button>
           <button
             class="primary"

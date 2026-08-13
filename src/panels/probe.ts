@@ -10,7 +10,7 @@ import { PanelElement, registerPanel } from '../ui/panel.js';
 import { capabilities, connected, machine } from '../core/store.js';
 import { checkField, numberField, pointField, selectField } from '../ui/widgets.js';
 import { fromAxis } from '../ui/capture.js';
-import { preview, saveAndRun } from '../ui/program.js';
+import { AutoPreview, preview, saveAndRun } from '../ui/program.js';
 import {
   DEFAULT_PROBE_MAP,
   ROLES,
@@ -47,6 +47,8 @@ export class ProbePanel extends PanelElement {
   private routine: RoutineId = 'corner';
   private showSetup = false;
 
+  private auto = new AutoPreview('probe');
+
   // Shared probing parameters.
   private tipDiameter = 3;
   private feedFast = 400;
@@ -82,6 +84,10 @@ export class ProbePanel extends PanelElement {
       connected.get();
       capabilities.get();
     });
+  }
+
+  protected override updated(): void {
+    this.auto.schedule(() => this.build());
   }
 
   private globals(): Record<string, unknown> {
@@ -352,6 +358,7 @@ export class ProbePanel extends PanelElement {
                       ? html`<div class="warn-banner">${program.warnings.map((w) => html`<div>${w}</div>`)}</div>`
                       : nothing}
                     <div class="pack-actions">
+                      ${this.auto.field(() => this.requestUpdate())}
                       <button ?disabled=${!program} @click=${() => program && preview(program)}>
                         Preview
                       </button>

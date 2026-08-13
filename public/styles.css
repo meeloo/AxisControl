@@ -942,7 +942,14 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .pack-note { padding: 6px 12px; color: var(--text-faint); font-size: 12px; }
 .pack-note code { color: var(--accent); }
 .pack-actions { display: flex; gap: 8px; padding: 10px 12px; margin-top: auto;
-  border-top: 1px solid var(--border); }
+  border-top: 1px solid var(--border); flex-wrap: wrap; align-items: center; }
+
+/* "Live preview" sits with the buttons but is not one — it is a mode, not an
+   action, so it reads at label weight and takes the leftover width so the two
+   buttons stay together at the right where they were. */
+.auto-preview { display: flex; align-items: center; gap: 6px; margin-right: auto;
+  font-size: 12px; color: var(--text-dim); cursor: pointer; user-select: none; }
+.auto-preview input { margin: 0; }
 
 /* 220px, not 190: a row is a label, a number and a unit, and now often a
    capture button too. At 190 the unit was overlapping the next column — which

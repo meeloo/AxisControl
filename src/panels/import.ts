@@ -17,7 +17,7 @@ import { connected, machine } from '../core/store.js';
 import { theme } from '../core/theme.js';
 import { checkField, numberField, pointField, selectField } from '../ui/widgets.js';
 import { fromAxis, fromDepthBelow } from '../ui/capture.js';
-import { preview, saveAndRun } from '../ui/program.js';
+import { AutoPreview, preview, saveAndRun } from '../ui/program.js';
 import { applyTool, toolPicker, type Filled } from '../ui/toolpick.js';
 import type { ToolInfo } from '../tools/table.js';
 import { importSvg } from '../import/svg.js';
@@ -155,6 +155,8 @@ export class ImportPanel extends PanelElement {
   /** Screen mapping from the last draw, so a click can be turned back into geometry. */
   private view: { cx: number; cy: number; scale: number; w: number; h: number } | null = null;
 
+  private auto = new AutoPreview('import');
+
   override connectedCallback(): void {
     super.connectedCallback();
     this.bind(() => {
@@ -181,6 +183,9 @@ export class ImportPanel extends PanelElement {
       }
     }
     this.draw();
+    // `built` rather than `build()`: render has just done the work, and the
+    // offsetting behind it is the most expensive thing in this panel.
+    this.auto.schedule(() => this.built?.program ?? null);
   }
 
   // --- Loading ------------------------------------------------------------
@@ -754,6 +759,7 @@ export class ImportPanel extends PanelElement {
                 <button class="tiny" @click=${() => ((this.drawing = null), this.rechain(), this.requestUpdate())}>
                   Another file
                 </button>
+                ${this.auto.field(() => this.requestUpdate())}
                 <button ?disabled=${!built} @click=${() => built && preview(built.program)}>
                   Preview
                 </button>

@@ -11,7 +11,7 @@ import type { ToolInfo } from '../tools/table.js';
 import { connected, machine } from '../core/store.js';
 import { checkField, numberField, pointField, selectField } from '../ui/widgets.js';
 import { fromAxis, fromDepthBelow, fromRadiusAround } from '../ui/capture.js';
-import { preview, saveAndRun } from '../ui/program.js';
+import { AutoPreview, preview, saveAndRun } from '../ui/program.js';
 import {
   circle,
   drillPattern,
@@ -64,6 +64,8 @@ export class MachiningPanel extends PanelElement {
   private side: ContourSide = 'outside';
   private climb = true;
 
+  private auto = new AutoPreview('machining');
+
   // Circle
   private cx = 0;
   private cy = 0;
@@ -97,6 +99,10 @@ export class MachiningPanel extends PanelElement {
       connected.get();
       machine.get();
     });
+  }
+
+  protected override updated(): void {
+    this.auto.schedule(() => this.build());
   }
 
   private common() {
@@ -388,6 +394,7 @@ export class MachiningPanel extends PanelElement {
           : nothing}
 
         <div class="pack-actions">
+          ${this.auto.field(() => this.requestUpdate())}
           <button @click=${() => preview(program)}>Preview</button>
           <button class="primary" ?disabled=${!live} @click=${() => void saveAndRun(program)}>
             Save &amp; run
