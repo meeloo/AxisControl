@@ -22,9 +22,11 @@ import {
 } from './core/store.js';
 import { syncOnConnect } from './core/settings.js';
 import { initTheme } from './core/theme.js';
+import { suppressDoubleTapZoom } from './ui/touch.js';
 
 // Before first paint, so there is no flash of the wrong theme.
 initTheme();
+suppressDoubleTapZoom();
 
 const root = document.getElementById('app');
 if (!root) throw new Error('#app not found');

@@ -2180,15 +2180,22 @@ button.cfg-state { border: none; cursor: pointer; font-family: inherit; }
 .dro-pending button { flex: 0 0 auto; }
 
 /* Double-tap-to-zoom, off across the app.
-   iOS treats a second tap inside about 300ms as a zoom gesture, and while it
-   waits to find out it swallows what the app would have done with the pair.
-   `manipulation` keeps panning and pinch-to-zoom — so the page can still be
-   made bigger by anyone who needs it — and gives up only the double-tap
-   shortcut, which this app has no use for and which was eating the gesture
-   that opens a DRO value for editing.
+   iOS treats a second tap inside about 300ms as a zoom gesture, and this is a
+   machine control: the double tap means "edit this number", and the page
+   jumping to 200% while somebody is standing over a running spindle is not a
+   trade worth making. `manipulation` keeps panning and pinch-to-zoom, so the
+   page can still be made bigger by anyone who needs it; only the double-tap
+   shortcut goes.
 
-   Set on the root rather than per control: the browser intersects touch-action
-   up the ancestor chain, so one declaration covers every element that has not
-   asked for something stricter. The jog rose, the toolpath canvas and the DRO
-   numbers all set `none` for their own drags and keep it. */
-html { touch-action: manipulation; }
+   On EVERY element, and that is the whole point. This was written as
+   `html { touch-action: manipulation }` first, on the assumption that the
+   browser walks the ancestor chain — it does for deciding what a pan does, but
+   touch-action is not an inherited property, so the declaration styled the html
+   element and nothing else. Safari kept zooming, and the second tap of a double
+   tap often lands on an element that appeared as a result of the first — the
+   DRO's own edit box, say — which had never been styled at all.
+
+   The universal selector has zero specificity, so every rule below that asks
+   for something stricter still wins: the jog rose, the toolpath canvas and the
+   DRO numbers all set `none` for their own drags and keep it. */
+*, *::before, *::after { touch-action: manipulation; }
