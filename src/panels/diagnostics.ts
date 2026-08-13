@@ -13,7 +13,7 @@
 import { html, nothing, type TemplateResult } from 'lit';
 import { PanelElement, registerPanel } from '../ui/panel.js';
 import { actions, activeDriver, connected, machine } from '../core/store.js';
-import { empty } from '../ui/widgets.js';
+import { empty, volumeBar } from '../ui/widgets.js';
 import type { DiagnosticItem, DiagnosticSection } from '../machine/types.js';
 
 export class DiagnosticsPanel extends PanelElement {
@@ -74,13 +74,23 @@ export class DiagnosticsPanel extends PanelElement {
     const driver = activeDriver();
     const sections = driver?.diagnostics() ?? [];
 
+    const volumes = machine.peek().volumes;
+
     if (!live) return empty('Not connected');
-    if (!sections.length) {
+    if (!sections.length && !volumes.length) {
       return empty(`${driver?.label ?? 'This controller'} does not report diagnostics.`);
     }
 
     return html`
       <div class="diagnostics">
+        ${volumes.length
+          ? html`
+              <div class="diag-section">
+                <div class="diag-title"><span>Storage</span></div>
+                ${volumes.map((v) => volumeBar(v))}
+              </div>
+            `
+          : nothing}
         ${sections.map((s) => this.renderSection(s, live))}
         <p class="hint">
           Values come straight from the controller and are not compared against any limit

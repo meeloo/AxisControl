@@ -370,6 +370,27 @@ for (const entries of Object.values(FILES)) {
 const PRISTINE_CONTENT = { ...FILE_CONTENT };
 const PRISTINE_LISTING = JSON.stringify(FILES);
 
+/** Nominal usable bytes on the mock's card, matching volumes[0].partitionSize. */
+const CARD_BYTES = 3975151616;
+
+/**
+ * Free space that actually moves when something is written.
+ *
+ * A constant would have satisfied any test that only checks a number is shown,
+ * and would have hidden the thing worth testing: that the figure is re-read
+ * rather than cached from the connect. Subtracting what is on the card makes an
+ * upload visible in the panel, which is the behaviour an operator relies on
+ * before sending a large job.
+ */
+function freeSpace() {
+  let used = 0;
+  for (const text of Object.values(FILE_CONTENT)) used += Buffer.byteLength(text);
+  for (const entries of Object.values(FILES)) {
+    for (const e of entries) if (!e.type || e.type === 'f') used += e.size ?? 0;
+  }
+  return Math.max(0, CARD_BYTES - used);
+}
+
 /** A simple raster surfacing pass — exercises rapids, feeds and long paths. */
 function generateSurfacingProgram() {
   const out = ['(spoilboard surfacing)', 'G21 G90', 'G17', 'T1 M6', 'M3 S18000', 'G0 Z5'];
@@ -511,6 +532,22 @@ function buildModel(liveOnly) {
       system: '0:/sys/',
       web: '0:/www/',
     },
+    // A 4GB card with a slot beside it that has nothing in it. The empty slot
+    // is not padding: an unmounted volume reports no capacity and no free
+    // space, and a panel that renders that as a full bar or as "0 B free" is
+    // the bug worth having a fixture for.
+    volumes: [
+      {
+        name: 'SD card',
+        mounted: true,
+        capacity: 3980394496,
+        partitionSize: 3975151616,
+        freeSpace: freeSpace(),
+        path: '0:/',
+        speed: 20000000,
+      },
+      { name: '', mounted: false, capacity: null, partitionSize: null, freeSpace: null, path: '1:/' },
+    ],
     global: globals,
     job: { ...job },
     move: {
@@ -729,6 +766,10 @@ const server = createServer(async (req, res) => {
       // direction that matters: anything that writes files and then checks
       // they arrived would see them all missing, forever.
       addToListing(name, body.length);
+      // The firmware bumps this when the card's contents change, and that is
+      // what makes a client re-read free space instead of showing the figure it
+      // saw at connect.
+      seqs.volumes++;
       pushReply(`Uploaded ${name}`);
       return sendJson(res, { err: 0 });
     }
@@ -737,6 +778,7 @@ const server = createServer(async (req, res) => {
       const name = url.searchParams.get('name') ?? '';
       delete FILE_CONTENT[name];
       removeFromListing(name);
+      seqs.volumes++;
       return sendJson(res, { err: 0 });
     }
 

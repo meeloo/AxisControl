@@ -9,12 +9,13 @@
 import { html, nothing, type TemplateResult } from 'lit';
 import { repeat } from 'lit/directives/repeat.js';
 import { PanelElement, registerPanel } from '../ui/panel.js';
-import { actions, activeDriver, appendLog, capabilities, connected, run } from '../core/store.js';
+import { actions, activeDriver, appendLog, capabilities, connected, machine, run } from '../core/store.js';
 import { basename, formatBytes, parentPath } from '../core/util.js';
 import type { FileEntry } from '../machine/types.js';
 import { enableGcodeComplete } from '../ui/complete.js';
 import { paintGcode } from '../ui/gcode-color.js';
 import { panelDir, setPanelDir } from '../ui/folder.js';
+import { volumeBar } from '../ui/widgets.js';
 
 const TEXT_EXTENSIONS = /\.(g|gcode|nc|txt|json|csv|md|cfg|conf|ini|log)$/i;
 /** Which of those are G-code, and so get completion and colour. */
@@ -59,6 +60,21 @@ export class FilesPanel extends PanelElement {
         void this.load();
       }
       wasConnected = now;
+    });
+    // Free space, and only free space. Binding to `machine` wholesale would
+    // re-render this panel four times a second on the position ticks, which
+    // means re-painting the editor's syntax highlighting over a file somebody
+    // is typing into. Comparing the volume figures first turns that into a
+    // render when the card actually changes, which is a few times an hour.
+    let seen = '';
+    this.bind(() => {
+      const key = machine
+        .get()
+        .volumes.map((v) => `${v.name}:${v.mounted}:${v.capacity}:${v.free}`)
+        .join('|');
+      if (key === seen) return;
+      seen = key;
+      this.requestUpdate();
     });
   }
 
@@ -317,8 +333,35 @@ export class FilesPanel extends PanelElement {
             ? html`<div class="empty">Empty directory</div>`
             : nothing}
         </div>
+
+        ${this.renderStorage()}
       </div>
     `;
+  }
+
+  /**
+   * Free space on the card the directory being browsed lives on.
+   *
+   * Under the listing rather than in the toolbar: it is context for what is on
+   * screen, not a control, and it is the number somebody wants a second before
+   * uploading a large job — which is the moment they are looking at this list.
+   *
+   * Only the relevant volume is shown. A controller with two cards would
+   * otherwise report the free space of one the operator is not writing to,
+   * which is worse than showing nothing; the whole set is in Diagnostics, where
+   * the question is about the machine rather than about this directory.
+   */
+  private renderStorage(): TemplateResult | typeof nothing {
+    const volumes = machine.peek().volumes;
+    if (!volumes.length) return nothing;
+    // RRF mounts the card at "0:/" and reports paths as "0:/gcodes/..." while
+    // this panel browses "/gcodes/...", so matching on the path prefix would
+    // match nothing. The leading volume number is what identifies it, and a
+    // path with none — which is every path in this panel — is on the first.
+    const digits = /^(\d+):/.exec(this.cwd);
+    const index = digits ? Number(digits[1]) : 0;
+    const volume = volumes[index] ?? volumes[0]!;
+    return html`<div class="files-storage">${volumeBar(volume)}</div>`;
   }
 
   private renderEditor(): TemplateResult {

@@ -786,6 +786,30 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
   border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .files-path { font-family: var(--mono); font-size: 11px; color: var(--text-faint);
   margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Free space, under the listing rather than in the toolbar: it is context for
+   what is on screen, not a control. flex: 0 0 auto so it keeps its height when
+   the list above it is long — without it the list takes everything and this
+   collapses to nothing, which is the failure mode that looks like the feature
+   was never added. */
+.files-storage { flex: 0 0 auto; padding: 6px 10px; border-top: 1px solid var(--border); }
+
+/* One volume: name, a bar, and the numbers. The bar fills with what is USED,
+   not what is free — a bar that empties as the card fills is the wrong way
+   round from every progress bar anyone has ever seen. */
+.vol { display: flex; align-items: center; gap: 8px; font-size: 12px;
+  color: var(--text-dim); }
+.vol-name { flex: 0 0 auto; color: var(--text); }
+.vol-track { flex: 1 1 60px; min-width: 40px; height: 6px; border-radius: 3px;
+  background: var(--bg-input); border: 1px solid var(--border); overflow: hidden; }
+.vol-fill { display: block; height: 100%; background: var(--accent); }
+.vol-text { flex: 0 0 auto; font-family: var(--mono); font-size: 11px; white-space: nowrap; }
+/* Past 90% the bar stops being information and starts being a warning: an
+   upload that runs out of card halfway leaves a truncated G-code file that
+   still looks runnable in the listing. */
+.vol-tight .vol-fill { background: var(--warn); }
+.vol-tight .vol-text { color: var(--warn); }
+.vol-empty .vol-text { color: var(--text-faint); font-style: italic; }
+
 .files-list { flex: 1; min-height: 0; overflow: auto; }
 .file-row { display: flex; gap: 8px; align-items: center; padding: 6px 10px;
   cursor: pointer; font-size: 13px; border-bottom: 1px solid var(--border); }

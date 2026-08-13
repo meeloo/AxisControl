@@ -412,6 +412,19 @@ export class RrfDriver implements MachineDriver {
       // RRF globals, and globals are part of the object model — so panels get
       // real machine state here rather than shadow bookkeeping.
       firmware,
+      // Index-named rather than skipped when the firmware gives no name: a
+      // second unnamed volume has to be distinguishable from the first, and
+      // "Volume 1" beats an empty row.
+      volumes: (m.volumes ?? []).filter(Boolean).map((v, i) => ({
+        name: v.name || `Volume ${i}`,
+        mountPath: v.path ?? null,
+        // partitionSize is the usable size and capacity is the card's; the
+        // usable one is what a free-space figure has to be a fraction of, or
+        // the bar reads wrong on any card whose partition is smaller than it.
+        capacity: v.partitionSize ?? v.capacity ?? null,
+        free: v.freeSpace ?? null,
+        mounted: v.mounted ?? true,
+      })),
       extras: { global: m.global ?? {} },
     };
 

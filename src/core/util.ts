@@ -25,7 +25,10 @@ export function formatBytes(n: number | null | undefined): string {
   if (n == null) return '—';
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MiB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MiB`;
+  // Cards are sold in gigabytes and it stopped here, so an 8GB card read as
+  // "7629.4 MiB" — a number nobody can compare against the one on the label.
+  return `${(n / 1024 / 1024 / 1024).toFixed(1)} GiB`;
 }
 
 /** Fixed-width number for DRO readouts; keeps the sign column stable. */

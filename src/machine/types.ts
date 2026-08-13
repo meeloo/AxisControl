@@ -192,6 +192,33 @@ export interface MachineState {
   extras: Record<string, unknown>;
   /** Main board first, then anything on the CAN bus. Empty when unknown. */
   firmware: FirmwareInfo[];
+  /**
+   * Storage the controller has mounted. Empty when the controller has none, or
+   * has one it declines to describe — plenty of controllers stream from the
+   * host and have no card at all, and a panel has to be able to tell "no card"
+   * from "a card I know nothing about" without guessing.
+   */
+  volumes: Volume[];
+}
+
+/** A mounted filesystem on the controller. */
+export interface Volume {
+  /** How the controller names it, e.g. "SD card" or "usb0". Never empty. */
+  name: string;
+  /** Path the volume is mounted at, e.g. "0:/". Null when unstated. */
+  mountPath: string | null;
+  /** Total size in bytes, or null when the controller does not say. */
+  capacity: number | null;
+  /**
+   * Bytes free, or null when unknown.
+   *
+   * Null rather than zero, and the distinction earns its keep: RRF reports
+   * freeSpace as null on a volume it has not been asked to compute it for, and
+   * showing that as "0 bytes free" would read as a card about to fail.
+   */
+  free: number | null;
+  /** False for a slot with no card in it. */
+  mounted: boolean;
 }
 
 export function emptyMachineState(): MachineState {
@@ -211,6 +238,7 @@ export function emptyMachineState(): MachineState {
     feedMultiplier: 1,
     extras: {},
     firmware: [],
+    volumes: [],
   };
 }
 

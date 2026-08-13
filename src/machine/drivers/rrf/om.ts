@@ -232,7 +232,26 @@ export interface ObjectModel {
   spindles?: OmSpindle[];
   state?: OmState;
   tools?: OmTool[];
+  volumes?: OmVolume[];
   [key: string]: unknown;
+}
+
+/**
+ * A mounted volume.
+ *
+ * `freeSpace` is the field worth knowing about: RRF only computes it when
+ * something asks, so it can be null or absent on a perfectly healthy card, and
+ * it is expensive enough on a large card that the firmware does not keep it
+ * fresh. Absent means unknown here, never zero.
+ */
+export interface OmVolume {
+  name?: string;
+  mounted?: boolean;
+  capacity?: number | null;
+  freeSpace?: number | null;
+  partitionSize?: number | null;
+  path?: string;
+  speed?: number | null;
 }
 
 /** Top-level keys we re-fetch in full when their sequence number advances. */
@@ -247,6 +266,12 @@ export const TRACKED_KEYS = [
   'spindles',
   'state',
   'tools',
+  // Free space is not in the frequently-changing subset the poll's cheap
+  // request returns, so without tracking the key it would be read once at
+  // connect and then never move — which is worse than not showing it, since a
+  // stale "2.1 GB free" is exactly the number somebody would rely on before
+  // uploading a large job.
+  'volumes',
 ] as const;
 
 /**

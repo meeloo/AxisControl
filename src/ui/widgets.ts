@@ -2,7 +2,8 @@
 // which keeps them cheap and avoids a custom element per button.
 
 import { html, nothing, type TemplateResult } from 'lit';
-import type { MachineStatus } from '../machine/types.js';
+import type { MachineStatus, Volume } from '../machine/types.js';
+import { formatBytes } from '../core/util.js';
 import { captureButton, pointCaptureButton, type Capture, type Frame } from './capture.js';
 
 export function statusLabel(status: MachineStatus): string {
@@ -307,4 +308,57 @@ export function checkField(
 
 export function warnIf(condition: boolean, message: string): TemplateResult | typeof nothing {
   return condition ? html`<div class="warn-banner">${message}</div>` : nothing;
+}
+
+/**
+ * A volume's free space, as a bar and a line of text.
+ *
+ * Shared by the Files and Diagnostics panels because they want the same answer
+ * from opposite directions — "can I upload this job" and "what is the state of
+ * this machine" — and two renderings of the same number that disagree about
+ * rounding is the kind of thing that costs an afternoon.
+ *
+ * Three cases, and the boring one is the least common:
+ *
+ *  - An empty slot has no card. It says so, and draws no bar; an empty bar
+ *    would read as a full card.
+ *  - A mounted card whose free space the firmware has not computed shows its
+ *    size with the free figure as "unknown". RRF genuinely does this — the
+ *    figure costs a directory walk — and inventing a zero there would look
+ *    like a card that is about to fail.
+ *  - A card that reports both gets the bar, and the bar fills with what is
+ *    USED rather than what is free, because a bar that empties as the card
+ *    fills is the wrong way round for every progress bar anyone has seen.
+ */
+export function volumeBar(volume: Volume): TemplateResult {
+  if (!volume.mounted) {
+    return html`<div class="vol vol-empty">
+      <span class="vol-name">${volume.name}</span>
+      <span class="vol-text">no card</span>
+    </div>`;
+  }
+
+  const { capacity, free } = volume;
+  const known = capacity != null && capacity > 0 && free != null;
+  // Clamped: a card that reports more free than it has capacity for is a
+  // firmware quirk, not a reason to draw a bar off the end of its track.
+  const usedFraction = known ? Math.min(1, Math.max(0, 1 - free / capacity)) : 0;
+
+  return html`
+    <div class="vol ${known && usedFraction > 0.9 ? 'vol-tight' : ''}">
+      <span class="vol-name">${volume.name}</span>
+      ${known
+        ? html`
+            <span class="vol-track"
+              ><span class="vol-fill" style=${`width:${(usedFraction * 100).toFixed(1)}%`}></span
+            ></span>
+            <span class="vol-text">
+              ${formatBytes(free)} free of ${formatBytes(capacity)}
+            </span>
+          `
+        : html`<span class="vol-text">
+            ${capacity != null ? formatBytes(capacity) : 'size unknown'}, free space not reported
+          </span>`}
+    </div>
+  `;
 }
