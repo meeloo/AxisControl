@@ -2178,3 +2178,17 @@ button.cfg-state { border: none; cursor: pointer; font-family: inherit; }
 .dro-pending span { flex: 1 1 auto; min-width: 0; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; }
 .dro-pending button { flex: 0 0 auto; }
+
+/* Double-tap-to-zoom, off across the app.
+   iOS treats a second tap inside about 300ms as a zoom gesture, and while it
+   waits to find out it swallows what the app would have done with the pair.
+   `manipulation` keeps panning and pinch-to-zoom — so the page can still be
+   made bigger by anyone who needs it — and gives up only the double-tap
+   shortcut, which this app has no use for and which was eating the gesture
+   that opens a DRO value for editing.
+
+   Set on the root rather than per control: the browser intersects touch-action
+   up the ancestor chain, so one declaration covers every element that has not
+   asked for something stricter. The jog rose, the toolpath canvas and the DRO
+   numbers all set `none` for their own drags and keep it. */
+html { touch-action: manipulation; }

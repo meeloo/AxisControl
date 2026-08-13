@@ -42,6 +42,11 @@ interface EditSession {
  */
 const PRIMARY = new Set(['X', 'Y', 'Z']);
 
+/** Longest gap between two taps that still counts as a double tap, ms. */
+const DOUBLE_TAP_MS = 400;
+/** How far the second tap may land from the first, px. A finger is not a mouse. */
+const DOUBLE_TAP_SLOP = 24;
+
 /** Statuses during which an axis must not be driven from the readout. */
 const BUSY = new Set(['running', 'paused', 'pausing', 'resuming', 'homing', 'tool-change', 'halted']);
 
@@ -72,6 +77,21 @@ export class DroPanel extends PanelElement {
    * rather than clamped into something that looks like it worked.
    */
   private session: EditSession | null = null;
+  /**
+   * The last tap that was not a drag, for spotting a double tap ourselves.
+   *
+   * iOS does not reliably deliver `dblclick` here. The cell captures the
+   * pointer on pointerdown so a scrub can follow a finger that leaves the cell,
+   * and a captured pointer breaks the chain Safari uses to synthesise the
+   * double click — so the one gesture that opens the editor never arrived on
+   * the device where typing a position is most useful.
+   *
+   * Two taps close together in time and place is not a hard thing to recognise,
+   * and recognising it here costs nothing on a mouse: `dblclick` still fires
+   * there and opening the editor twice is the same as opening it once.
+   */
+  private lastTap: { letter: string; column: Column; at: number; x: number; y: number } | null = null;
+
   /** Live scrub state: null unless a drag is in progress. */
   private scrub: {
     letter: string;
@@ -266,7 +286,17 @@ export class DroPanel extends PanelElement {
   private onScrubStart(e: PointerEvent, axis: Axis, column: Column): void {
     if (this.blocked(axis)) return;
     const el = e.currentTarget as HTMLElement;
-    el.setPointerCapture(e.pointerId);
+    // Guarded: a pointer that is no longer active — a synthetic event, or one
+    // the browser has already released — throws here, and losing the capture
+    // costs a scrub that stops at the edge of the cell rather than the whole
+    // interaction.
+    try {
+      el.setPointerCapture(e.pointerId);
+    } catch {
+      /* scrub still works, it just will not follow the finger off the cell */
+    }
+    this.tapX = e.clientX;
+    this.tapY = e.clientY;
     this.scrub = {
       letter: axis.letter,
       column,
@@ -276,6 +306,9 @@ export class DroPanel extends PanelElement {
       moved: false,
     };
   }
+
+  private tapX = 0;
+  private tapY = 0;
 
   private onScrubMove(e: PointerEvent, axis: Axis): void {
     const s = this.scrub;
@@ -302,13 +335,51 @@ export class DroPanel extends PanelElement {
     // On release, never during. A move per pointermove event would stream
     // commands at the rate of a finger and leave the machine chasing a drag
     // that has already finished somewhere else.
-    if (s.moved) this.goTo(axis, s.column, s.value);
+    if (s.moved) {
+      this.lastTap = null;
+      this.goTo(axis, s.column, s.value);
+      this.requestUpdate();
+      return;
+    }
+
+    // Not a drag, so it was a tap. Two of them on the same number, close
+    // together, open the editor — see lastTap.
+    const now = Date.now();
+    const prev = this.lastTap;
+    const near =
+      prev !== null &&
+      prev.letter === axis.letter &&
+      prev.column === s.column &&
+      now - prev.at < DOUBLE_TAP_MS &&
+      Math.abs(this.tapX - prev.x) < DOUBLE_TAP_SLOP &&
+      Math.abs(this.tapY - prev.y) < DOUBLE_TAP_SLOP;
+
+    if (near) {
+      this.lastTap = null;
+      this.openEditor(axis, s.column);
+      return;
+    }
+    this.lastTap = { letter: axis.letter, column: s.column, at: now, x: this.tapX, y: this.tapY };
+    this.requestUpdate();
+  }
+
+  /** Open the box on this cell, joining or starting a session. */
+  private openEditor(axis: Axis, column: Column): void {
+    if (!connected.peek() || this.blocked(axis)) return;
+    // A session belongs to one column. Starting in the other one is a different
+    // set of numbers meaning different things, so it starts over rather than
+    // mixing the two.
+    if (!this.session || this.session.column !== column) {
+      this.session = { column, editing: axis.letter, pending: new Map() };
+    } else {
+      this.session.editing = axis.letter;
+    }
     this.requestUpdate();
   }
 
   // --- Rendering ------------------------------------------------------------
 
-  private renderValue(axis: Axis, column: Column, live: boolean): TemplateResult {
+  private renderValue(axis: Axis, column: Column): TemplateResult {
     const live0 = column === 'machine' ? axis.machine : axis.work;
     const why = this.blocked(axis);
     const s = this.session;
@@ -374,18 +445,7 @@ export class DroPanel extends PanelElement {
       (pending !== null
         ? `${axis.letter} is set to ${fixed(pending)} but has not been sent. Enter to go, Escape to forget it.`
         : `Drag to scrub ${axis.letter}, double-click to type a position. Tab for the next axis, Enter to go.`)}
-      @dblclick=${() => {
-        if (!live || why) return;
-        // A session belongs to one column. Starting in the other one is a
-        // different set of numbers meaning different things, so it starts over
-        // rather than mixing the two.
-        if (!this.session || this.session.column !== column) {
-          this.session = { column, editing: axis.letter, pending: new Map() };
-        } else {
-          this.session.editing = axis.letter;
-        }
-        this.requestUpdate();
-      }}
+      @dblclick=${() => this.openEditor(axis, column)}
       @pointerdown=${(e: PointerEvent) => this.onScrubStart(e, axis, column)}
       @pointermove=${(e: PointerEvent) => this.onScrubMove(e, axis)}
       @pointerup=${() => this.onScrubEnd(axis)}
@@ -457,8 +517,8 @@ export class DroPanel extends PanelElement {
                       ? nothing
                       : html`<span class="unhomed-dot" title="Not homed">●</span>`}
                   </td>
-                  ${this.renderValue(axis, 'work', live)}
-                  ${this.renderValue(axis, 'machine', live)}
+                  ${this.renderValue(axis, 'work')}
+                  ${this.renderValue(axis, 'machine')}
                   <td class="dro-actions">
                     <button
                       class="tiny"
