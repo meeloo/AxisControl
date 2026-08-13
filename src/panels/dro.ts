@@ -16,6 +16,22 @@ const WCS_NAMES = ['G54', 'G55', 'G56', 'G57', 'G58', 'G59', 'G59.1', 'G59.2', '
 /** Which column of the readout a value came from. */
 type Column = 'work' | 'machine';
 
+/**
+ * One pass of filling in positions, across however many axes it touches.
+ *
+ * A session is per column, and that is the operator's own distinction: work
+ * coordinates and machine coordinates are different numbers for the same place,
+ * and Tab moving between them would change what the value means halfway through
+ * typing a set of them.
+ */
+interface EditSession {
+  column: Column;
+  /** Axis whose box is open, or null when the values are typed but unsent. */
+  editing: string | null;
+  /** Axis letter → value in this session's column. Not yet sent anywhere. */
+  pending: Map<string, number>;
+}
+
 /** Statuses during which an axis must not be driven from the readout. */
 const BUSY = new Set(['running', 'paused', 'pausing', 'resuming', 'homing', 'tool-change', 'halted']);
 
@@ -45,7 +61,7 @@ export class DroPanel extends PanelElement {
    * running a job has no business being dragged sideways. Both are refused
    * rather than clamped into something that looks like it worked.
    */
-  private editing: { letter: string; column: Column } | null = null;
+  private session: EditSession | null = null;
   /** Live scrub state: null unless a drag is in progress. */
   private scrub: {
     letter: string;
@@ -119,15 +135,94 @@ export class DroPanel extends PanelElement {
     void actions.moveToMachine({ [axis.letter]: target }, axis.maxFeed || undefined);
   }
 
-  /** Take what was typed and act on it, once. */
-  private commit(axis: Axis, column: Column, raw: string): void {
-    // Guarded because both Enter and the browser's own change can arrive for
-    // one edit, and sending the move twice would be a second move from the
-    // position the first one is still travelling to.
-    if (!this.editing) return;
-    this.editing = null;
+  // --- Editing across axes --------------------------------------------------
+  //
+  // Tab keeps what was typed and moves to the next axis; Enter sends every
+  // edited axis at once, as ONE coordinated move. That is the point of
+  // collecting them rather than applying each as it is typed: three separate
+  // moves trace a staircase through whatever is in the way, at positioning
+  // speed, which is exactly the shape you were trying not to make. It is the
+  // same reason jog takes a map of axes rather than one letter at a time.
+  //
+  // Nothing moves until Enter, so an edited-but-unsent value is shown in red.
+  // A number on a readout that is not where the axis is is a lie unless it is
+  // marked as one.
+
+  /** The axes in the order Tab walks them — the order they are on screen. */
+  private get axes(): Axis[] {
+    return machine.peek().axes;
+  }
+
+  /** Take whatever is in the open box and remember it, without sending it. */
+  private stash(raw: string): void {
+    const s = this.session;
+    if (!s || !s.editing) return;
+    const axis = this.axes.find((a) => a.letter === s.editing);
+    if (!axis) return;
     const v = Number(raw);
-    if (isFinite(v)) this.goTo(axis, column, v);
+    // A box emptied and left empty is a cancelled edit for that axis, not a
+    // move to zero. Zero is somewhere; blank is a change of mind.
+    if (raw.trim() === '' || !isFinite(v)) {
+      s.pending.delete(axis.letter);
+      return;
+    }
+    s.pending.set(axis.letter, this.clamp(axis, s.column, v));
+  }
+
+  /** Move the open box to the next axis along, wrapping at the ends. */
+  private step(raw: string, delta: 1 | -1): void {
+    const s = this.session;
+    if (!s || !s.editing) return;
+    this.stash(raw);
+    const letters = this.axes.map((a) => a.letter);
+    const at = letters.indexOf(s.editing);
+    if (at < 0) return;
+    // Wrapping, so the last axis leads back to the first and the first back to
+    // the last. On a three-axis machine that is Z to X exactly; on one with a
+    // fourth axis the fourth is in the ring too, because an axis you cannot
+    // reach by Tab is an axis this feature does not have.
+    s.editing = letters[(at + delta + letters.length) % letters.length]!;
+    // Stay in the column the session started in. Tabbing from a machine
+    // coordinate into a work coordinate would change what the number means
+    // halfway through typing a set of them.
+    this.requestUpdate();
+  }
+
+  /** Send every edited axis, in one move. */
+  private apply(raw?: string): void {
+    const s = this.session;
+    if (!s) return;
+    if (raw !== undefined) this.stash(raw);
+
+    const targets: Record<string, number> = {};
+    const feeds: number[] = [];
+    for (const [letter, value] of s.pending) {
+      const axis = this.axes.find((a) => a.letter === letter);
+      if (!axis) continue;
+      const why = this.blocked(axis);
+      if (why) {
+        // Refuse the whole set rather than the part of it that would have
+        // worked. Half a coordinated move is a different move.
+        appendLog({ level: 'warning', text: `Not moving: ${why}`, time: new Date() });
+        return;
+      }
+      const target = Math.min(axis.max, Math.max(axis.min, this.toMachine(axis, s.column, value)));
+      if (Math.abs(target - axis.machine) < 0.001) continue;
+      targets[letter] = target;
+      if (axis.maxFeed > 0) feeds.push(axis.maxFeed);
+    }
+
+    this.session = null;
+    this.requestUpdate();
+    if (!Object.keys(targets).length) return;
+    // The slowest axis involved sets the feed: a coordinated move runs at one
+    // rate, and taking the fastest would ask the others to exceed their own
+    // maximum on the way.
+    void actions.moveToMachine(targets, feeds.length ? Math.min(...feeds) : undefined);
+  }
+
+  private cancel(): void {
+    this.session = null;
     this.requestUpdate();
   }
 
@@ -179,10 +274,13 @@ export class DroPanel extends PanelElement {
   // --- Rendering ------------------------------------------------------------
 
   private renderValue(axis: Axis, column: Column, live: boolean): TemplateResult {
-    const shown = column === 'machine' ? axis.machine : axis.work;
+    const live0 = column === 'machine' ? axis.machine : axis.work;
     const why = this.blocked(axis);
-    const editing =
-      this.editing && this.editing.letter === axis.letter && this.editing.column === column;
+    const s = this.session;
+    const mine = s?.column === column;
+    const pending = mine && s.pending.has(axis.letter) ? s.pending.get(axis.letter)! : null;
+    const shown = pending ?? live0;
+    const editing = mine && s.editing === axis.letter;
 
     if (editing) {
       // The value is bound as an ATTRIBUTE, not as a property, and that is
@@ -199,24 +297,32 @@ export class DroPanel extends PanelElement {
           min=${this.fromMachine(axis, column, axis.min)}
           max=${this.fromMachine(axis, column, axis.max)}
           @keydown=${(e: KeyboardEvent) => {
-            // Enter commits here rather than being left to the browser's own
+            const raw = (e.target as HTMLInputElement).value;
+            if (e.key === 'Tab') {
+              // Taken over from the browser. Its own Tab would leave the panel
+              // for the next button on the page, and what is wanted is the next
+              // axis — the readout is one thing being filled in, not four
+              // controls that happen to be near each other.
+              e.preventDefault();
+              this.step(raw, e.shiftKey ? -1 : 1);
+            }
+            // Enter applies here rather than being left to the browser's own
             // change event. A number input only fires change on Enter under
             // conditions that vary by browser and do not exist at all on a
             // phone keyboard, and "I typed a position and pressed go and
             // nothing happened" is not a failure mode this control can have.
-            if (e.key === 'Enter') this.commit(axis, column, (e.target as HTMLInputElement).value);
-            if (e.key === 'Escape') {
-              this.editing = null;
-              this.requestUpdate();
-            }
+            if (e.key === 'Enter') this.apply(raw);
+            if (e.key === 'Escape') this.cancel();
             // Whatever the key, it must not reach the page shortcuts — the
             // digits would switch page out from under the operator mid-number.
             e.stopPropagation();
           }}
-          @change=${(e: Event) => this.commit(axis, column, (e.target as HTMLInputElement).value)}
-          @blur=${() => {
-            this.editing = null;
-            this.requestUpdate();
+          @change=${(e: Event) => this.stash((e.target as HTMLInputElement).value)}
+          @blur=${(e: Event) => {
+            // Keeps the value, does NOT end the session. Tab removes this input
+            // and builds the next one, so blur fires on every step — treating it
+            // as "done" would throw away the set on the first Tab.
+            this.stash((e.target as HTMLInputElement).value);
           }}
         />
       </td>`;
@@ -226,11 +332,23 @@ export class DroPanel extends PanelElement {
     const value = scrubbing ? this.scrub!.value : shown;
 
     return html`<td
-      class="num ${column} ${why ? '' : 'settable'} ${scrubbing ? 'scrubbing' : ''}"
-      title=${why ?? `Drag to scrub ${axis.letter}, double-click to type a position. Shift for fine.`}
+      class="num ${column} ${why ? '' : 'settable'} ${scrubbing ? 'scrubbing' : ''} ${
+        pending !== null ? 'pending' : ''
+      }"
+      title=${why ??
+      (pending !== null
+        ? `${axis.letter} is set to ${fixed(pending)} but has not been sent. Enter to go, Escape to forget it.`
+        : `Drag to scrub ${axis.letter}, double-click to type a position. Tab for the next axis, Enter to go.`)}
       @dblclick=${() => {
         if (!live || why) return;
-        this.editing = { letter: axis.letter, column };
+        // A session belongs to one column. Starting in the other one is a
+        // different set of numbers meaning different things, so it starts over
+        // rather than mixing the two.
+        if (!this.session || this.session.column !== column) {
+          this.session = { column, editing: axis.letter, pending: new Map() };
+        } else {
+          this.session.editing = axis.letter;
+        }
         this.requestUpdate();
       }}
       @pointerdown=${(e: PointerEvent) => this.onScrubStart(e, axis, column)}
@@ -329,6 +447,17 @@ export class DroPanel extends PanelElement {
             )}
           </tbody>
         </table>
+
+        ${this.session?.pending.size
+          ? html`<div class="dro-pending">
+              <span>${this.session.pending.size} typed, not sent</span>
+              <!-- Buttons as well as Enter and Escape. A phone keyboard has
+                   neither, and this is the panel people use standing at the
+                   machine. -->
+              <button class="primary" @click=${() => this.apply()}>Go</button>
+              <button class="ghost" @click=${() => this.cancel()}>Cancel</button>
+            </div>`
+          : nothing}
 
         <div class="dro-foot">
           <button ?disabled=${!live} @click=${() => this.zeroAll()}>Zero all</button>

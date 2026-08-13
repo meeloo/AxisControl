@@ -2126,3 +2126,17 @@ button.cfg-state { border: none; cursor: pointer; font-family: inherit; }
   font-size: inherit; padding: 2px 4px;
   border: 1px solid var(--accent); border-radius: 4px; background: var(--bg-input);
 }
+
+/* Positions typed into the readout but not yet sent.
+   Red, because a number on a readout that is not where the axis is is a lie
+   unless it is marked as one — and this one stays on screen across the polls
+   that keep redrawing every other value from the machine. */
+.dro-table td.num.pending { color: var(--bad); font-weight: 700; }
+.dro-pending { display: flex; align-items: center; gap: 8px; padding: 6px 12px;
+  border-top: 1px solid var(--border); font-size: 12px; color: var(--bad); }
+/* min-width: 0 and nowrap together: the label is the part that gives, and it
+   gives by being clipped rather than by wrapping to four lines and pushing the
+   two buttons down the panel. */
+.dro-pending span { flex: 1 1 auto; min-width: 0; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+.dro-pending button { flex: 0 0 auto; }

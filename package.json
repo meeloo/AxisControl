@@ -25,6 +25,7 @@
     "hershey-check": "node tools/hershey-check.mjs",
     "outline-check": "node tools/outline-check.mjs",
     "vcarve-check": "node tools/vcarve-check.mjs",
+    "steps-check": "node tools/steps-check.mjs",
     "fontstore-check": "node tools/fontstore-check.mjs"
   },
   "dependencies": {

@@ -84,6 +84,26 @@ export function stepTick(mm: number): string {
 }
 
 /**
+ * A distance that is not a ladder step, short enough to sit in a rose sector.
+ *
+ * The ladder's own labels are at most four glyphs — 1000, .01 — and the sectors
+ * were drawn for that. A clamped distance is whatever is left before the axis
+ * runs out, so it arrives as 50.028471, which printed in full ran three
+ * sectors wide and over the ones beside it.
+ *
+ * Rounded DOWN, never up. The label is a promise about how far that press will
+ * travel, and a rounded-up one promises a millimetre the axis does not have.
+ * The exact figure is in the sector's tooltip, where there is room for it.
+ */
+export function shortDistance(mm: number): string {
+  if (!isFinite(mm) || mm <= 0) return '0';
+  if (mm >= 100) return String(Math.floor(mm));
+  if (mm >= 10) return (Math.floor(mm * 10) / 10).toFixed(1);
+  if (mm >= 1) return (Math.floor(mm * 10) / 10).toFixed(1);
+  return (Math.floor(mm * 100) / 100).toFixed(2).replace(/^0\./, '.');
+}
+
+/**
  * Feed rates offered by the speed cursor, mm/min, derived from the machine.
  *
  * Computed rather than listed. A fixed ladder has to be filtered against the

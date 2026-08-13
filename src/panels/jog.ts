@@ -39,7 +39,27 @@ import {
   stepAtMost,
   stepLabel,
   stepTick,
+  shortDistance,
 } from '../core/steps.js';
+
+/**
+ * A font size that keeps a label inside its own sector.
+ *
+ * The band thickness sets how tall the type can be; the arc of the sector sets
+ * how long it can be. Only the first was being checked, which is fine while
+ * every label is one of the ladder's own — 1000, .01, four glyphs at most — and
+ * wrong the moment a clamped distance turns up, because that is whatever is
+ * left before the axis runs out and it arrives as long as it likes.
+ *
+ * 0.58em per glyph is the measured average for the tabular figures this uses,
+ * and 0.86 of the arc leaves the gap between neighbouring sectors visible
+ * rather than letting two labels meet in the middle of it.
+ */
+function fitFont(band: number, label: string, labelRadius: number, halfAngleDeg: number): number {
+  const arc = 2 * labelRadius * Math.sin((halfAngleDeg * Math.PI) / 180) * 0.86;
+  const wanted = label.length * 0.58;
+  return Math.max(4, Math.min(band, arc / wanted));
+}
 
 const REPEAT_DELAY_MS = 400;
 const REPEAT_INTERVAL_MS = 180;
@@ -304,7 +324,7 @@ export class JogPanel extends PanelElement {
       // the glyph height against the ring thickness, not the text width, so
       // this can be far more generous than it had to be when they were
       // horizontal.
-      const fontSize = Math.max(5, Math.min(13, (rOuter - rInner) * 0.62));
+      const bandFont = Math.max(5, Math.min(13, (rOuter - rInner) * 0.62));
 
       for (const octant of OCTANTS) {
         const [lx, ly] = polar(labelR, octant.angle);
@@ -319,6 +339,7 @@ export class JogPanel extends PanelElement {
         const stuck = reach.limit !== null && reach.mm <= 0;
         const short = reach.limit !== null && reach.mm > 0;
         const cls = `rose-cell${enabled ? '' : ' disabled'}${short ? ' short' : ''}${stuck ? ' stuck' : ''}`;
+        const label = stuck ? 'max' : short ? shortDistance(reach.mm) : stepTick(mm);
 
         sectors.push(svg`
           <g
@@ -341,8 +362,8 @@ export class JogPanel extends PanelElement {
               y=${ly}
               dy="0.36em"
               transform=${`rotate(${labelRotation(octant.angle)} ${lx} ${ly})`}
-              style="font-size:${fontSize}px"
-            >${stuck ? 'max' : short ? stepTick(reach.mm) : stepTick(mm)}</text>
+              style="font-size:${fitFont(bandFont, label, labelR, half)}px"
+            >${label}</text>
           </g>
         `);
       }
