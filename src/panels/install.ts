@@ -27,6 +27,7 @@ import {
   ownOrigin,
   probeManifest,
   readManifest,
+  verifyInstalled,
   sealInstall,
   shortcutPath,
   shortcutUrl,
@@ -78,6 +79,16 @@ export class InstallPanel extends PanelElement {
   private progress: { done: number; total: number; label: string } | null = null;
   private error: string | null = null;
   private done: string | null = null;
+  /**
+   * Something worth knowing about an install that nonetheless worked.
+   *
+   * Separate from `error` because it renders differently and, more to the
+   * point, means something different: `error` says the install did not happen,
+   * `caveat` says it did and here is what to watch out for. The two were one
+   * field, and that is how "this browser cannot fetch the manifest" came out as
+   * "the machine will not serve the files, check your SD card".
+   */
+  private caveat: string | null = null;
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -121,9 +132,19 @@ export class InstallPanel extends PanelElement {
     }
   }
 
+  /**
+   * What is on the machine, read off the card rather than fetched over HTTP.
+   *
+   * Same reasoning as the check after an install: the driver's file API is the
+   * channel that is known to work whenever the panel is connected at all, while
+   * a browser fetch to the machine's web server can fail for reasons that have
+   * nothing to do with what is on the card. Reading it over HTTP is what used
+   * to make an installed copy show as "not installed".
+   */
   private async readInstalled(): Promise<void> {
     if (!connected.peek()) return;
-    this.installed = await readManifest(installedUrl(controllerUrl.peek()));
+    const driver = activeDriver();
+    this.installed = driver ? (await verifyInstalled(driver, INSTALL_DIR)).manifest : null;
     this.requestUpdate();
   }
 
@@ -156,6 +177,7 @@ export class InstallPanel extends PanelElement {
     if (this.busy) return;
     this.busy = label;
     this.error = null;
+    this.caveat = null;
     this.done = null;
     this.progress = null;
     this.requestUpdate();
@@ -213,6 +235,44 @@ export class InstallPanel extends PanelElement {
     });
   }
 
+  /**
+   * Whether the machine serves the copy over HTTP, and what to say if not.
+   *
+   * Returns null when it does. Everything else is advice, not a verdict: the
+   * files are on the card — that has already been confirmed through the driver —
+   * so the worst case here is that this browser cannot reach them from where it
+   * is standing, which is a thing the operator can check in a tab in two
+   * seconds and which may not even be true of the tablet at the machine.
+   *
+   * Retried, because twenty-odd files have just gone onto the card and a board
+   * still finishing with it answers the first request badly.
+   */
+  private async checkServed(): Promise<string | null> {
+    const url = controllerUrl.peek();
+    const entry = entryUrl(url);
+
+    let probe = await probeManifest(installedUrl(url));
+    for (let attempt = 0; !probe.manifest && attempt < 3; attempt++) {
+      await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+      probe = await probeManifest(installedUrl(url));
+    }
+    if (!probe.manifest) {
+      return (
+        `The files are on the machine — that has been read back off the card. ` +
+        `What could not be confirmed from this browser is that the machine serves them: ${probe.reason}. ` +
+        `Open ${entry} in a tab; if it loads, there is nothing wrong.`
+      );
+    }
+
+    if (!(await entryServesUs(entry))) {
+      return (
+        `The files are on the machine, but ${entry} is being answered by something else — ` +
+        'almost certainly DWC. That is what a "404 page not found" drawn inside the DWC shell means.'
+      );
+    }
+    return null;
+  }
+
   private async writeAndSeal(
     driver: NonNullable<ReturnType<typeof activeDriver>>,
     manifest: BuildManifest,
@@ -231,40 +291,24 @@ export class InstallPanel extends PanelElement {
     await sealInstall(driver, INSTALL_DIR, manifest);
     if (this.settings.shortcut) await writeShortcut(driver, INSTALL_DIR);
 
-    // Confirm by reading it back off the machine rather than by assuming the
-    // uploads that returned success added up to a working copy.
-    //
-    // Retried, and the retry is not padding. Twenty-odd files have just gone
-    // onto the card and the board may still be finishing with it, so the first
-    // request can fail on a copy that is perfectly complete — which then reads
-    // as a failed install and sends somebody looking for a fault that is not
-    // there.
-    const url = controllerUrl.peek();
-    let probe = await probeManifest(installedUrl(url));
-    for (let attempt = 0; !probe.manifest && attempt < 3; attempt++) {
-      this.step('confirming the copy on the machine', attempt + 1, 4);
-      await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
-      probe = await probeManifest(installedUrl(url));
+    // Did the bytes land? Asked through the driver, over the same channel the
+    // uploads went through. This is the only question whose answer means the
+    // install failed.
+    this.step('confirming the copy on the machine', 1, 1);
+    const written = await verifyInstalled(driver, INSTALL_DIR);
+    if (!written.manifest) {
+      throw new Error(`The upload finished but the copy is not readable: ${written.reason}`);
     }
-    this.installed = probe.manifest;
-    if (!this.installed) {
-      // Say what actually happened. The old wording asserted a cause it had not
-      // checked — "/www is missing, or the card is full" — and both are rare
-      // next to a board that was simply still busy.
-      throw new Error(
-        `Everything uploaded, but the copy could not be read back: ${probe.reason ?? 'no reason given'}. ` +
-          'The files may well be there — try Install again, or open that URL in a tab to see what the machine answers.',
-      );
-    }
-    // And the part that files-uploaded-successfully does not cover: that the
-    // entry URL reaches this app rather than the web interface already there.
-    if (!(await entryServesUs(entryUrl(url)))) {
-      throw new Error(
-        `The files are on the machine, but ${entryUrl(url)} is being answered by something else — almost certainly DWC. That is what a "404 page not found" drawn inside the DWC shell means.`,
-      );
-    }
+    this.installed = written.manifest;
     this.done = `${describeBuild(this.installed)} is installed — ${mb(totalBytes(files))} written`;
     appendLog({ level: 'info', text: `Axis Control ${this.done}`, time: new Date() });
+
+    // Does the machine SERVE it? A different question with its own ways to
+    // fail, none of which means the install did not work — which is the whole
+    // reason it is a caveat and not an error. The files are on the card either
+    // way, and saying otherwise sent people looking for a fault in the SD card
+    // that was never there.
+    this.caveat = await this.checkServed();
   }
 
   // --- Render -------------------------------------------------------------
@@ -395,6 +439,7 @@ export class InstallPanel extends PanelElement {
 
         ${this.error ? html`<div class="warn-banner bad">${this.error}</div>` : nothing}
         ${this.done ? html`<div class="pack-note good">${this.done}</div>` : nothing}
+        ${this.caveat ? html`<div class="warn-banner">${this.caveat}</div>` : nothing}
 
         ${this.renderActions()}
 

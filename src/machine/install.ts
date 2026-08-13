@@ -115,6 +115,43 @@ export async function probeManifest(
   return { manifest: json, reason: null };
 }
 
+/**
+ * Read the manifest back off the card, through the driver.
+ *
+ * This is the check that says whether an install worked, and it deliberately
+ * does not go near the machine's web server. The files were written with the
+ * driver's own file API, so reading them back the same way asks exactly one
+ * question — did the bytes land — over a channel already proven to work by the
+ * twenty uploads that just went through it.
+ *
+ * The web server is a separate question with separate ways to fail: it needs a
+ * usable address, it needs `/www` mapped, and from another computer it needs
+ * CORS. Every one of those can be broken while the copy on the card is perfect,
+ * and conflating them is what made a working install report itself as a failed
+ * one. So whether the machine SERVES the copy is asked separately, and answered
+ * as a caveat rather than as a failure.
+ */
+export async function verifyInstalled(
+  driver: MachineDriver,
+  dir = INSTALL_DIR,
+): Promise<{ manifest: BuildManifest | null; reason: string | null }> {
+  const path = `${dir}/build.json`;
+  let text: string;
+  try {
+    text = new TextDecoder().decode(await driver.readFile(path));
+  } catch (err) {
+    return { manifest: null, reason: `${path} could not be read back (${(err as Error).message})` };
+  }
+  try {
+    const json: unknown = JSON.parse(text);
+    return isManifest(json)
+      ? { manifest: json, reason: null }
+      : { manifest: null, reason: `${path} is not a build manifest` };
+  } catch {
+    return { manifest: null, reason: `${path} came back as something that is not JSON` };
+  }
+}
+
 /** Fetch every file a manifest names, from the copy that published it. */
 export async function fetchBuild(
   base: string,
