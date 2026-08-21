@@ -184,6 +184,20 @@ v.setJogVector({ X: 200 });
 await sleep(500);
 const during = await jogState();
 ok(during.active, 'a vector set through the app makes the machine move');
+
+// The bug this exists to prevent, and it shipped: a machine that is moving
+// reports "busy", so a host treating "busy" as a reason not to send stops itself
+// the instant it succeeds. 500ms at 30Hz is fifteen commands, all of which have
+// to have been sent AFTER the status went busy.
+ok(st.machine.peek().status === 'busy',
+   '  and the machine reports itself busy while being jogged, as a real one does',
+   st.machine.peek().status);
+ok(v.canVelocityJog().ok,
+   '  which must not stop the app sending — busy is what success looks like here',
+   v.canVelocityJog().why || 'allowed');
+ok(v.jogRunning.peek(), '  so the jog is still running a moment later');
+ok((await jogState()).commands > 5,
+   '  and commands kept arriving throughout', `${(await jogState()).commands} sent`);
 ok(near(during.speeds.X, 10, 1e-6) && near(during.commanded.X, 200, 1e-6),
    '  and 200 mm/s is silently clamped to the ceiling rather than refused',
    `asked ${during.commanded.X}, running ${during.speeds.X}`);
@@ -233,14 +247,23 @@ await sleep(120);
 // exactly why the app watches the log for these strings instead of the return
 // value, and it is what makes this worth checking rather than assuming.
 await raw('M32 "/gcodes/anything.nc"');
-await sleep(150);
+// Long enough for a poll to land: the app learns the machine's status from its
+// own poll loop, not from the command it just sent.
+await sleep(800);
 await raw('M700 X5');
-await sleep(150);
+await sleep(200);
 const busy = await jogState();
 ok(!busy.active && busy.stoppedBy === 'printing', 'a jog is refused while a program is running',
    String(busy.stoppedBy));
+
+// The other half of the same distinction: relaxing "busy" must not have relaxed
+// this. A program running is something else owning the machine, and the app has
+// to refuse before the firmware does.
+ok(!v.canVelocityJog().ok, '  and the app refuses it too, without waiting to be told',
+   `${st.machine.peek().status}: ${v.canVelocityJog().why || 'allowed'}`);
 await raw('M0');
-await sleep(150);
+await sleep(800);
+ok(v.canVelocityJog().ok, '  and allows it again once the program ends', v.canVelocityJog().why || 'allowed');
 
 console.log(fails.length ? `\n${fails.length} FAILED: ${fails.join(', ')}` : '\nall passed');
 process.exit(fails.length ? 1 : 0);

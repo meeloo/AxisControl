@@ -24,7 +24,44 @@ export type MachineStatus =
   | 'halted'
   | 'off';
 
-/** Statuses in which it is unsafe to start a new motion command. */
+/**
+ * Statuses in which hand-driven motion cannot happen.
+ *
+ * Deliberately NOT `BUSY_STATES`, and the whole difference is `busy`. A machine
+ * that is moving reports `busy` — including a machine that is moving *because
+ * the operator is jogging it*. Treat that as a reason to stop sending and the
+ * control defeats itself the instant it works: the first command starts a move,
+ * the status goes busy, the next command is refused, and continuous jogging
+ * lasts exactly one command. The Jog panel did precisely that on a real machine
+ * while passing every test here, because the mock stayed idle through a jog.
+ *
+ * `paused` is absent for the same kind of reason. Jogging while paused is when
+ * you most want it — clearing a chip, checking a cut, moving the head to see
+ * what you are doing — and RRF allows it.
+ *
+ * What is left is the cases where something else genuinely owns the machine, or
+ * where there is nothing to drive: a program running, a homing move or tool
+ * change in progress, an emergency stop, motors off, no connection.
+ */
+export const JOG_BLOCKED_STATES: ReadonlySet<MachineStatus> = new Set<MachineStatus>([
+  'disconnected',
+  'connecting',
+  'running',
+  'pausing',
+  'resuming',
+  'homing',
+  'tool-change',
+  'halted',
+  'off',
+]);
+
+/**
+ * Statuses in which it is unsafe to start a new motion command.
+ *
+ * For anything that queues work and then waits — running a macro, starting a
+ * spindle. Hand-driven motion wants JOG_BLOCKED_STATES instead; see the note
+ * there for why the two differ.
+ */
 export const BUSY_STATES: ReadonlySet<MachineStatus> = new Set<MachineStatus>([
   'disconnected',
   'connecting',

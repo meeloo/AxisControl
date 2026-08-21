@@ -35,7 +35,7 @@ import {
   saveJogSettings,
   type JogSettings,
 } from '../core/motion.js';
-import { BUSY_STATES } from '../machine/types.js';
+import { JOG_BLOCKED_STATES } from '../machine/types.js';
 import { empty } from '../ui/widgets.js';
 import {
   feedLadder,
@@ -166,8 +166,17 @@ export class JogPanel extends PanelElement {
     this.onDispose(() => this.stopRepeat());
   }
 
+  /**
+   * JOG_BLOCKED_STATES rather than BUSY_STATES, and for the same reason the
+   * velocity pad needs it: a machine that is moving reports `busy`, including
+   * one that is moving because this rose told it to. Refusing on busy greyed
+   * out the whole rose under the operator's own thumb the moment a jog started,
+   * and hold-to-repeat kept firing anyway because the repeat timer never
+   * re-checked — so the display disagreed with the behaviour as well as being
+   * wrong. See the note on the set.
+   */
   private get canMove(): boolean {
-    return connected.get() && !BUSY_STATES.has(machine.get().status);
+    return connected.get() && !JOG_BLOCKED_STATES.has(machine.get().status);
   }
 
   /** Distances for each ring of the XY rose, innermost first. */
@@ -622,7 +631,9 @@ export class JogPanel extends PanelElement {
             )}
           </div>
           ${!this.canMove && connected.get()
-            ? html`<span class="jog-blocked">Machine busy — jogging disabled</span>`
+            ? html`<span class="jog-blocked"
+                >${machine.get().status} — jogging disabled</span
+              >`
             : nothing}
         </div>
       </div>

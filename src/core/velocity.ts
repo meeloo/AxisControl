@@ -29,7 +29,7 @@
 
 import { effect, signal } from './signal.js';
 import { activeDriver, appendLog, capabilities, connected, log, loadSetting, machine, saveSetting } from './store.js';
-import { BUSY_STATES, type VelocityJogStatus } from '../machine/types.js';
+import { JOG_BLOCKED_STATES, type VelocityJogStatus } from '../machine/types.js';
 import type { MachineDriver } from '../machine/driver.js';
 
 // --- Tuning ---------------------------------------------------------------
@@ -275,8 +275,11 @@ export function canVelocityJog(): { ok: boolean; why: string } {
   const support = jogSupport.get();
   if (support === 'no') return { ok: false, why: 'This firmware does not implement M700' };
   if (support !== 'yes') return { ok: false, why: 'Checking the firmware…' };
+  // JOG_BLOCKED_STATES, not BUSY_STATES. A machine being jogged reports `busy`,
+  // so refusing on busy means refusing every command after the first one — see
+  // the note on the set itself.
   const status = machine.get().status;
-  if (BUSY_STATES.has(status)) return { ok: false, why: `Machine is ${status}` };
+  if (JOG_BLOCKED_STATES.has(status)) return { ok: false, why: `Machine is ${status}` };
   return { ok: true, why: '' };
 }
 
@@ -529,7 +532,12 @@ if (typeof window !== 'undefined') {
       jogSupport.set('unknown');
       jogStatus.set(null);
       stopJog(jogRunning.peek() ? 'Connection lost' : undefined);
-    } else if (BUSY_STATES.has(status) && jogRunning.peek()) {
+    } else if (JOG_BLOCKED_STATES.has(status) && jogRunning.peek()) {
+      // The states that mean something ELSE has taken the machine — a program
+      // started, homing began, the estop was hit. Emphatically not `busy`,
+      // which is what the machine reports because this jog is working: stopping
+      // on that stopped the jog a fraction of a second after it started, every
+      // time, on any machine that reports its status honestly.
       stopJog(`Machine went ${status}`);
     }
   });

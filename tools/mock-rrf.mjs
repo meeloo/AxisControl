@@ -526,6 +526,7 @@ setInterval(() => {
   }
   stepJog(100);
   applyFollow();
+  settleMoving();
   for (const a of axes) {
     a.userPosition = a.machinePosition - a.workplaceOffsets[workplaceNumber];
   }
@@ -552,6 +553,8 @@ function stopJog(why) {
   jog.active = false;
   jog.speeds = {};
   jog.commanded = {};
+  // Left to settleMoving to drop back to idle, so a jog that ends while an
+  // ordinary move is still notionally running does not clear the status early.
   bumpSeq('move');
 }
 
@@ -642,6 +645,13 @@ function handleJog(upper) {
   jog.stoppedBy = null;
   jog.commands++;
   jog.lastCommandAt = Date.now();
+
+  // A moving machine reports "busy", and that includes a machine moving because
+  // it is being jogged. Reproduced here because a host that treats "busy" as a
+  // reason not to send is a host that stops itself the instant it succeeds — and
+  // without this the mock sits at "idle" through an entire jog, which lets that
+  // bug pass every test there is. It did.
+  markMoving();
 }
 
 function handleFollow(cmd, upper) {
@@ -707,6 +717,41 @@ function applyFollow() {
     f.machinePosition = next;
     bumpSeq('move');
   }
+}
+
+/**
+ * When the machine stops calling itself busy after an ordinary move.
+ *
+ * The move itself is instantaneous here — this mock does not simulate
+ * trajectories — but the STATUS is not a detail a client can be spared. A real
+ * board reports "busy" for as long as a move is executing, and a panel that
+ * treats busy as a reason to grey itself out disables its own controls under
+ * the operator's thumb. That shipped once already, in both jog panels, and it
+ * passed every test here because the mock went from idle to idle.
+ *
+ * Long enough to be observed by a client polling at 250ms, short enough that a
+ * test doing a move and then checking something is not left waiting on it.
+ */
+const MOVING_MS = 400;
+let movingUntil = 0;
+
+function markMoving() {
+  // A running program owns the status; anything else is a hand-driven move.
+  if (state.status !== 'idle' && state.status !== 'busy') return;
+  movingUntil = Date.now() + MOVING_MS;
+  if (state.status !== 'busy') {
+    state.status = 'busy';
+    bumpSeq('state');
+  }
+}
+
+/** Drop back to idle once the move and any jog are done. Called from the tick. */
+function settleMoving() {
+  if (state.status !== 'busy') return;
+  if (jog.active) return;
+  if (Date.now() < movingUntil) return;
+  state.status = 'idle';
+  bumpSeq('state');
 }
 
 function bumpSeq(key) {
@@ -1430,6 +1475,7 @@ function handleGcode(gcode) {
           a.machinePosition = Math.max(a.min, Math.min(a.max, target));
         }
       }
+      markMoving();
       bumpSeq('move');
     } else if (/^M999 PROBE([01])$/.test(upper.trim())) {
       // Test hook, not a real RRF command: flips a probe so the diagnostics
