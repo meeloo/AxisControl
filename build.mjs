@@ -2,7 +2,8 @@
 //
 //   node build.mjs              -> production bundle in dist/
 //   node build.mjs --watch      -> rebuild on change
-//   node build.mjs --serve      -> dev server on :8080 (implies --watch)
+//   node build.mjs --serve      -> dev server on :8000 (implies --watch)
+//   node build.mjs --serve --port 9000        (or PORT=9000)
 //
 // Production output is written twice: `cnc.js` and `cnc.js.gz`. The Duet's web
 // server prefers a `.gz` sibling when the client sends Accept-Encoding: gzip,
@@ -19,6 +20,23 @@ import { fileURLToPath } from 'node:url';
 
 const watch = process.argv.includes('--watch') || process.argv.includes('--serve');
 const serve = process.argv.includes('--serve');
+
+/**
+ * Port for the dev server.
+ *
+ * 8000 rather than 8080. On a Mac 8080 is the busiest port there is — Tomcat,
+ * Jenkins, a dozen Docker containers and half the tutorials on the internet all
+ * want it — and when something already holds it the failure is not obvious:
+ * esbuild binds the next free port and prints it, so the browser tab you had
+ * open is quietly pointed at somebody else's server.
+ *
+ * Overridable either way, because there is no port that is free everywhere.
+ */
+const PORT = Number(
+  (process.argv.includes('--port') ? process.argv[process.argv.indexOf('--port') + 1] : '') ||
+    process.env.PORT ||
+    8000,
+);
 const prod = !watch;
 
 // Everything is relative to this file, not to wherever the build was invoked
@@ -317,10 +335,17 @@ if (watch) {
   console.log('[build] watching…');
   if (serve) {
     // `host` on esbuild 0.24, `hosts` on 0.25+. Getting this wrong prints
-    // "http://undefined:8080" as the first thing a new checkout ever says.
-    const served = await ctx.serve({ servedir: 'dist', port: 8080 });
+    // "http://undefined:8000" as the first thing a new checkout ever says.
+    const served = await ctx.serve({ servedir: 'dist', port: PORT });
     const host = served.host ?? served.hosts?.[0] ?? 'localhost';
     console.log(`[build] dev server → http://${host === '0.0.0.0' ? 'localhost' : host}:${served.port}`);
+    // Said out loud, because esbuild silently takes the next free port when the
+    // one asked for is busy — and a page served from a port you did not choose
+    // is indistinguishable from the app being broken until you notice the
+    // number in the address bar.
+    if (served.port !== PORT) {
+      console.log(`[build] NOTE: ${PORT} was busy, so this is on ${served.port} instead`);
+    }
     console.log('[build] point the UI at your controller via the connect bar (CORS is enabled by M586 C"*")');
   }
 } else {

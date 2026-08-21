@@ -166,7 +166,7 @@ plus 62 KB for the video demuxer if it is ever needed.
 
 ```
 npm install
-npm run dev        # esbuild watch + dev server on :8080
+npm run dev        # esbuild watch + dev server on :8000 (PORT=9000 to move it)
 npm run build      # dist/, with .gz siblings for the controller
 npm run typecheck
 ```
