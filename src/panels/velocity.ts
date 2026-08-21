@@ -55,6 +55,8 @@ import {
   jogVector,
   loadVelocitySettings,
   probeSupport,
+  jogOwnerFor,
+  releaseJog,
   setJogVector,
   shapeStick,
   speedCeiling,
@@ -67,6 +69,7 @@ import {
   padSupported,
   savePadSettings,
   watchPad,
+  type PadMode,
   type PadReading,
   type PadSettings,
 } from '../core/gamepad.js';
@@ -157,6 +160,40 @@ export class VelocityJogPanel extends PanelElement {
    * dragged across the screen.
    */
   private pointerDown = false;
+  /**
+   * This instance's claim on the machine, unique to it.
+   *
+   * More than one Jog panel can be alive at once — two dock groups on a page, or
+   * one page hidden behind another, which stays mounted because pages are hidden
+   * with display:none. Only one of them may be driving. See JogOwner.
+   */
+  private readonly owner = jogOwnerFor(this.panelKey || 'jog');
+  /**
+   * Whether this panel is actually on screen.
+   *
+   * Not the same as being connected. A panel on a page you have switched away
+   * from is still in the document, still running its effects, and — before this
+   * — still polling the gamepad and able to drive the machine from behind
+   * another page. Tracked with an observer rather than read on demand because
+   * `offsetParent` forces layout, and this would be asking sixty times a second.
+   */
+  private visible = true;
+  private watching: (() => void) | null = null;
+  /**
+   * Whether the stick has been seen at rest since this panel could last drive.
+   *
+   * False means "do not act on the stick yet". A panel that becomes visible with
+   * a stick already deflected — because you switched to the page it is on while
+   * holding one, or because it was leaning when the page loaded — must not
+   * start moving the machine on the strength of a state that was already true.
+   * Motion begins with a deliberate act, which is the same reasoning as the
+   * deadman, and it is what makes switching pages mid-jog stop rather than hand
+   * the machine to whichever panel appeared.
+   *
+   * Cleared when the stick is seen somewhere that would not drive: centred, or
+   * with the deadman released.
+   */
+  private padArmed = false;
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -173,15 +210,64 @@ export class VelocityJogPanel extends PanelElement {
       padName.get();
     });
     void probeSupport();
-    this.onDispose(watchPad((reading) => this.onPad(reading)));
+    this.syncPadWatch();
+
+    // display:none gives an element no boxes at all, so it never intersects.
+    // That is what makes this the right instrument for "is my page showing":
+    // it fires on the transition rather than being asked, and it also catches
+    // the panel being scrolled out of view.
+    const io = new IntersectionObserver((entries) => {
+      const now = entries[entries.length - 1]?.isIntersecting ?? true;
+      if (now === this.visible) return;
+      this.visible = now;
+      // A page switched away from while the stick is held would otherwise go on
+      // driving the machine from behind the page now on screen.
+      if (!now) this.release('the page was switched');
+      // And a panel arriving must not inherit a stick that is already leaning —
+      // see padArmed.
+      else this.padArmed = false;
+      this.syncPadWatch();
+    });
+    io.observe(this);
+    this.onDispose(() => io.disconnect());
+
     // A panel that goes away while the machine is moving must take the motion
     // with it. Switching tabs detaches the element — the pointer never comes
     // up, so nothing else in here would ever fire — and the ticker would go on
     // driving the machine from a panel that is no longer on screen.
-    this.onDispose(() => this.release('the panel was closed'));
+    this.onDispose(() => {
+      this.watching?.();
+      this.watching = null;
+      this.release('the panel was closed');
+    });
   }
 
   // --- The physical stick --------------------------------------------------
+
+  /**
+   * Start or stop polling the pad, to match the mode and whether we are on
+   * screen.
+   *
+   * Both conditions matter and for different reasons. Off means off — no loop,
+   * no reading, nothing to go wrong — which is what makes the setting worth
+   * having rather than a cosmetic filter over a loop that runs anyway. Hidden
+   * means a panel behind another page, which must not be reading a stick at all:
+   * with the machine free, it would claim it and drive from a page nobody is
+   * looking at.
+   */
+  private syncPadWatch(): void {
+    const want = this.padSettings.mode !== 'off' && this.visible;
+    if (want === (this.watching !== null)) return;
+    if (want) {
+      this.padArmed = false;
+      this.watching = watchPad((reading) => this.onPad(reading));
+    } else {
+      this.watching?.();
+      this.watching = null;
+      this.pad = null;
+    }
+    this.requestUpdate();
+  }
 
   /**
    * One frame from the gamepad.
@@ -205,6 +291,10 @@ export class VelocityJogPanel extends PanelElement {
       return;
     }
 
+    // Arm on the first frame the stick would not be driving anyway. Until then
+    // it is ignored entirely — see padArmed.
+    if (!this.padArmed && !this.padWouldDrive(reading)) this.padArmed = true;
+
     if (this.pointerDown) return;
     this.emit();
 
@@ -219,14 +309,22 @@ export class VelocityJogPanel extends PanelElement {
     if (moved) this.requestUpdate();
   }
 
+  /** Whether this reading is one that would move the machine, mode considered. */
+  private padWouldDrive(r: PadReading): boolean {
+    if (this.padSettings.mode === 'off') return false;
+    if (!r.deflected) return false;
+    return this.padSettings.mode === 'always' || r.live;
+  }
+
   /** What the physical stick is contributing, after the deadman has its say. */
   private get padDrive(): { x: number; y: number; z: number } {
     const p = this.pad;
-    if (!p) return { x: 0, y: 0, z: 0 };
+    if (!p || !this.padArmed) return { x: 0, y: 0, z: 0 };
     // Deflection is reported even when it may not drive anything — see
     // PadReading.live — so the gate is applied here rather than at the source,
     // and the knob can still show where the stick is.
-    if (this.padSettings.deadman && !p.live) return { x: 0, y: 0, z: 0 };
+    if (this.padSettings.mode === 'off') return { x: 0, y: 0, z: 0 };
+    if (this.padSettings.mode === 'deadman' && !p.live) return { x: 0, y: 0, z: 0 };
     return { x: p.x, y: p.y, z: p.z };
   }
 
@@ -260,6 +358,14 @@ export class VelocityJogPanel extends PanelElement {
   }
 
   private emit(): void {
+    // A panel that is not on screen does not drive. Belt and braces alongside
+    // the observer that stops the pad watch: the keyboard and a captured pointer
+    // can both outlive a page switch, and this is the one place all of them meet.
+    if (!this.visible) {
+      releaseJog(this.owner, 'the page was switched');
+      return;
+    }
+
     const out: Record<string, number> = {};
 
     // The physical stick and the on-screen one are the same control, so they
@@ -301,16 +407,46 @@ export class VelocityJogPanel extends PanelElement {
     // the one place that guarantees nothing goes out above a limit. As one
     // scaled vector rather than axis by axis; see fitToCeilings for why that
     // distinction matters.
-    setJogVector(fitToCeilings(out, this.settings.chunkMs));
+    // Owner-scoped. Another Jog panel may be driving, in which case this is
+    // dropped rather than interleaved with theirs — and an empty vector from
+    // here cannot stop a jog this panel never started.
+    setJogVector(fitToCeilings(out, this.settings.chunkMs), this.owner);
   }
 
   /** Everything back to centre, and the machine stopped. */
-  private release(reason?: string): void {
+  /**
+   * Everything back to centre, and the machine stopped — if this panel was the
+   * one driving it.
+   *
+   * `releaseJog` rather than `stopJog`, because a second Jog panel letting go of
+   * a stick it was not driving with must not stop the jog someone else is
+   * holding. The unconditional stop is still what the Stop button and the global
+   * safety paths use.
+   */
+  /**
+   * Stop the machine, whoever is driving it.
+   *
+   * What the Stop and E-stop buttons call. Deliberately NOT owner-scoped: a stop
+   * that only works when this particular panel happens to hold the claim is not
+   * a stop button, and the panel with the button on it is quite likely to be the
+   * one that is not driving — you reach for the nearest screen, not the one you
+   * started the jog from.
+   */
+  private panicStop(reason: string): void {
     this.pointerDown = false;
     this.stick = { x: 0, y: 0 };
     this.strips = {};
     this.keys.clear();
     stopJog(reason);
+    this.requestUpdate();
+  }
+
+  private release(reason?: string): void {
+    this.pointerDown = false;
+    this.stick = { x: 0, y: 0 };
+    this.strips = {};
+    this.keys.clear();
+    releaseJog(this.owner, reason);
     this.requestUpdate();
   }
 
@@ -749,24 +885,34 @@ export class VelocityJogPanel extends PanelElement {
       : !name
         ? 'No gamepad. Plug one in and press a button — the browser hides them until then.'
         : `${name}\n\nLeft stick drives XY, right stick drives Z. ` +
-          'With the deadman on, a shoulder or trigger button has to be held for either to move anything.';
+          'Hold to jog: a shoulder or trigger button has to be held before either moves anything. ' +
+          'Always live: deflection alone moves the machine. Off: the stick is ignored entirely and ' +
+          'nothing is polled.';
+
+    const mode = this.padSettings.mode;
+    const on = mode !== 'off' && !!name;
 
     return html`
-      <label class=${`vjog-pad${name ? ' on' : ''}${held ? ' held' : ''}`} title=${title}>
-        <input
-          type="checkbox"
+      <label class=${`vjog-pad${on ? ' on' : ''}${on && held ? ' held' : ''}`} title=${title}>
+        <span>Gamepad</span>
+        <select
           ?disabled=${!padSupported}
-          .checked=${this.padSettings.deadman}
           @change=${(e: Event) => {
-            this.padSettings = { deadman: (e.target as HTMLInputElement).checked };
+            this.padSettings = { mode: (e.target as HTMLSelectElement).value as PadMode };
             savePadSettings(this.padSettings);
-            // A deadman switched on mid-jog has to take effect at once, or it is
-            // a safety control that waits for permission to start being one.
+            this.syncPadWatch();
+            // Applied at once rather than at the next input. Switching to Off,
+            // or to Hold, while a stick is deflected has to take effect now —
+            // a safety control that waits for permission to start being one is
+            // not a safety control.
             this.emit();
             this.requestUpdate();
           }}
-        />
-        <span>Deadman</span>
+        >
+          <option value="off" ?selected=${mode === 'off'}>Off</option>
+          <option value="deadman" ?selected=${mode === 'deadman'}>Hold to jog</option>
+          <option value="always" ?selected=${mode === 'always'}>Always live</option>
+        </select>
       </label>`;
   }
 
@@ -791,7 +937,7 @@ export class VelocityJogPanel extends PanelElement {
           class="vjog-stop"
           ?disabled=${!running}
           title="Send M700 S0 — decelerates normally. For a real emergency use the estop."
-          @click=${() => this.release('stopped by hand')}
+          @click=${() => this.panicStop('stopped by hand')}
         >
           Stop
         </button>
@@ -800,7 +946,7 @@ export class VelocityJogPanel extends PanelElement {
           ?disabled=${!connected.get()}
           title="M112 — cuts everything now. This is the emergency stop; Stop is not."
           @click=${() => {
-            this.release('emergency stop');
+            this.panicStop('emergency stop');
             void actions.estop();
           }}
         >

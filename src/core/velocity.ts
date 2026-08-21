@@ -230,6 +230,39 @@ export const jogHealth = signal<JogHealth>({ buff: null, skipped: 0, sent: 0 }, 
 /** Why jogging last stopped on its own, for the panel to show. Null if it did not. */
 export const jogRefusal = signal<string | null>(null);
 
+/**
+ * Who is allowed to drive, while anyone is.
+ *
+ * There is one machine and one velocity vector, and more than one control can
+ * be on screen wanting to set it — two Jog panels in two dock groups, or one on
+ * a page hidden behind another, which is live because pages are hidden with
+ * display:none rather than taken apart. So the vector is claimed rather than
+ * shared: the first control to ask for motion gets it and keeps it until it
+ * lets go, and everyone else's commands are dropped on the floor rather than
+ * interleaved with the driver's at thirty a second.
+ *
+ * A token per instance rather than a name, because identity is the whole point
+ * and two panels of the same kind on the same page would otherwise be the same
+ * owner. The label is only for saying who, in a message.
+ *
+ * Required, with no default. A default meant an unidentified caller could take
+ * the claim and then never let go of it, locking out every panel that did
+ * identify itself — and the alternative, a token that drives without ever
+ * claiming, is a hole straight through the middle of this. There is one caller
+ * and it knows who it is.
+ */
+export interface JogOwner {
+  readonly label: string;
+}
+
+/** The label of whoever is driving, or null. For a panel to show it is not. */
+export const jogOwner = signal<string | null>(null);
+
+/** Make a token for one control instance. */
+export function jogOwnerFor(label: string): JogOwner {
+  return { label };
+}
+
 function sameVector(a: Record<string, number>, b: Record<string, number>): boolean {
   const ka = Object.keys(a);
   if (ka.length !== Object.keys(b).length) return false;
@@ -240,6 +273,8 @@ function sameVector(a: Record<string, number>, b: Record<string, number>): boole
 
 let ticker: ReturnType<typeof setInterval> | null = null;
 let vector: Record<string, number> = {};
+/** Whoever currently holds the claim, or null when the machine is free. */
+let holder: JogOwner | null = null;
 let settings: VelocitySettings = loadVelocitySettings();
 /**
  * The request currently on the wire, if any.
@@ -324,27 +359,57 @@ export async function probeSupport(force = false): Promise<boolean> {
  * because that is what M700 does with an axis it is not told about and having
  * this layer disagree would be worse than either behaviour on its own.
  */
-export function setJogVector(next: Record<string, number>): void {
+export function setJogVector(next: Record<string, number>, owner: JogOwner): void {
   const clean: Record<string, number> = {};
   for (const [letter, v] of Object.entries(next)) {
     if (Number.isFinite(v) && v !== 0) clean[letter.toUpperCase()] = v;
   }
 
   if (!Object.keys(clean).length) {
-    stopJog();
+    // Only the driver may stop the machine by letting go. A second panel
+    // sending an empty vector — which it does on every frame its own stick sits
+    // centred — must not cut the jog somebody else is holding.
+    if (holder === owner) stopJog();
     return;
   }
+
+  // Whoever is already driving keeps driving. Two Jog panels can be on screen at
+  // once — two dock groups on a page, or one page hidden behind another, since
+  // pages are hidden with display:none rather than detached — and both are live,
+  // both watching the same gamepad, both computing a vector from it. Without
+  // this they take turns at 30Hz: the machine gets one panel's vector, then the
+  // other's, and letting go of either stops it.
+  if (holder !== null && holder !== owner) return;
 
   const gate = canVelocityJog();
   if (!gate.ok) {
     jogRefusal.set(gate.why);
-    stopJog();
+    if (holder === owner) stopJog();
     return;
   }
 
+  holder = owner;
+  jogOwner.set(owner.label);
   vector = clean;
   jogVector.set(clean);
   if (!ticker) start();
+}
+
+/**
+ * Give up the machine, if this owner had it.
+ *
+ * What a panel calls when it is closed, hidden, or otherwise done. Distinct
+ * from `stopJog`, which stops unconditionally: a panel going away must stop the
+ * jog it was driving and must NOT stop one it never had.
+ */
+export function releaseJog(owner: JogOwner, reason?: string): void {
+  if (holder !== owner) return;
+  stopJog(reason);
+}
+
+/** Whether this owner is the one currently driving. */
+export function jogHeldBy(owner: JogOwner): boolean {
+  return holder === owner;
 }
 
 function start(): void {
@@ -428,6 +493,11 @@ export function stopJog(reason?: string): void {
   if (ticker) clearInterval(ticker);
   ticker = null;
   vector = {};
+  // The claim goes with the motion. Unconditional on purpose: this is what the
+  // global safety paths and the Stop button call, and anything that stops the
+  // machine has to leave it available to whoever reaches for it next.
+  holder = null;
+  jogOwner.set(null);
   jogVector.set({});
   jogRunning.set(false);
   if (reason) jogRefusal.set(reason);

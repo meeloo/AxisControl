@@ -46,22 +46,41 @@ export interface PadReading {
   deflected: boolean;
 }
 
+/**
+ * Whether a stick may drive the machine, and on what terms.
+ *
+ * `off`      — ignored entirely. No poll loop runs.
+ * `deadman`  — a shoulder or trigger button must be held. The default.
+ * `always`   — deflection alone moves the machine.
+ *
+ * Three states in one control rather than two checkboxes, because "gamepad on,
+ * deadman off" and "gamepad off" are different answers to the same question and
+ * a pair of tickboxes lets you express a fourth combination that means nothing.
+ *
+ * The default is `deadman` rather than `off`: a stick that does nothing until
+ * you find a setting is a stick most people conclude is unsupported. A held
+ * enable is what makes that safe to ship on by default — nothing moves until a
+ * button is deliberately held, so a pad already plugged in cannot surprise
+ * anyone. Off is there for the case the setting exists for: not wanting the
+ * thing at all, or a controller whose sticks are too worn to trust.
+ */
+export type PadMode = 'off' | 'deadman' | 'always';
+
 export interface PadSettings {
-  /**
-   * Require a button to be held before the stick moves anything.
-   *
-   * On by default. A stick self-centres, so releasing it is already physical —
-   * but a pad can be put down on, dropped, or leant against, and the axes drift
-   * on a worn one. The convention on every hand-held jog pendant is a held
-   * enable, and the firmware's own guidance says to have one.
-   */
-  deadman: boolean;
+  mode: PadMode;
 }
 
-const DEFAULTS: PadSettings = { deadman: true };
+const DEFAULTS: PadSettings = { mode: 'deadman' };
 
 export function loadPadSettings(): PadSettings {
-  return { ...DEFAULTS, ...loadSetting<Partial<PadSettings>>('gamepad', {}) };
+  const raw = loadSetting<Partial<PadSettings> & { deadman?: boolean }>('gamepad', {});
+  // Carried over from when this was a single boolean and the gamepad was always
+  // on. Both of its values map onto a mode, so nobody loses a preference.
+  if (typeof raw.deadman === 'boolean' && raw.mode === undefined) {
+    return { mode: raw.deadman ? 'deadman' : 'always' };
+  }
+  const mode = raw.mode;
+  return { mode: mode === 'off' || mode === 'deadman' || mode === 'always' ? mode : DEFAULTS.mode };
 }
 
 export function savePadSettings(s: PadSettings): void {
@@ -126,40 +145,56 @@ function read(g: Gamepad): PadReading {
  * ignore, because a pad unplugged mid-move must stop the machine and a caller
  * that only ever hears about readings would never find out.
  */
+const listeners = new Set<(reading: PadReading | null) => void>();
+let frame = 0;
+
+/**
+ * The pad is polled once per frame no matter how many watchers there are.
+ *
+ * Two Jog panels can be on screen at once, and a hidden page's panel is still
+ * alive — pages are hidden with display:none rather than taken apart. One loop
+ * per panel would read the same hardware two or three times a frame and hand
+ * each watcher a separate snapshot of it.
+ */
+function tick(): void {
+  frame = 0;
+  if (!listeners.size) return;
+  const g = pick();
+  padName.set(g ? g.id : null);
+  const reading = g ? read(g) : null;
+  for (const fn of [...listeners]) fn(reading);
+  frame = requestAnimationFrame(tick);
+}
+
+// The API hides pads until one is touched, so a pad already plugged in when the
+// page loaded does not appear until a button is pressed. The connection event is
+// how it shows up without one.
+function wake(): void {
+  if (listeners.size && !frame) frame = requestAnimationFrame(tick);
+}
+
+if (padSupported) {
+  window.addEventListener('gamepadconnected', wake);
+  window.addEventListener('gamepaddisconnected', wake);
+}
+
 export function watchPad(onRead: (reading: PadReading | null) => void): () => void {
   if (!padSupported) {
     onRead(null);
     return () => {};
   }
 
-  let frame = 0;
-  let stopped = false;
-
-  const tick = (): void => {
-    if (stopped) return;
-    const g = pick();
-    padName.set(g ? g.id : null);
-    onRead(g ? read(g) : null);
-    frame = requestAnimationFrame(tick);
-  };
-
-  // The API hides pads until one is touched, so a pad that was already plugged
-  // in when the page loaded does not appear until a button is pressed. The
-  // connection event is how it shows up without one; the poll below finds it
-  // either way once it does.
-  const wake = (): void => {
-    if (!stopped && !frame) frame = requestAnimationFrame(tick);
-  };
-  window.addEventListener('gamepadconnected', wake);
-  window.addEventListener('gamepaddisconnected', wake);
-  frame = requestAnimationFrame(tick);
+  listeners.add(onRead);
+  wake();
 
   return () => {
-    stopped = true;
+    listeners.delete(onRead);
+    if (listeners.size) return;
+    // Last one out. The loop stops rather than spinning over an empty set, and
+    // the name is cleared because nothing is watching a pad any more — which is
+    // not the same claim as there not being one.
     if (frame) cancelAnimationFrame(frame);
     frame = 0;
-    window.removeEventListener('gamepadconnected', wake);
-    window.removeEventListener('gamepaddisconnected', wake);
     padName.set(null);
   };
 }

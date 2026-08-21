@@ -75,7 +75,7 @@ const entry = join(dir, 'entry.ts');
 await writeFile(entry, `export * from ${JSON.stringify(join(root, 'src/core/gamepad.ts'))};\n`);
 await build({ entryPoints: [entry], bundle: true, format: 'esm', outfile: out, logLevel: 'error',
   platform: 'neutral', mainFields: ['module', 'main'], conditions: ['browser'] });
-const { watchPad, padName, padSupported } = await import(pathToFileURL(out).href);
+const { watchPad, padName, padSupported, loadPadSettings } = await import(pathToFileURL(out).href);
 
 const fails = [];
 const ok = (c, w, x = '') => { console.log(`${c ? 'PASS' : 'FAIL'}  ${w}${x ? '  ' + x : ''}`); if (!c) fails.push(w); };
@@ -162,6 +162,50 @@ ok(last.live && last.y === 1, 'a pad mid-jog reads as driving');
 attached = null;
 step();
 ok(last === null, 'and unplugging arrives as null, not as the last reading held forever');
+
+// --- One loop, however many watchers ----------------------------------------
+//
+// Two Jog panels can be alive at once, and a hidden page's panel stays mounted.
+// A loop per watcher would read the same hardware two or three times a frame.
+
+attached = pad([1, 0, 0, 0], [4]);
+const seen = [[], []];
+const off = [watchPad((r) => seen[0].push(r)), watchPad((r) => seen[1].push(r))];
+step();
+ok(seen[0].length === 1 && seen[1].length === 1, 'two watchers each get the frame once',
+   `${seen[0].length}, ${seen[1].length}`);
+ok(seen[0][0] === seen[1][0], '  and it is the same reading, not two reads of the hardware');
+
+// One leaving must not take the loop with it.
+off[0]();
+seen[1].length = 0;
+step();
+ok(seen[1].length === 1, 'one watcher leaving does not stop the others', `${seen[1].length}`);
+off[1]();
+seen[1].length = 0;
+step();
+step();
+ok(seen[1].length === 0, '  and the last one out stops the loop');
+
+// --- The mode setting -------------------------------------------------------
+
+ok(loadPadSettings().mode === 'deadman', 'a browser that has never been told defaults to hold-to-jog',
+   loadPadSettings().mode);
+
+// The setting used to be a boolean, back when the gamepad was always on. Both
+// of its values still mean something, so nobody loses a preference.
+kv.set('cnc.gamepad', JSON.stringify({ deadman: false }));
+ok(loadPadSettings().mode === 'always', 'an old deadman:false carries over to always-live',
+   loadPadSettings().mode);
+kv.set('cnc.gamepad', JSON.stringify({ deadman: true }));
+ok(loadPadSettings().mode === 'deadman', 'and an old deadman:true to hold-to-jog', loadPadSettings().mode);
+
+kv.set('cnc.gamepad', JSON.stringify({ mode: 'off' }));
+ok(loadPadSettings().mode === 'off', 'off is remembered', loadPadSettings().mode);
+kv.set('cnc.gamepad', JSON.stringify({ mode: 'nonsense' }));
+ok(loadPadSettings().mode === 'deadman', 'and a value this version does not know falls back to the default',
+   loadPadSettings().mode);
+kv.delete('cnc.gamepad');
 
 // --- Stopping ---------------------------------------------------------------
 

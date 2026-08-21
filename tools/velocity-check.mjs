@@ -180,7 +180,9 @@ ok(v.fitToCeilings({ X: 3, Y: 4 }, 20) !== undefined
 await raw('G53 G1 X260 Y600 Z115');
 await sleep(150);
 const before = (await jogState()).positions;
-v.setJogVector({ X: 200 });
+// An owner is required, so the checks name themselves like a panel would.
+const pad = v.jogOwnerFor('check');
+v.setJogVector({ X: 200 }, pad);
 await sleep(500);
 const during = await jogState();
 ok(during.active, 'a vector set through the app makes the machine move');
@@ -221,6 +223,66 @@ ok(near(during.speeds.X, 10, 1e-6) && near(during.commanded.X, 200, 1e-6),
 ok(during.positions.X > before.X + 2,
    '  and the axis really travelled', `${(during.positions.X - before.X).toFixed(2)}mm`);
 
+// --- One machine, more than one panel --------------------------------------
+//
+// Two Jog panels can be alive at once: two dock groups on a page, or one page
+// hidden behind another, which stays mounted because pages are hidden with
+// display:none rather than taken apart. Both compute a vector, both from the
+// same gamepad. Without a claim they take turns at 30Hz and letting go of
+// either stops the machine.
+
+const alice = v.jogOwnerFor('page-1/jog');
+const bob = v.jogOwnerFor('page-2/jog');
+
+// From a standing start: the claim is held until it is let go, so the previous
+// section's jog has to be over before this one means anything.
+v.stopJog();
+await sleep(200);
+v.setJogVector({ X: 5 }, alice);
+await sleep(150);
+ok(v.jogHeldBy(alice) && v.jogOwner.peek() === 'page-1/jog',
+   'the first panel to ask for motion gets the machine', String(v.jogOwner.peek()));
+
+// The second panel's stick is centred, so it sends an empty vector on every
+// frame. That must not stop the jog the first one is holding.
+v.setJogVector({}, bob);
+await sleep(150);
+ok(v.jogRunning.peek() && (await jogState()).active,
+   '  and a second panel letting go of nothing does not stop it');
+
+// Nor may it take over mid-jog.
+v.setJogVector({ Y: -5 }, bob);
+await sleep(200);
+const owned = await jogState();
+ok(v.jogHeldBy(alice) && owned.speeds.X && !owned.speeds.Y,
+   '  nor take it over while the first is still driving', JSON.stringify(owned.speeds));
+
+// The holder letting go frees it, and then the other may have it.
+v.setJogVector({}, alice);
+await sleep(200);
+ok(!v.jogRunning.peek() && v.jogOwner.peek() === null, '  the holder letting go frees the machine');
+v.setJogVector({ Y: -5 }, bob);
+await sleep(200);
+ok(v.jogHeldBy(bob) && (await jogState()).speeds.Y, '  and the other panel can then take it',
+   JSON.stringify((await jogState()).speeds));
+
+// releaseJog is scoped; stopJog is not. A Stop button on the panel that is NOT
+// driving still has to stop the machine.
+v.releaseJog(alice);
+await sleep(150);
+ok(v.jogRunning.peek(), 'releaseJog from a non-holder does nothing');
+v.stopJog('stop button');
+await sleep(200);
+ok(!v.jogRunning.peek() && !(await jogState()).active,
+   '  but stopJog stops it whoever presses it');
+ok(v.jogOwner.peek() === null, '  and leaves the machine free for whoever reaches for it next');
+
+// Back to a single owner for the rest of this file.
+v.stopJog();
+await sleep(150);
+await raw('G53 G1 X260 Y600 Z115');
+await sleep(200);
+
 // Releasing. Both halves matter: that it stopped, and that OUR stop is what
 // stopped it. Without the second half this passes on a host that sends nothing
 // at all and lets the watchdog clean up 250ms later.
@@ -248,7 +310,7 @@ ok(!dead.active && dead.stoppedBy === 'watchdog',
 // the behaviour it is marking.
 await raw('G53 G1 X523 Y600');
 await sleep(150);
-v.setJogVector({ X: 50, Y: 50 });
+v.setJogVector({ X: 50, Y: 50 }, pad);
 await sleep(500);
 const split = await jogState();
 ok(near(split.positions.X, 524, 0.001), 'an axis that reaches its limit stops there',

@@ -130,13 +130,28 @@ still in flight, and losing the window, the tab, the pointer, the panel or the
 connection is a stop. Arrow keys work the same way while the panel has focus.
 
 A gamepad drives it, which is what velocity jogging was for: left stick for XY,
-right stick for Z, and — unless you turn it off — a shoulder button held while
-either moves anything. A stick self-centres, so letting go already stops the
-machine; the held enable is for the pad being put down on, dropped or leant
-against, and it is the convention on every hand-held pendant. The stick shares
-the on-screen pad's deadzone, response curve and ceilings, so a jog feels the
-same whichever is driving, and a stick pushed without the enable still shows on
-the pad rather than doing nothing silently.
+right stick for Z, in one of three modes — **Off**, which polls nothing at all;
+**Hold to jog**, the default, where a shoulder or trigger button must be held;
+and **Always live**, where deflection alone moves the machine. A stick
+self-centres, so letting go already stops it; the held enable is for the pad
+being put down on, dropped or leant against, and it is the convention on every
+hand-held pendant. The stick shares the on-screen pad's deadzone, response curve
+and ceilings, so a jog feels the same whichever is driving, and a stick pushed
+without the enable still shows on the pad rather than doing nothing silently.
+
+A stick that is already leaning when a panel appears does not start moving
+anything. It has to be seen at rest first, so opening a page — or switching to
+one — with a controller resting against something is not a way to start a cut.
+
+More than one Jog panel can exist, on the same page or on different ones, and
+they do not fight: the first to ask for motion holds the machine until it lets
+go, and the others' commands are dropped rather than interleaved with it at
+thirty a second. Pages are hidden rather than taken apart, so a panel you have
+switched away from is still alive — it stops what it was driving and stops
+watching the stick, instead of driving the machine from behind the page you are
+looking at. **Stop** and **E-stop** are the exceptions and are deliberately not
+scoped: they stop the machine whoever is driving, because the panel with the
+button under your hand is quite likely not the one that started it.
 
 The host owns knowing that a jog is happening, too. The firmware leaves its
 status at `idle` for the whole of a velocity jog, so nothing here infers one

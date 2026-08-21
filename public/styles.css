@@ -861,13 +861,13 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
    the exact moment someone reached for them. Dimmed with no pad, coloured when
    one is attached, and filled while the enable is actually held, so the label is
    also the answer to "is this thing seeing my controller". */
-.vjog-pad { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto;
+.vjog-pad { display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto;
   font-size: 11px; color: var(--text-faint); cursor: pointer; user-select: none;
-  padding: 0 6px; height: 32px; border: 1px solid transparent; border-radius: 5px; }
-.vjog-pad input { margin: 0; accent-color: var(--accent); }
+  padding: 0 4px 0 6px; height: 32px; border: 1px solid transparent; border-radius: 5px; }
+.vjog-pad select { font-size: 11px; min-height: 26px; height: 26px; padding: 0 4px; }
 .vjog-pad.on { color: var(--text-dim); border-color: var(--border); }
 .vjog-pad.held { color: var(--accent); border-color: var(--accent); background: var(--tint-accent); }
-.vjog-pad:has(input:disabled) { opacity: 0.45; cursor: default; }
+.vjog-pad:has(select:disabled) { opacity: 0.45; cursor: default; }
 
 .vjog-recheck { margin-left: auto; font-size: 11px; }
 .vjog-blocked { color: var(--warn); font-size: 12px; flex: 0 0 auto; }
