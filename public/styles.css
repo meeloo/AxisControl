@@ -856,6 +856,19 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
   flex: 0 0 auto; min-height: 13px; line-height: 13px; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; }
 .vjog-health.warn { color: var(--warn); }
+/* The gamepad's deadman toggle. Always present, so the row does not change
+   shape when a stick is plugged in — which would move the controls beside it at
+   the exact moment someone reached for them. Dimmed with no pad, coloured when
+   one is attached, and filled while the enable is actually held, so the label is
+   also the answer to "is this thing seeing my controller". */
+.vjog-pad { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto;
+  font-size: 11px; color: var(--text-faint); cursor: pointer; user-select: none;
+  padding: 0 6px; height: 32px; border: 1px solid transparent; border-radius: 5px; }
+.vjog-pad input { margin: 0; accent-color: var(--accent); }
+.vjog-pad.on { color: var(--text-dim); border-color: var(--border); }
+.vjog-pad.held { color: var(--accent); border-color: var(--accent); background: var(--tint-accent); }
+.vjog-pad:has(input:disabled) { opacity: 0.45; cursor: default; }
+
 .vjog-recheck { margin-left: auto; font-size: 11px; }
 .vjog-blocked { color: var(--warn); font-size: 12px; flex: 0 0 auto; }
 .vjog-hint { font-size: 10px; color: var(--text-faint); line-height: 1.4; flex: 0 0 auto; }

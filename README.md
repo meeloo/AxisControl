@@ -129,6 +129,15 @@ itself — releasing sends an explicit zero and sends it again behind anything
 still in flight, and losing the window, the tab, the pointer, the panel or the
 connection is a stop. Arrow keys work the same way while the panel has focus.
 
+A gamepad drives it, which is what velocity jogging was for: left stick for XY,
+right stick for Z, and — unless you turn it off — a shoulder button held while
+either moves anything. A stick self-centres, so letting go already stops the
+machine; the held enable is for the pad being put down on, dropped or leant
+against, and it is the convention on every hand-held pendant. The stick shares
+the on-screen pad's deadzone, response curve and ceilings, so a jog feels the
+same whichever is driving, and a stick pushed without the enable still shows on
+the pad rather than doing nothing silently.
+
 The host owns knowing that a jog is happening, too. The firmware leaves its
 status at `idle` for the whole of a velocity jog, so nothing here infers one
 from the machine — the app tracks the stick itself, and that is what the status
@@ -463,6 +472,7 @@ npm run steps-check     # jog labels never round up and always fit their sector
 npm run fontstore-check # fonts on the card: round trip, validation, path escapes
 npm run velocity-check  # velocity jogging: the stop, the watchdog, the clamps
 npm run dustshoe-check  # who moves the dust shoe, and what each macro emits
+npm run gamepad-check   # stick axis conventions, deadzone, and the deadman
 ```
 
 `rewrite-check` takes a directory and will sweep real config files for the

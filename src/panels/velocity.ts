@@ -61,6 +61,15 @@ import {
   stopJog,
   type VelocitySettings,
 } from '../core/velocity.js';
+import {
+  loadPadSettings,
+  padName,
+  padSupported,
+  savePadSettings,
+  watchPad,
+  type PadReading,
+  type PadSettings,
+} from '../core/gamepad.js';
 
 /** Pad geometry, in viewBox units. The pad's radius is 100. */
 const PAD_R = 100;
@@ -136,6 +145,18 @@ export class VelocityJogPanel extends PanelElement {
   private strips: Record<string, number> = {};
   /** Keys currently held down, by their code. */
   private keys = new Set<string>();
+  /** The physical stick's last reading, or null when there is no pad. */
+  private pad: PadReading | null = null;
+  private padSettings: PadSettings = loadPadSettings();
+  /**
+   * True while a finger or mouse owns the on-screen pad.
+   *
+   * The two inputs write to the same place, so one of them has to yield. The
+   * touch wins, because it is the one someone is deliberately doing: a physical
+   * stick resting a hair off centre should not fight a thumb that is being
+   * dragged across the screen.
+   */
+  private pointerDown = false;
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -149,13 +170,64 @@ export class VelocityJogPanel extends PanelElement {
       jogStatus.get();
       jogHealth.get();
       jogRefusal.get();
+      padName.get();
     });
     void probeSupport();
+    this.onDispose(watchPad((reading) => this.onPad(reading)));
     // A panel that goes away while the machine is moving must take the motion
     // with it. Switching tabs detaches the element — the pointer never comes
     // up, so nothing else in here would ever fire — and the ticker would go on
     // driving the machine from a panel that is no longer on screen.
     this.onDispose(() => this.release('the panel was closed'));
+  }
+
+  // --- The physical stick --------------------------------------------------
+
+  /**
+   * One frame from the gamepad.
+   *
+   * Called about sixty times a second, so it does as little as possible: it
+   * sends the vector on every frame — `setJogVector` is cheap and the ticker
+   * decides what actually goes on the wire — but only asks for a re-render when
+   * something a reader would notice has changed. Re-rendering the panel at 60Hz
+   * to redraw a knob that has not moved is how a jog control starts dropping
+   * frames on the tablet it is meant to run on.
+   */
+  private onPad(reading: PadReading | null): void {
+    const before = this.pad;
+    this.pad = reading;
+
+    // Unplugged, or the browser lost it. Whatever it was doing, it is not doing
+    // it any more, and nothing else here would notice.
+    if (!reading) {
+      if (before?.live && before.deflected) this.release('the gamepad was unplugged');
+      else if (before) this.requestUpdate();
+      return;
+    }
+
+    if (this.pointerDown) return;
+    this.emit();
+
+    // A tenth of a percent of travel: below that it is a stick sitting still and
+    // an ADC deciding between two neighbouring counts.
+    const moved =
+      !before ||
+      before.live !== reading.live ||
+      Math.abs(before.x - reading.x) > 0.001 ||
+      Math.abs(before.y - reading.y) > 0.001 ||
+      Math.abs(before.z - reading.z) > 0.001;
+    if (moved) this.requestUpdate();
+  }
+
+  /** What the physical stick is contributing, after the deadman has its say. */
+  private get padDrive(): { x: number; y: number; z: number } {
+    const p = this.pad;
+    if (!p) return { x: 0, y: 0, z: 0 };
+    // Deflection is reported even when it may not drive anything — see
+    // PadReading.live — so the gate is applied here rather than at the source,
+    // and the knob can still show where the stick is.
+    if (this.padSettings.deadman && !p.live) return { x: 0, y: 0, z: 0 };
+    return { x: p.x, y: p.y, z: p.z };
   }
 
   // --- Building the vector -------------------------------------------------
@@ -190,12 +262,26 @@ export class VelocityJogPanel extends PanelElement {
   private emit(): void {
     const out: Record<string, number> = {};
 
-    const shaped = shapeStick(this.stick.x, this.stick.y, {
+    // The physical stick and the on-screen one are the same control, so they
+    // share the shaping — deadzone, response curve and ceiling — and a jog feels
+    // the same whichever is driving. The touch wins while a pointer is down;
+    // see `pointerDown`.
+    const drive = this.padDrive;
+    const xy = this.pointerDown || !(drive.x || drive.y) ? this.stick : { x: drive.x, y: drive.y };
+
+    const shaped = shapeStick(xy.x, xy.y, {
       ...this.settings,
       maxSpeed: this.reach(['X', 'Y']),
     });
     if (shaped.x) out.X = shaped.x;
     if (shaped.y) out.Y = shaped.y;
+
+    // The right stick drives Z, on the axis that stands for up. Only when the
+    // strip beside it is not being dragged, so the two cannot argue.
+    if (drive.z && this.strips.Z === undefined) {
+      const v = shapeStick(0, drive.z, { ...this.settings, maxSpeed: this.reach(['Z']) }).y;
+      if (v) out.Z = v;
+    }
 
     for (const [letter, t] of Object.entries(this.strips)) {
       const v = shapeStick(0, t, { ...this.settings, maxSpeed: this.reach([letter]) }).y;
@@ -220,6 +306,7 @@ export class VelocityJogPanel extends PanelElement {
 
   /** Everything back to centre, and the machine stopped. */
   private release(reason?: string): void {
+    this.pointerDown = false;
     this.stick = { x: 0, y: 0 };
     this.strips = {};
     this.keys.clear();
@@ -277,6 +364,7 @@ export class VelocityJogPanel extends PanelElement {
         // that leaves it hits pointerleave and stops, which is the safe way to
         // be wrong.
       }
+      this.pointerDown = true;
       this.stick = this.deflection(e, e.currentTarget as Element, STICK_VIEW);
       this.emit();
       this.requestUpdate();
@@ -292,7 +380,10 @@ export class VelocityJogPanel extends PanelElement {
       this.requestUpdate();
     };
 
-    const drop = () => this.release();
+    const drop = () => {
+      this.pointerDown = false;
+      this.release();
+    };
     return { grab, drag, drop };
   }
 
@@ -307,6 +398,7 @@ export class VelocityJogPanel extends PanelElement {
       grab: (e: PointerEvent) => {
         if (!canVelocityJog().ok) return;
         e.preventDefault();
+        this.pointerDown = true;
         try {
           (e.currentTarget as Element).setPointerCapture(e.pointerId);
         } catch {
@@ -319,7 +411,10 @@ export class VelocityJogPanel extends PanelElement {
         e.preventDefault();
         set(e);
       },
-      drop: () => this.release(),
+      drop: () => {
+        this.pointerDown = false;
+        this.release();
+      },
     };
   }
 
@@ -394,10 +489,22 @@ export class VelocityJogPanel extends PanelElement {
     // The knob sits at the raw deflection, not the shaped speed: it is showing
     // where the thumb is, and a knob that lagged behind the finger because of
     // the response curve would read as the control being broken.
-    const r = Math.hypot(this.stick.x, this.stick.y);
+    //
+    // The physical stick draws here too, and — deliberately — even when the
+    // deadman is not held and it is driving nothing. A stick pushed with no
+    // effect and a stick sitting still look identical otherwise, and the first
+    // one is someone who has not found the button yet. The knob goes accent
+    // only when the machine is actually moving, so the two states still read
+    // differently.
+    const p = this.pad;
+    const at =
+      !this.pointerDown && p && p.deflected && !(this.stick.x || this.stick.y)
+        ? { x: p.x, y: p.y }
+        : this.stick;
+    const r = Math.hypot(at.x, at.y);
     const scale = r > 1 ? 1 / r : 1;
-    const kx = this.stick.x * scale * PAD_R;
-    const ky = -this.stick.y * scale * PAD_R;
+    const kx = at.x * scale * PAD_R;
+    const ky = -at.y * scale * PAD_R;
     const live = jogRunning.get() && r > this.settings.deadzone;
 
     return svg`
@@ -625,6 +732,44 @@ export class VelocityJogPanel extends PanelElement {
 
   // --- Foot ----------------------------------------------------------------
 
+  /**
+   * The gamepad's toggle, and what it is doing.
+   *
+   * Always rendered, including with no pad attached — the panel is not allowed
+   * to change shape while it is being used, and a control that appeared when
+   * someone plugged a stick in would move everything beside it at exactly the
+   * wrong moment. Disabled and dimmed instead, which also answers "does this app
+   * even do that" without anyone having to find out by trying.
+   */
+  private renderPadControl(): TemplateResult {
+    const name = padName.get();
+    const held = this.pad?.live === true;
+    const title = !padSupported
+      ? 'This browser does not report gamepads.'
+      : !name
+        ? 'No gamepad. Plug one in and press a button — the browser hides them until then.'
+        : `${name}\n\nLeft stick drives XY, right stick drives Z. ` +
+          'With the deadman on, a shoulder or trigger button has to be held for either to move anything.';
+
+    return html`
+      <label class=${`vjog-pad${name ? ' on' : ''}${held ? ' held' : ''}`} title=${title}>
+        <input
+          type="checkbox"
+          ?disabled=${!padSupported}
+          .checked=${this.padSettings.deadman}
+          @change=${(e: Event) => {
+            this.padSettings = { deadman: (e.target as HTMLInputElement).checked };
+            savePadSettings(this.padSettings);
+            // A deadman switched on mid-jog has to take effect at once, or it is
+            // a safety control that waits for permission to start being one.
+            this.emit();
+            this.requestUpdate();
+          }}
+        />
+        <span>Deadman</span>
+      </label>`;
+  }
+
   private renderFoot(): TemplateResult {
     const h = jogHealth.get();
     const status = jogStatus.get();
@@ -661,6 +806,7 @@ export class VelocityJogPanel extends PanelElement {
         >
           E-stop
         </button>
+        ${this.renderPadControl()}
         <span class="label">Rate</span>
         <div class="segmented" title=${RATE_HELP}>
           ${RATES.map(
@@ -752,10 +898,16 @@ export class VelocityJogPanel extends PanelElement {
         ${!gate.ok && jogSupport.get() === 'yes'
           ? html`<div class="vjog-blocked">${gate.why}</div>`
           : nothing}
+        <!-- Static wording on purpose. This is the last thing in a column, so a
+             sentence that grew a line would take that line off the pad above
+             it — the panel changing shape to tell you something is the one
+             thing it must not do. Anything that varies goes in a tooltip or in
+             the colour of a control, not in here. -->
         <div class="vjog-hint">
-          Hold to move — releasing stops. Arrow keys drive XY and PageUp/PageDown drive Z while this
-          panel has focus. Sending at ${this.settings.rateHz}Hz; the machine stops itself if that
-          stream is interrupted.
+          Hold to move — releasing stops. A gamepad works too: left stick for XY, right stick for Z,
+          with a shoulder button held if Deadman is on. Arrow keys drive XY and PageUp/PageDown drive
+          Z while this panel has focus. The machine stops itself if the command stream is
+          interrupted.
         </div>
       </div>
     `;
