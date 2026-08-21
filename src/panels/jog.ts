@@ -45,6 +45,7 @@ import {
   stepLabel,
   stepTick,
   shortDistance,
+  MAX_LABEL_GLYPHS,
 } from '../core/steps.js';
 
 /**
@@ -56,13 +57,20 @@ import {
  * wrong the moment a clamped distance turns up, because that is whatever is
  * left before the axis runs out and it arrives as long as it likes.
  *
+ * Sized for the longest label the sector could EVER show, not the one it is
+ * showing. Sizing to the current text meant the type changed size every time
+ * the number did — and a clamped sector's number changes continuously as the
+ * axis creeps toward its stop, so the whole rose breathed while the machine
+ * moved. It costs a little height on short labels and buys a control that holds
+ * still while being used, which is the trade an operator wants.
+ *
  * 0.58em per glyph is the measured average for the tabular figures this uses,
  * and 0.86 of the arc leaves the gap between neighbouring sectors visible
  * rather than letting two labels meet in the middle of it.
  */
-function fitFont(band: number, label: string, labelRadius: number, halfAngleDeg: number): number {
+function fitFont(band: number, labelRadius: number, halfAngleDeg: number): number {
   const arc = 2 * labelRadius * Math.sin((halfAngleDeg * Math.PI) / 180) * 0.86;
-  const wanted = label.length * 0.58;
+  const wanted = MAX_LABEL_GLYPHS * 0.58;
   return Math.max(4, Math.min(band, arc / wanted));
 }
 
@@ -367,7 +375,7 @@ export class JogPanel extends PanelElement {
               y=${ly}
               dy="0.36em"
               transform=${`rotate(${labelRotation(octant.angle)} ${lx} ${ly})`}
-              style="font-size:${fitFont(bandFont, label, labelR, half)}px"
+              style="font-size:${fitFont(bandFont, labelR, half)}px"
             >${label}</text>
           </g>
         `);
@@ -421,7 +429,12 @@ export class JogPanel extends PanelElement {
           @pointerleave=${onUp}
         >
           <span class="jog-arrow">${sign > 0 ? '▲' : '▼'}</span>
-          <span class="jog-mm">${stuck ? '—' : stepLabel(short ? reach.mm : mm)}</span>
+          <!-- shortDistance for a clamped value, as the rose does. stepLabel is
+               for ladder rungs and prints anything else in full: reach.mm is
+               whatever is left before the stop, so "104.999" was reachable here
+               and would have burst straight through the width reserved for it.
+               The exact figure is in the tooltip, where there is room. -->
+          <span class="jog-mm">${stuck ? '—' : short ? shortDistance(reach.mm) : stepLabel(mm)}</span>
           ${short || stuck
             ? html`<span class="jog-max">${letter} ${end}</span>`
             : nothing}

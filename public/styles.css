@@ -749,7 +749,11 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
   touch-action: none;
 }
 .jog-cell .jog-arrow { font-size: 10px; color: var(--text-faint); }
-.jog-cell .jog-mm { font-family: var(--mono); font-size: 12px; font-weight: 600; }
+/* Sized for the longest distance a clamped button can show — five glyphs, which
+   steps-check pins — so the number stays centred instead of shuffling sideways
+   as it counts down from 20 to 4 to 0.5 while the axis approaches its stop. */
+.jog-cell .jog-mm { font-family: var(--mono); font-size: 12px; font-weight: 600;
+  font-variant-numeric: tabular-nums; min-width: 5ch; text-align: center; }
 .jog-cell.home { color: var(--text-dim); font-size: 15px; flex: 0 0 34px; }
 .jog-cell:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .jog-cell:hover:not(:disabled) .jog-arrow { color: var(--accent); }
@@ -1819,10 +1823,18 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
    that it is a limit and not a step you chose — otherwise the column reads as a
    ladder with a strange rung in it. */
 .jog-cell.short .jog-mm, .rose-cell.short text { fill: var(--warn); color: var(--warn); }
-.jog-cell.short, .jog-cell.stuck { position: relative; }
+/* Always relative, not only when clamped: the badge below is positioned against
+   it, and a button that only became a containing block once it had something to
+   say would move its own contents at that moment. */
+.jog-cell { position: relative; }
+/* Overlaid rather than stacked. As a third flex child it pushed the arrow and
+   the distance up by four pixels the instant an axis came within reach of its
+   limit — which is exactly when the operator is watching that number. Absolute
+   keeps it out of the button's own layout entirely. */
 .jog-cell .jog-max {
+  position: absolute; left: 0; right: 0; bottom: 1px; text-align: center;
   font-size: 8px; line-height: 1; letter-spacing: 0.04em; text-transform: uppercase;
-  color: var(--warn); white-space: nowrap;
+  color: var(--warn); white-space: nowrap; pointer-events: none;
 }
 .jog-cell.stuck { opacity: 0.5; }
 .jog-cell.stuck .jog-mm { color: var(--text-faint); }

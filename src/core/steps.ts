@@ -84,6 +84,21 @@ export function stepTick(mm: number): string {
 }
 
 /**
+ * The longest any of these labels can be, in glyphs.
+ *
+ * The rose sizes its type for THIS rather than for whatever a sector currently
+ * says, so that the type does not change size every time the number does — and
+ * a clamped sector's number changes continuously as the axis creeps toward its
+ * stop, which made the whole rose breathe while the machine moved.
+ *
+ * That only works while the number is true, so it is declared here beside the
+ * formatters it describes and asserted against every one of them in
+ * steps-check. A formatter that grows past it would silently start overflowing
+ * its sector instead of being caught.
+ */
+export const MAX_LABEL_GLYPHS = 5;
+
+/**
  * A distance that is not a ladder step, short enough to sit in a rose sector.
  *
  * The ladder's own labels are at most four glyphs — 1000, .01 — and the sectors

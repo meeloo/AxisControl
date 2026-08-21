@@ -20,7 +20,7 @@ const dir = await mkdtemp(join(tmpdir(), 'steps-'));
 const out = join(dir, 's.mjs');
 await build({ entryPoints: [join(root, 'src/core/steps.ts')], bundle: true, format: 'esm',
   outfile: out, logLevel: 'error' });
-const { shortDistance, stepTick, stepLabel } = await import(pathToFileURL(out).href);
+const { shortDistance, stepTick, stepLabel, MAX_LABEL_GLYPHS } = await import(pathToFileURL(out).href);
 process.on('exit', () => { void rm(dir, { recursive: true, force: true }); });
 
 const fails = [];
@@ -55,6 +55,30 @@ for (const [mm, want] of [[50.028471, '50.0'], [1200, '1200'], [523.9999, '523']
   ok(shortDistance(mm) === want, `${mm} reads as ${want}`, shortDistance(mm));
 }
 ok(stepLabel(0.5) === '0.5' && stepTick(0.5) === '.5', 'the ladder labels are unchanged');
+
+// MAX_LABEL_GLYPHS is what the rose sizes its type for — every sector, always,
+// rather than for the label it happens to be showing. That is what stops the
+// type resizing as a clamped distance counts down, and it is only sound while
+// no formatter can exceed it. Checked against all three across the full range,
+// because a formatter that grew would not fail loudly: it would quietly start
+// spilling out of its sector again.
+// Only the formatters that take an ARBITRARY distance are swept over the whole
+// range. stepLabel and stepTick are for ladder rungs — stepLabel returns
+// String(mm) for anything else, by design — so they are checked against the
+// ladder, which is all they are ever given. Getting that wrong is not
+// hypothetical: the column buttons were calling stepLabel on a clamped distance,
+// so an axis with 104.999mm of headroom put seven glyphs in a five-glyph box.
+let worst = 'max';
+for (let mm = 0.001; mm < 2000; mm *= 1.0007) {
+  const s = shortDistance(mm);
+  if (s.length > worst.length) worst = s;
+}
+for (const s of [...ladder.map(stepTick), ...ladder.map(stepLabel)]) {
+  if (s.length > worst.length) worst = s;
+}
+ok(worst.length <= MAX_LABEL_GLYPHS,
+   `no label exceeds MAX_LABEL_GLYPHS (${MAX_LABEL_GLYPHS}), which the rose sizes its type for`,
+   `longest "${worst}" at ${worst.length}`);
 
 console.log(fails.length ? `\n${fails.length} FAILED: ${fails.join(', ')}` : '\nall passed');
 process.exit(fails.length ? 1 : 0);
