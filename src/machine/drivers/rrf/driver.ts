@@ -18,6 +18,7 @@ import {
   type LogLine,
   type MachineState,
   type VelocityJogStatus,
+  type AxisFollow,
 } from '../../types.js';
 import { RrfClient, SessionLostError } from './client.js';
 import { mergeInto } from './merge.js';
@@ -110,6 +111,9 @@ export class RrfDriver implements MachineDriver {
     // and the panel asks the board itself before showing anything; see the
     // capability's own note in types.ts.
     velocityJog: true,
+    // M604, from the same fork, and a provisional command number. Same meaning
+    // as above: this driver can ask, the board decides whether it answers.
+    axisFollowing: true,
     gcodeRoot: '/gcodes',
     configRoot: '/sys',
     macroRoot: '/macros',
@@ -723,6 +727,17 @@ export class RrfDriver implements MachineDriver {
     return parseJogStatus(reply);
   }
 
+  // --- Axis following (M604) ----------------------------------------------
+  //
+  // Also a fork command, and unlike M700 the number itself is provisional — free
+  // in that firmware but not blessed by Duet3D, so it may well move. Nothing
+  // here or above the driver hard-codes "604" anywhere except this method, which
+  // is the point of it being a driver method at all.
+
+  async axisFollowing(): Promise<AxisFollow | null> {
+    return parseAxisFollow(await this.query('M604'));
+  }
+
   async home(axes?: string[]): Promise<void> {
     if (!axes || axes.length === 0) return this.send('G28');
     await this.send(`G28 ${axes.map((a) => a.toUpperCase()).join(' ')}`);
@@ -1139,13 +1154,80 @@ export function parseJogStatus(reply: string): VelocityJogStatus | null {
   }
 
   return {
-    // "inactive" contains "active", so it has to be ruled out first or every
-    // idle machine reads as jogging — which would have the panel show motion
-    // that is not happening.
-    active: !/\binactive\b/i.test(text) && /\bactive\b/i.test(text),
+    // "inactive" contains "active"; the word boundary is what keeps them apart,
+    // since `\bactive\b` does not match inside "inactive". Ruling it out
+    // explicitly costs nothing and covers a reworded "not active", which the
+    // boundary would read as jogging — see the same note in parseAxisFollow.
+    active: !/\b(?:in[\s-]?active|not\s+active)\b/i.test(text) && /\bactive\b/i.test(text),
     chunkMs: num(/chunk\s*(\d+(?:\.\d+)?)\s*ms/i, 20),
     watchdogMs: num(/(?:timeout|watchdog)\s*(\d+(?:\.\d+)?)\s*ms/i, 250),
     queueDepth: num(/queue\s*(\d+)/i, 2),
     speeds,
+  };
+}
+
+/**
+ * Read M604's report, and use it to decide whether M604 exists at all.
+ *
+ * The line the firmware prints looks like this:
+ *
+ *   U follows Z as -1.000 * Z + 70.000, engaged
+ *
+ * Picked apart field by field rather than matched as a sentence, for the reason
+ * parseJogStatus gives: this is a debug report from a fork whose author can
+ * reword it, and a parser that needs the commas in the right places would
+ * answer "no axis following" for a board that has it.
+ *
+ * A caveat worth stating plainly, because it is a guess and the rest of this is
+ * not: the wording when the feature exists but nothing is configured has not
+ * been seen. This treats any reply mentioning following — or M604 itself — as
+ * proof of support, and reports an unconfigured relationship when it cannot
+ * find a follower in it. If that firmware answers with something mentioning
+ * neither word, this will call it unsupported and the ATC panel will say so;
+ * the fix is one more alternative in SUPPORTED below, not a redesign.
+ *
+ * Null means unsupported, and everything downstream hides on null. As with
+ * M700, that is recognised by matching success rather than by trying to
+ * enumerate the ways stock RRF words a refusal.
+ */
+const SUPPORTED = /follow|m604/i;
+
+export function parseAxisFollow(reply: string): AxisFollow | null {
+  const text = (reply ?? '').trim();
+  if (!SUPPORTED.test(text)) return null;
+  // Any error is a refusal however it is worded, and RRF's refusal for an
+  // unknown code names the code — which SUPPORTED would otherwise read as
+  // evidence the code exists.
+  if (/^(error|warning)\b/i.test(text)) return null;
+
+  const pair = /\b([A-Za-z])\s+follows\s+([A-Za-z])\b/i.exec(text);
+  // "disengaged" contains "engaged", and the word boundary already keeps them
+  // apart — `\bengaged\b` does not match inside "disengaged". The explicit
+  // exclusion is for the rewordings this parser is otherwise built to survive:
+  // "dis engaged", "not engaged", "engaged: no" all defeat the boundary, and
+  // reading any of them as engaged would have the panel report tracking that is
+  // not happening while the macros drop the term that was compensating for it.
+  const engaged = !/\b(?:dis[\s-]?engaged|not\s+engaged|engaged\s*:\s*no)\b/i.test(text)
+    && /\bengaged\b/i.test(text);
+
+  if (!pair) {
+    // Supported, nothing set up. Scale −1 rather than 0 because it is the
+    // firmware's own default and the value a caller would want if it went on to
+    // describe what engaging would do; it describes no live relationship here.
+    return { follower: null, leader: null, scale: -1, offset: 0, engaged: false };
+  }
+
+  // "as -1.000 * Z + 70.000". The offset carries its own sign and may be
+  // absent; the multiplier may be written without a leading digit.
+  const rule = /as\s+(-?\d*\.?\d+)\s*\*\s*[A-Za-z]\s*([-+]\s*\d*\.?\d+)?/i.exec(text);
+  const scale = rule ? Number(rule[1]) : -1;
+  const offset = rule && rule[2] ? Number(rule[2].replace(/\s+/g, '')) : 0;
+
+  return {
+    follower: pair[1]!.toUpperCase(),
+    leader: pair[2]!.toUpperCase(),
+    scale: Number.isFinite(scale) ? scale : -1,
+    offset: Number.isFinite(offset) ? offset : 0,
+    engaged,
   };
 }

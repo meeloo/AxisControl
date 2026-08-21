@@ -29,6 +29,8 @@
 // pocket next door. That is why the panel computes and shows every slot
 // position, and why nothing is written without being seen first.
 
+import type { DustShoeTracking } from '../core/dustshoe.js';
+
 /** Which way a row of pockets runs. */
 export type AtcAlignment = 0 | 1; // 0 = along X, 1 = along Y
 
@@ -118,6 +120,18 @@ export interface AtcConfig {
   // --- Integration ---
   /** Retract a U-axis dust shoe around tool changes, if one is configured. */
   dustShoe: boolean;
+  /**
+   * Who keeps the shoe level with the cutter — the firmware, or the offset term
+   * this app writes into atcProbeZ.g.
+   *
+   * `auto` asks the board and is right for the machine in front of you. The
+   * explicit settings are for the case that makes this a setting at all: these
+   * are files, written now and run later, possibly on a board that has since
+   * been reflashed — or written from a laptop with no machine attached.
+   *
+   * See core/dustshoe.ts, which owns the reasoning and the resolution.
+   */
+  dustShoeTracking: DustShoeTracking;
 }
 
 export function defaultAtcBank(name = 'Tool bank'): AtcBank {
@@ -158,6 +172,7 @@ export function defaultAtcConfig(): AtcConfig {
     toolSensorPin: '^io7.in',
     hasToolSensor: false,
     dustShoe: false,
+    dustShoeTracking: 'auto',
   };
 }
 
@@ -185,6 +200,13 @@ export function adoptAtcConfig(raw: unknown): AtcConfig {
   bool('enabled', (v) => (config.enabled = v));
   bool('probingEnabled', (v) => (config.probingEnabled = v));
   bool('dustShoe', (v) => (config.dustShoe = v));
+  // Absent in anything saved before firmware tracking existed, and absent is
+  // exactly right: 'auto' asks the board, which is the answer those saves would
+  // have wanted. Only a value this version recognises is taken, so a setting
+  // from a later build cannot smuggle in a mode that is not handled here.
+  if (old.dustShoeTracking === 'auto' || old.dustShoeTracking === 'firmware' || old.dustShoeTracking === 'macro') {
+    config.dustShoeTracking = old.dustShoeTracking;
+  }
   bool('hasToolSensor', (v) => (config.hasToolSensor = v));
   num('toolSensorIn', (v) => (config.toolSensorIn = v));
   if (typeof old.toolSensorPin === 'string') config.toolSensorPin = old.toolSensorPin;

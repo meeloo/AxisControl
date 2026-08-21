@@ -53,6 +53,13 @@ import {
 } from '../atc/config.js';
 import { atcFiles, type AtcFile } from '../atc/files.js';
 import { checkAtc, effectiveRetractZ, slotInEnvelope } from '../atc/check.js';
+import {
+  axisFollow,
+  followSupport,
+  probeAxisFollowing,
+  resolveDustShoeTracking,
+  type DustShoeTracking,
+} from '../core/dustshoe.js';
 
 type Tab = 'pockets' | 'setup' | 'install';
 
@@ -92,10 +99,18 @@ export class AtcPanel extends PanelElement {
     this.bind(() => {
       machine.get();
       capabilities.get();
+      followSupport.get();
+      axisFollow.get();
     });
     this.bind(() => {
       const now = connected.get();
-      if (now && !this.wasConnected) void this.readBack(false);
+      if (now && !this.wasConnected) {
+        void this.readBack(false);
+        // Asked as soon as there is a board to ask, so the setting's note is
+        // already true when the Integration group is first opened rather than
+        // saying "not yet checked" until something is clicked.
+        if (this.config.dustShoe) void probeAxisFollowing();
+      }
       if (!now) {
         this.present = null;
         this.configCalls = null;
@@ -321,6 +336,62 @@ export class AtcPanel extends PanelElement {
   }
 
   // --- Render: setup ------------------------------------------------------
+
+  /**
+   * The dust-shoe settings, and what the board says about them.
+   *
+   * The board's answer is shown rather than only acted on because the two can
+   * disagree and the disagreement is invisible in the generated file: a machine
+   * set to firmware tracking that turns out not to have M604 produces an
+   * atcProbeZ.g with no U term, which looks perfectly reasonable and leaves the
+   * shoe at the wrong height for every tool but one.
+   */
+  private renderDustShoe(): TemplateResult {
+    const setting = this.config.dustShoeTracking;
+    const verdict = resolveDustShoeTracking(setting);
+    const support = followSupport.get();
+
+    return html`
+      <div class="param-note">
+        Calls <code>dustShoeRetract.g</code> before the change and
+        <code>dustShoeEngage.g</code> after it. Both macros have to exist, and both are yours —
+        where the shoe sits when engaged is a property of the machine, so it stays in configuration
+        rather than moving into this panel or into the firmware.
+      </div>
+      ${selectField(
+        'Keeping the shoe level with the cutter',
+        setting,
+        [
+          // Short, because the select is narrow and truncates: the note under
+          // it carries the explanation, and the title carries the reasoning.
+          { value: 'auto', label: 'Ask the board' },
+          { value: 'firmware', label: 'Firmware (M604)' },
+          { value: 'macro', label: 'Offset in the macro' },
+        ],
+        (v) => this.patch({ dustShoeTracking: v as DustShoeTracking }),
+        {
+          title:
+            'Under M604 the firmware holds the shoe axis to Z inside the motion planner, in ' +
+            'machine coordinates and after tool offsets, so tool length compensates itself and ' +
+            'atcProbeZ.g needs no U term. Without it, that term is what keeps the shoe level.',
+        },
+      )}
+      <div class=${verdict.conflict ? 'param-note bad' : 'param-note'}>
+        ${verdict.why}
+        ${support === 'checking'
+          ? ' Asking the board…'
+          : html`
+              <button
+                class="link"
+                ?disabled=${!connected.get()}
+                @click=${() => void probeAxisFollowing(true)}
+              >
+                ${support === 'unknown' ? 'Ask the board' : 'Check again'}
+              </button>
+            `}
+      </div>
+    `;
+  }
 
   private group(title: string, note: string | TemplateResult, body: TemplateResult): TemplateResult {
     return html`
@@ -564,13 +635,7 @@ export class AtcPanel extends PanelElement {
           'Optional hooks into the rest of this machine.',
           html`
             ${checkField('Retract a U-axis dust shoe around tool changes', c.dustShoe, (v) => this.patch({ dustShoe: v }))}
-            ${c.dustShoe
-              ? html`<div class="param-note">
-                  Calls <code>dustShoeRetract.g</code> before the change and
-                  <code>dustShoeEngage.g</code> after it, and follows the tool offset with U so the
-                  brush stays level with the cutter. Both macros have to exist.
-                </div>`
-              : nothing}
+            ${c.dustShoe ? this.renderDustShoe() : nothing}
           `,
         )}
       </div>
@@ -722,9 +787,10 @@ export class AtcPanel extends PanelElement {
 
   protected override render(): TemplateResult {
     const axes = machine.get().axes;
-    const issues = checkAtc(this.config, axes);
+    const tracking = resolveDustShoeTracking(this.config.dustShoeTracking);
+    const issues = checkAtc(this.config, axes, { dustShoeTracking: tracking });
     const blocking = issues.filter((i) => i.level === 'bad').length;
-    const files = atcFiles(this.config);
+    const files = atcFiles(this.config, { dustShoeFollowsInFirmware: tracking.firmware });
     const retract = effectiveRetractZ(this.config, axes);
 
     const pockets = this.config.banks.reduce((n, b) => n + b.count, 0);

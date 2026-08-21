@@ -139,6 +139,38 @@ the machine ends up moving somewhere other than where your thumb is pointing.
 
 [fork]: https://github.com/meeloo/RepRapFirmware/tree/feature/velocity-jog
 
+### It knows who is moving the dust shoe
+
+The shoe hangs off the Z carriage on its own U axis, so U has to travel opposite
+to Z for the bristles to stay a constant height above the work. Doing that from
+G-code cannot be made to work, and it took a polling loop and then an expression
+trigger to prove why: the object model reports where an axis **is**, never where
+a move is **going**, so the correction cannot start until Z has already arrived.
+The information is late, and nothing about polling rates or motion queues makes
+late information early.
+
+`M604` — the same fork — puts the relationship inside the motion planner
+instead, and the two axes become one coordinated move. That changes one word in
+two generated macros: the `U{-var.newOffset}` beside `G10 L1 Z{var.newOffset}`,
+a trick that made the shoe's engaged height compensate for tool length by
+shifting U's *work* coordinate. Under `M604` the rule is applied in machine
+coordinates after tool offsets, so tool length compensates itself and the term
+does nothing.
+
+Getting that wrong is silent in both directions — leave it in and the file
+claims to do something it does not; take it out without `M604` and the shoe sits
+at the wrong height for every tool but the one it was set with, with no error
+and perfectly valid G-code. So the Tool changer panel asks the board, says what
+it heard, and lets you override it for the case that makes this a setting at
+all: these are files, written now and run later, possibly on a board that has
+since been reflashed. Overriding it the dangerous way is a blocking issue rather
+than a warning.
+
+`M604` replaces the *tracking* and nothing else. `global.dustShoeEngaged` stays
+— it is what the tool-change hooks gate on — and the engage and retract macros
+stay yours, because where the shoe sits when engaged is bristle contact height,
+which is a property of the machine and not of the firmware.
+
 ### It is honest about what it cannot do
 
 Panels hide themselves when the controller cannot back them, rather than
@@ -266,6 +298,13 @@ machine when commands stop arriving, and the silent clamping of any speed above
 happening — the commanded speeds, the clamped ones, and why it last stopped —
 which is how `npm run velocity-check` tells a stop that was *sent* from one the
 watchdog cleaned up 250ms later.
+
+`M604` axis following is there too, including the two behaviours a host has to
+be written against: engaging **captures** the current separation rather than
+taking a target, so a caller that engages before positioning gets a correct rule
+about the wrong place; and the follower is clamped to its own `M208` range, so
+it tracks down to its stop and rests there while the leader carries on. `GET
+/__follow` reports the relationship as the board holds it.
 
 Open <http://localhost:8081> and it connects to itself.
 
@@ -410,6 +449,7 @@ npm run vcarve-check    # V-carve depths against the geometry they claim
 npm run steps-check     # jog labels never round up and always fit their sector
 npm run fontstore-check # fonts on the card: round trip, validation, path escapes
 npm run velocity-check  # velocity jogging: the stop, the watchdog, the clamps
+npm run dustshoe-check  # who moves the dust shoe, and what each macro emits
 ```
 
 `rewrite-check` takes a directory and will sweep real config files for the

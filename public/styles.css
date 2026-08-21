@@ -1563,8 +1563,13 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
   line-height: 1.45; color: var(--text-dim); overflow-x: auto; white-space: pre; }
 
 .atc-summary { flex: 1; font-size: 11px; color: var(--text-faint); }
-.atc-group-note button.link { background: none; border: 0; padding: 0; min-height: 0;
-  font: inherit; color: var(--accent); text-decoration: underline; cursor: pointer; }
+.atc-group-note button.link, .param-note button.link { background: none; border: 0; padding: 0;
+  min-height: 0; font: inherit; color: var(--accent); text-decoration: underline; cursor: pointer; }
+.param-note button.link:disabled { color: var(--text-faint); text-decoration: none; cursor: default; }
+/* A note that is reporting a disagreement between the setting and the board.
+   Not `.atc-issue.bad`'s tinted block — this sits under the control it is about
+   and a filled panel there reads as an error in the control itself. */
+.param-note.bad { color: var(--bad); }
 
 /* ---------- Install / update ---------- */
 

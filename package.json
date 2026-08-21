@@ -27,7 +27,8 @@
     "vcarve-check": "node tools/vcarve-check.mjs",
     "steps-check": "node tools/steps-check.mjs",
     "fontstore-check": "node tools/fontstore-check.mjs",
-    "velocity-check": "node tools/velocity-check.mjs"
+    "velocity-check": "node tools/velocity-check.mjs",
+    "dustshoe-check": "node tools/dustshoe-check.mjs"
   },
   "dependencies": {
     "clipper-lib": "^6.4.2",

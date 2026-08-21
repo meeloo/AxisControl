@@ -202,6 +202,37 @@ export interface MachineState {
 }
 
 /**
+ * One axis made to follow another inside the motion planner.
+ *
+ * This machine's dust shoe is the case it exists for: the shoe hangs off the Z
+ * carriage on its own U axis, so U has to move opposite to Z for the bristles
+ * to stay at a constant height above the work. Doing that from G-code cannot
+ * work, and the reason is worth stating because a lot of effort went into
+ * proving it — a watcher can only react *after* Z has moved, and the object
+ * model does not expose where a move is going, only where it is. The
+ * information is late, and no amount of polling, triggers or extra motion
+ * queues makes late information early.
+ *
+ * Inside the planner the two become one coordinated move and the problem
+ * disappears. `follower = scale × leader + offset`, in MACHINE coordinates and
+ * after tool offsets — which is what makes tool length compensate itself: a
+ * longer tool puts the carriage higher for the same work Z, the leader's
+ * machine coordinate rises, and the follower comes down to match.
+ */
+export interface AxisFollow {
+  /** The driven axis. Null when the firmware has the feature but nothing is set up. */
+  follower: string | null;
+  /** The axis it tracks. Null when nothing is set up. */
+  leader: string | null;
+  /** Usually −1: something carried on a carriage moves the opposite way to stay put. */
+  scale: number;
+  /** Machine-coordinate constant in the relationship. */
+  offset: number;
+  /** Whether the relationship is currently being applied. */
+  engaged: boolean;
+}
+
+/**
  * What the controller says about velocity jogging when asked.
  *
  * The one field worth reading closely is `speeds`: those are what the firmware
@@ -373,6 +404,16 @@ export interface Capabilities {
    * it sends.
    */
   velocityJog: boolean;
+  /**
+   * This driver knows how to ask about one axis following another — see
+   * AxisFollow.
+   *
+   * Same shape of promise as `velocityJog`, and the same warning: it says the
+   * driver can form the question, not that the firmware will answer it. RRF's
+   * M604 is a fork command, and a provisional number at that, so the only
+   * reliable answer comes from asking the board — `axisFollowing()`.
+   */
+  axisFollowing: boolean;
   /** Directory the driver considers the natural root for G-code jobs. */
   gcodeRoot: string;
   /** Directory holding controller configuration, if browsable. */
@@ -398,6 +439,7 @@ export function defaultCapabilities(): Capabilities {
     resumeFromOffset: false,
     toolSelection: false,
     velocityJog: false,
+    axisFollowing: false,
     gcodeRoot: '/gcodes',
     configRoot: null,
     macroRoot: null,

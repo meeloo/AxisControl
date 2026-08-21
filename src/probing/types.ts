@@ -116,8 +116,24 @@ export interface ToolLengthParams extends ProbeCommon {
   probeZ: number;
   /** Machine Z to retract to before and after. */
   retractZ: number;
-  /** Also drive the dust-shoe axis by the inverse offset. */
+  /** The axis the dust shoe rides on, or null if this machine has none. */
   dustShoeAxis: string | null;
+  /**
+   * True when the firmware makes that axis follow Z by itself (M604).
+   *
+   * When it does, the inverse-offset term this macro would otherwise carry is
+   * redundant: the following rule is applied in machine coordinates after tool
+   * offsets, so a longer tool raises the carriage and the shoe comes down to
+   * match without being told. Leaving the term in is harmless — a derived
+   * coordinate ignores its own tool offset, so it cannot compensate twice — but
+   * it reads as though it is doing something.
+   *
+   * The other direction is not harmless, which is why this defaults to false
+   * everywhere it is not explicitly known: drop the term on a firmware without
+   * M604 and the shoe sits at the wrong height for every tool but the one it
+   * was set with.
+   */
+  dustShoeFollowsInFirmware: boolean;
 }
 
 /**

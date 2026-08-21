@@ -13,6 +13,7 @@
 //    and marks the connection degraded rather than tearing it down.
 
 import type {
+  AxisFollow,
   ScanArea,
   HeightMapCommands,
   Capabilities,
@@ -171,6 +172,24 @@ export interface MachineDriver {
    * clamping — see VelocityJogStatus.
    */
   velocityJogStatus(): Promise<VelocityJogStatus | null>;
+
+  /**
+   * Ask whether one axis is being made to follow another in the planner, and
+   * how — see AxisFollow.
+   *
+   * Read-only on purpose. The obvious next method is one that engages and
+   * disengages it, and this app should not have one: engaging captures the
+   * CURRENT separation between the two axes, so it is only correct once the
+   * follower has been positioned, and where the follower belongs is a property
+   * of the machine — bristle contact height, in the dust shoe's case. That
+   * lives in the machine's own macros, which already position the axis and are
+   * the right place to engage it. A button here that engaged without
+   * positioning would capture whatever separation happened to exist.
+   *
+   * Null means the firmware does not have the feature at all. A non-null result
+   * with a null `follower` means it has it and nothing is set up.
+   */
+  axisFollowing(): Promise<AxisFollow | null>;
 
   home(axes?: string[]): Promise<void>;
   /**

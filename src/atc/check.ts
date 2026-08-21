@@ -54,7 +54,18 @@ export function slotInEnvelope(bank: AtcBank, slot: number, axes: Axis[]): boole
   return p.x >= x.min && p.x <= x.max && p.y >= y.min && p.y <= y.max;
 }
 
-export function checkAtc(config: AtcConfig, axes: Axis[]): AtcIssue[] {
+export interface CheckContext {
+  /**
+   * How the dust shoe is kept level with the tool, already resolved against the
+   * board — see core/dustshoe.ts.
+   *
+   * Optional so this stays callable with nothing but a configuration, which is
+   * what the tests do and what a caller with no machine attached has.
+   */
+  dustShoeTracking?: { firmware: boolean; conflict: boolean };
+}
+
+export function checkAtc(config: AtcConfig, axes: Axis[], ctx: CheckContext = {}): AtcIssue[] {
   const issues: AtcIssue[] = [];
   const x = axis(axes, 'X');
   const y = axis(axes, 'Y');
@@ -203,6 +214,18 @@ export function checkAtc(config: AtcConfig, axes: Axis[]): AtcIssue[] {
     issues.push({
       level: 'warn',
       text: 'Dust-shoe hooks are switched on, but this machine reports no U axis. The macros call dustShoeRetract.g / dustShoeEngage.g, which have to exist.',
+    });
+  }
+
+  // A setting that says the firmware follows Z on a board that cannot is the
+  // one dust-shoe mistake with no symptom at the time: atcProbeZ.g is written
+  // without its U term, which looks entirely reasonable, and the shoe then sits
+  // at the wrong height for every tool but the one it was set with. Nothing
+  // else here would catch it — the file is valid G-code and the machine runs.
+  if (config.dustShoe && ctx.dustShoeTracking?.conflict) {
+    issues.push({
+      level: 'bad',
+      text: 'The dust shoe is set to be followed by the firmware, but this board does not report that it can (M604). As written, atcProbeZ.g will leave the shoe at the wrong height for every tool but the one it was set with — switch the setting to the offset term, or check the firmware.',
     });
   }
 

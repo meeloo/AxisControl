@@ -177,15 +177,27 @@ export function probeCorner(p: CornerProbeParams): GeneratedProgram {
 /**
  * Tool length against the fixed setter.
  *
- * Mirrors atcProbeZ.g, including driving the dust-shoe axis by the inverse of
- * the tool offset so the shoe follows the tool — without that the shoe height
- * is wrong for every tool but the one it was set with.
+ * Mirrors atcProbeZ.g, including the dust shoe — which on a firmware that
+ * cannot follow one axis with another means driving the shoe axis by the
+ * INVERSE of the tool offset. That does not move the shoe; it shifts the shoe
+ * axis's work coordinate, so that the engage macro's fixed work-coordinate
+ * target lands at a machine position adjusted for tool length. Without it the
+ * shoe height is wrong for every tool but the one it was set with.
+ *
+ * With M604 the firmware holds the two axes together in machine coordinates
+ * after tool offsets, and the trick becomes redundant — see
+ * `dustShoeFollowsInFirmware`, and core/dustshoe.ts for who decides.
  */
 export function probeToolLength(p: ToolLengthParams): GeneratedProgram {
   const g = new Gcode();
+  const shoeNote = !p.dustShoeAxis
+    ? 'no dust-shoe compensation'
+    : p.dustShoeFollowsInFirmware
+      ? `dust shoe axis ${p.dustShoeAxis} is followed by the firmware, so no offset term here`
+      : `dust shoe axis ${p.dustShoeAxis} follows the offset`;
   g.header('Probe tool length', [
     `setter K${p.probeIndex} at machine X${p.probeX} Y${p.probeY}, trigger Z${p.probeZ}`,
-    p.dustShoeAxis ? `dust shoe axis ${p.dustShoeAxis} follows the offset` : 'no dust-shoe compensation',
+    shoeNote,
   ]);
   g.blank();
   g.raw(`G53 G0 Z${n(p.retractZ)}`);
@@ -203,7 +215,7 @@ export function probeToolLength(p: ToolLengthParams): GeneratedProgram {
   g.comment('offset = how far the tool tip sits above the known trigger height');
   g.raw(`var newOffset = {-(move.axes[2].machinePosition - ${n(p.probeZ)})}`);
   g.raw(
-    p.dustShoeAxis
+    p.dustShoeAxis && !p.dustShoeFollowsInFirmware
       ? `G10 L1 Z{var.newOffset} ${p.dustShoeAxis}{-var.newOffset}`
       : 'G10 L1 Z{var.newOffset}',
   );

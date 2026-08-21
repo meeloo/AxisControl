@@ -7,7 +7,9 @@
 
 import { html, nothing, type TemplateResult } from 'lit';
 import { PanelElement, registerPanel } from '../ui/panel.js';
-import { capabilities, connected, machine } from '../core/store.js';
+import { capabilities, connected, loadSetting, machine } from '../core/store.js';
+import { followSupport, probeAxisFollowing, resolveDustShoeTracking } from '../core/dustshoe.js';
+import { adoptAtcConfig } from '../atc/config.js';
 import { checkField, numberField, pointField, selectField } from '../ui/widgets.js';
 import { fromAxis } from '../ui/capture.js';
 import { AutoPreview, preview, saveAndRun } from '../ui/program.js';
@@ -83,7 +85,12 @@ export class ProbePanel extends PanelElement {
       machine.get();
       connected.get();
       capabilities.get();
+      // Read so that the answer arriving re-renders, which re-runs the preview:
+      // the tool-length macro's shoe handling depends on it, and a preview that
+      // did not update would show a macro different from the one Save writes.
+      followSupport.get();
     });
+    void probeAxisFollowing();
   }
 
   protected override updated(): void {
@@ -130,6 +137,15 @@ export class ProbePanel extends PanelElement {
         // Defaults come from this machine's own ATC globals rather than being
         // typed in twice and drifting apart.
         const dustShoe = machine.peek().axes.find((a) => a.letter === 'U');
+        // The same question the ATC panel asks, answered from the same place —
+        // this macro and atcProbeZ.g do the same job and must not disagree
+        // about who moves the shoe. The setting lives with the ATC
+        // configuration because that is where a dust shoe is set up; the
+        // resolution against the board is shared. Absent configuration
+        // resolves to the offset term, which is the safe way to be wrong.
+        const tracking = resolveDustShoeTracking(
+          adoptAtcConfig(loadSetting('atcConfig', {})).dustShoeTracking,
+        );
         return probeToolLength({
           ...common,
           probeX: this.num('atcProbeX', 3),
@@ -137,6 +153,7 @@ export class ProbePanel extends PanelElement {
           probeZ: this.num('atcProbeZ', 41.3),
           retractZ: this.num('atcRetractZ', 135),
           dustShoeAxis: dustShoe ? 'U' : null,
+          dustShoeFollowsInFirmware: tracking.firmware,
         });
       }
       case 'corner':

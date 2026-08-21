@@ -71,6 +71,23 @@ const jog = {
   stoppedBy: null,
 };
 
+/**
+ * One axis following another inside the planner (M604), as the fork does it.
+ *
+ * This is what replaced the dust shoe's tracking loop. U is held to Z in
+ * machine coordinates — `follower = scale × leader + offset` — so the two move
+ * as one and the shoe stops lagging a move behind.
+ *
+ * Two behaviours here are load-bearing for anything testing against this. The
+ * relationship is CAPTURED from wherever the axes happen to be when it is
+ * engaged, rather than being given as an absolute target, so a host that
+ * engages before positioning gets a correct rule about the wrong place. And the
+ * follower is clamped to its own M208 range, which is how the real shoe
+ * saturates: it tracks down until it reaches its stop and then rests there
+ * while Z carries on into the work.
+ */
+const follow = { follower: null, leader: null, scale: -1, offset: 0, engaged: false };
+
 /** Probing grid set by M557, and the compensation G29 turns on. */
 let grid = { xMin: 0, xMax: 300, yMin: 0, yMax: 300, sx: 25, sy: 25 };
 let compensation = { type: 'none' };
@@ -508,6 +525,7 @@ setInterval(() => {
     axes[2].machinePosition = 115 + Math.sin(t * 2) * 3;
   }
   stepJog(100);
+  applyFollow();
   for (const a of axes) {
     a.userPosition = a.machinePosition - a.workplaceOffsets[workplaceNumber];
   }
@@ -624,6 +642,71 @@ function handleJog(upper) {
   jog.stoppedBy = null;
   jog.commands++;
   jog.lastCommandAt = Date.now();
+}
+
+function handleFollow(cmd, upper) {
+  if (/^M604$/.test(upper.trim())) {
+    pushReply(
+      follow.follower
+        ? `${follow.follower} follows ${follow.leader} as ${follow.scale.toFixed(3)} * ` +
+            `${follow.leader} ${follow.offset < 0 ? '-' : '+'} ${Math.abs(follow.offset).toFixed(3)}, ` +
+            `${follow.engaged ? 'engaged' : 'disengaged'}`
+        : 'No axis following configured',
+    );
+    return;
+  }
+
+  // A"U" B"Z" — quoted, as RRF spells string parameters.
+  const a = /\bA"([A-Za-z])"/.exec(cmd);
+  const bAxis = /\bB"([A-Za-z])"/.exec(cmd);
+  const s = /\bS(-?\d*\.?\d+)/.exec(upper);
+  const e = /\bE([01])/.exec(upper);
+
+  if (a) follow.follower = a[1].toUpperCase();
+  if (bAxis) follow.leader = bAxis[1].toUpperCase();
+  if (s) follow.scale = Number(s[1]);
+
+  if (!e) return;
+
+  if (e[1] === '0') {
+    follow.engaged = false;
+    pushReply('Axis following disengaged');
+    return;
+  }
+
+  const f = axes.find((x) => x.letter === follow.follower);
+  const l = axes.find((x) => x.letter === follow.leader);
+  if (!f || !l) {
+    pushReply('Error: M604: unknown axis');
+    return;
+  }
+  // Refused unless the follower is homed, matching what the old daemon checked
+  // — an unhomed axis has no machine position to capture a relationship from.
+  if (!f.homed) {
+    pushReply('Error: M604: follower axis is not homed');
+    return;
+  }
+  // Captured, not commanded: offset is whatever makes the rule true right now.
+  follow.offset = f.machinePosition - follow.scale * l.machinePosition;
+  follow.engaged = true;
+  pushReply(
+    `${follow.follower} follows ${follow.leader} as ${follow.scale.toFixed(3)} * ` +
+      `${follow.leader} ${follow.offset < 0 ? '-' : '+'} ${Math.abs(follow.offset).toFixed(3)}, engaged`,
+  );
+}
+
+/** Drag the follower to wherever the rule says it should be, clamped to its limits. */
+function applyFollow() {
+  if (!follow.engaged) return;
+  const f = axes.find((x) => x.letter === follow.follower);
+  const l = axes.find((x) => x.letter === follow.leader);
+  if (!f || !l) return;
+  const want = follow.scale * l.machinePosition + follow.offset;
+  const next = Math.max(f.min, Math.min(f.max, want));
+  if (next !== f.machinePosition) {
+    f.machinePosition = next;
+    bumpSeq('move');
+  }
 }
 
 function bumpSeq(key) {
@@ -876,6 +959,11 @@ const server = createServer(async (req, res) => {
     // Not a firmware route. The velocity-jog state as the board holds it,
     // including the clamp and the watchdog — neither of which a client can see
     // from the object model, and both of which a jog host has to get right.
+    // Not a firmware route. The axis-following relationship as the board holds
+    // it, so a test can tell a captured rule from a commanded one.
+    case '/__follow':
+      return sendJson(res, { ...follow, positions: Object.fromEntries(axes.map((a) => [a.letter, a.machinePosition])) });
+
     case '/__jog': {
       // Stepped on read as well as on the timer, so a test that checks the
       // watchdog does not have to sleep for a tick boundary to see it fire.
@@ -1100,6 +1188,11 @@ function handleGcode(gcode) {
 
     if (/^M700\b/.test(upper.trim())) {
       handleJog(upper);
+    } else if (/^M604\b/.test(upper.trim())) {
+      // `cmd` as well as `upper`, because the axis letters arrive quoted and
+      // upper-casing a quoted string is fine but the regex reads cleaner
+      // against the original.
+      handleFollow(cmd, upper);
     } else if (upper.startsWith('M997')) {
       // The firmware refuses to flash unless the files it named are actually
       // on the card — which is the whole safety property, so the mock enforces
@@ -1380,6 +1473,11 @@ function handleGcode(gcode) {
       pushReply(`ok (${cmd})`);
     }
   }
+
+  // After the batch, not inside the loop: the point of putting following in the
+  // planner is that the follower arrives WITH the leader rather than chasing it,
+  // so there is no state in which one has moved and the other has not.
+  applyFollow();
 }
 
 server.listen(PORT, () => {

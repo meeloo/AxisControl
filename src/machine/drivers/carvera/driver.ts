@@ -11,6 +11,7 @@
 
 import type { ConnectionConfig, JogOptions, MachineDriver } from '../../driver.js';
 import {
+  type AxisFollow,
   defaultCapabilities,
   emptyMachineState,
   type Capabilities,
@@ -101,6 +102,10 @@ export class CarveraDriver implements MachineDriver {
     return null;
   }
   async velocityJogStatus(): Promise<VelocityJogStatus | null> {
+    return null;
+  }
+  /** Not `todo()` for the same reason as velocityJog: null means "no", truthfully. */
+  async axisFollowing(): Promise<AxisFollow | null> {
     return null;
   }
   async home(_axes?: string[]): Promise<void> {
