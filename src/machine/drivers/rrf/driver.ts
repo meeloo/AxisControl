@@ -1,6 +1,11 @@
 // RepRapFirmware driver — maps the object model onto the neutral machine model.
 
-import type { ConnectionConfig, JogOptions, MachineDriver } from '../../driver.js';
+import type {
+  ConnectionConfig,
+  JogOptions,
+  MachineDriver,
+  VelocityJogOptions,
+} from '../../driver.js';
 import {
   defaultCapabilities,
   emptyMachineState,
@@ -12,6 +17,7 @@ import {
   type FirmwareInfo,
   type LogLine,
   type MachineState,
+  type VelocityJogStatus,
 } from '../../types.js';
 import { RrfClient, SessionLostError } from './client.js';
 import { mergeInto } from './merge.js';
@@ -99,6 +105,11 @@ export class RrfDriver implements MachineDriver {
     babystep: true,
     resumeFromOffset: true,
     toolSelection: true,
+    // M700, which stock RRF does not have — it is in the meeloo/RepRapFirmware
+    // fork on feature/velocity-jog. True here means "this driver can speak it",
+    // and the panel asks the board itself before showing anything; see the
+    // capability's own note in types.ts.
+    velocityJog: true,
     gcodeRoot: '/gcodes',
     configRoot: '/sys',
     macroRoot: '/macros',
@@ -110,6 +121,14 @@ export class RrfDriver implements MachineDriver {
   private state: MachineState = emptyMachineState();
   private stateSubs = new Set<(s: MachineState) => void>();
   private logSubs = new Set<(l: LogLine) => void>();
+  /**
+   * Queries waiting for the next reply text, whoever fetches it.
+   *
+   * The poll loop and `query` both drain `rr_reply`, and RRF gives a reply to a
+   * client only once — so without this the loser of that race reports that the
+   * machine said nothing. See `query`.
+   */
+  private replyWaiters = new Set<(text: string) => void>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private polling = false;
   private stopped = true;
@@ -532,6 +551,9 @@ export class RrfDriver implements MachineDriver {
 
   /** RRF prefixes replies with "Error: " / "Warning: "; surface that as a level. */
   private emitReply(text: string): void {
+    // Anyone waiting on a reply hears it here, whichever path drained it — see
+    // `replyWaiters`.
+    for (const waiter of [...this.replyWaiters]) waiter(text);
     for (const raw of text.split('\n')) {
       const t = raw.trimEnd();
       if (!t.trim()) continue;
@@ -559,25 +581,62 @@ export class RrfDriver implements MachineDriver {
   /**
    * Send and wait for the reply. RRF buffers replies per HTTP client (3.5+), so
    * this does not steal output from DWC or grr.py running alongside us.
+   *
+   * The awkward part is that it competes with our OWN poll loop, which drains
+   * `rr_reply` whenever it notices the sequence number move. RRF hands a given
+   * reply to a client exactly once, so whichever of the two asks first gets the
+   * text and the other gets an empty string — and which one that is comes down
+   * to where the 250ms poll happens to fall relative to the command. A query
+   * that loses that race returns "" and its caller concludes the machine said
+   * nothing, which for a probe means concluding a feature is missing.
+   *
+   * So this listens as well as asks: a waiter registered before the command
+   * goes out is notified by `emitReply` no matter which path drained the text.
+   * Registered before rather than after, because the reverse ordering has the
+   * same hole one step earlier — a poll landing between the send and the
+   * listen.
    */
   async query(command: string): Promise<string> {
     const client = this.requireClient();
     this.log('command', command);
-    await client.gcode(command);
 
-    // Wait for seqs.reply to advance rather than guessing at a delay.
-    const before = this.seqs.reply;
-    for (let i = 0; i < 40; i++) {
-      const seqs = (await client.model('seqs', 'd2')) as OmSeqs;
-      if (seqs.reply !== before) {
-        this.seqs.reply = seqs.reply;
-        const text = await client.reply();
-        if (text.trim()) this.emitReply(text);
-        return text;
+    let deliver!: (text: string) => void;
+    const overheard = new Promise<string>((resolve) => {
+      deliver = resolve;
+    });
+    this.replyWaiters.add(deliver);
+
+    try {
+      await client.gcode(command);
+
+      // Wait for seqs.reply to advance rather than guessing at a delay.
+      const before = this.seqs.reply;
+      for (let i = 0; i < 40; i++) {
+        // 50ms of listening, then a look of our own. Both are needed: the poll
+        // loop can be up to half a second away, and it can also beat us to the
+        // very next reply.
+        const heard = await Promise.race([
+          overheard,
+          new Promise<null>((r) => setTimeout(() => r(null), 50)),
+        ]);
+        if (heard !== null) return heard;
+
+        const seqs = (await client.model('seqs', 'd2')) as OmSeqs;
+        if (seqs.reply !== before) {
+          this.seqs.reply = seqs.reply;
+          const text = await client.reply();
+          // Empty means the poll loop had already taken it, in which case it has
+          // resolved `overheard` and the next turn of this loop picks it up.
+          if (text.trim()) {
+            this.emitReply(text);
+            return text;
+          }
+        }
       }
-      await new Promise((r) => setTimeout(r, 50));
+      return '';
+    } finally {
+      this.replyWaiters.delete(deliver);
     }
-    return '';
   }
 
   async jog(deltas: Record<string, number>, opts: JogOptions): Promise<void> {
@@ -615,6 +674,53 @@ export class RrfDriver implements MachineDriver {
     // axis at its limit instead of at the speed asked for.
     const feed = opts.feedRate && opts.feedRate > 0 ? opts.feedRate : 1000;
     await this.send(`M120\nG90\nG53 G1 ${words} F${feed}\nM121`);
+  }
+
+  // --- Velocity jogging (M700) --------------------------------------------
+  //
+  // M700 is not stock RepRapFirmware. It comes from the meeloo/RepRapFirmware
+  // fork, branch feature/velocity-jog, so every board will parse the command
+  // and most will reject it — which is why velocityJogStatus() exists and why
+  // nothing here assumes an answer.
+  //
+  // Note what these do NOT call: `send()`. Every other command in this file
+  // goes through it and is logged to the console panel, which is right for a
+  // command an operator issued. This one is issued thirty times a second for as
+  // long as a thumb is on the pad; logging it would bury the console under
+  // hundreds of identical lines and push everything that mattered off the top.
+  // The panel logs the start and the stop instead.
+
+  async velocityJog(speeds: Record<string, number>, opts: VelocityJogOptions = {}): Promise<number | null> {
+    // Zeroes are dropped rather than sent as X0, because in M700 an omitted
+    // axis IS zero — the two say the same thing and the shorter one leaves
+    // more of the buffer for the axes that are moving.
+    const words = Object.entries(speeds)
+      .filter(([, v]) => Number.isFinite(v) && v !== 0)
+      .map(([axis, v]) => `${axis.toUpperCase()}${Math.round(v * 1000) / 1000}`)
+      .join(' ');
+
+    // Only sent when the caller actually chose one. An M700 carrying P, R and D
+    // on every tick would work, but it would also mean a stray digit in a
+    // corrupted packet could retune the watchdog; leaving them out unless asked
+    // keeps the streamed command to the thing that changes.
+    const tune =
+      (opts.chunkMs ? ` P${Math.round(opts.chunkMs)}` : '') +
+      (opts.watchdogMs ? ` R${Math.round(opts.watchdogMs)}` : '') +
+      (opts.queueDepth ? ` D${Math.round(opts.queueDepth)}` : '');
+
+    // S0 rather than a bare M700 for the stop: with no parameters at all, M700
+    // reports status instead of doing anything, so an empty vector sent as
+    // "M700" would leave the machine running and look like it had been told to
+    // stop. The one case where the difference is a crash.
+    return this.requireClient().gcode(words ? `M700 ${words}${tune}` : 'M700 S0');
+  }
+
+  async velocityJogStatus(): Promise<VelocityJogStatus | null> {
+    // `query`, so this one IS logged: it happens once when the panel opens, and
+    // "does this firmware do velocity jogging" is a question whose answer an
+    // operator may well want to see in the console.
+    const reply = await this.query('M700');
+    return parseJogStatus(reply);
   }
 
   async home(axes?: string[]): Promise<void> {
@@ -988,4 +1094,58 @@ export class RrfDriver implements MachineDriver {
     }
     await this.send(cmd);
   }
+}
+
+/**
+ * Read M700's status line, and use it to decide whether M700 exists at all.
+ *
+ * The line looks like this:
+ *
+ *   Jogging active, chunk 20ms, timeout 250ms, queue 2, speeds X10.0 Y-5.0
+ *
+ * Parsed by picking fields out of it rather than by matching the sentence,
+ * because the sentence is not a promise: this is a debug report from a fork
+ * whose author is free to reword it, and a parser that needs the commas in the
+ * right places would break on a cosmetic change and report "no velocity
+ * jogging" for a board that has it.
+ *
+ * Null means unsupported. That is the important return, and the reason this
+ * insists on seeing the word "jog" before believing anything: stock RRF answers
+ * an unknown M-code with an error, but *which* error, and in what words, varies
+ * by version — so this recognises success rather than trying to enumerate
+ * failure. A firmware that says nothing at all reads as unsupported too, which
+ * is the right way round: an absent feature and an unanswered question both
+ * mean "do not put a live jog pad in front of the operator".
+ */
+export function parseJogStatus(reply: string): VelocityJogStatus | null {
+  const text = (reply ?? '').trim();
+  if (!/\bjog/i.test(text)) return null;
+  // Any RRF error is a refusal, however it is worded — including the homing and
+  // in-use refusals, which mention jogging and would otherwise parse as a
+  // perfectly good status with everything defaulted.
+  if (/^(error|warning)\b/i.test(text)) return null;
+
+  const num = (re: RegExp, fallback: number): number => {
+    const m = re.exec(text);
+    return m ? Number(m[1]) : fallback;
+  };
+
+  const speeds: Record<string, number> = {};
+  // Only the tail after "speeds", so "chunk 20ms" cannot be read as an axis.
+  const tail = /speeds?\b(.*)$/i.exec(text)?.[1] ?? '';
+  for (const m of tail.matchAll(/([A-Za-z])\s*(-?\d+(?:\.\d+)?)/g)) {
+    const v = Number(m[2]);
+    if (v !== 0) speeds[m[1]!.toUpperCase()] = v;
+  }
+
+  return {
+    // "inactive" contains "active", so it has to be ruled out first or every
+    // idle machine reads as jogging — which would have the panel show motion
+    // that is not happening.
+    active: !/\binactive\b/i.test(text) && /\bactive\b/i.test(text),
+    chunkMs: num(/chunk\s*(\d+(?:\.\d+)?)\s*ms/i, 20),
+    watchdogMs: num(/(?:timeout|watchdog)\s*(\d+(?:\.\d+)?)\s*ms/i, 250),
+    queueDepth: num(/queue\s*(\d+)/i, 2),
+    speeds,
+  };
 }

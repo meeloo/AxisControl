@@ -745,6 +745,91 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .jog-foot { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; flex: 0 0 auto; }
 .jog-blocked { color: var(--warn); font-size: 12px; margin-left: auto; }
 
+/* ---------- Velocity jog (M700) ---------- */
+
+/* `touch-action: none` and not the global `manipulation`: this is a drag
+   surface, and on a touchscreen the browser's default is to treat a finger
+   moving across it as a scroll or a pan. That steals the pointer mid-jog, which
+   arrives here as pointercancel — so the machine stops, correctly but
+   maddeningly, every time a thumb moves more than a few pixels. */
+.vjog { padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; height: 100%;
+  min-height: 0; outline: none; }
+.vjog:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+
+.vjog-banner { font-size: 12px; color: var(--text-dim); background: var(--bg-raised);
+  border: 1px solid var(--border); border-radius: 5px; padding: 6px 8px; flex: 0 0 auto; }
+.vjog-banner.bad { border-color: var(--bad); color: var(--text); }
+.vjog-banner.warn { border-color: var(--warn); color: var(--text); }
+.vjog-banner code { font-family: var(--mono); font-size: 11px; }
+
+/* Readout. Fixed-width figures and a sign always in the same column, so the
+   numbers do not shuffle sideways thirty times a second while the pad moves. */
+.vjog-readout { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap;
+  font-family: var(--mono); font-size: 15px; font-variant-numeric: tabular-nums; flex: 0 0 auto; }
+.vjog-val { color: var(--text-faint); }
+.vjog-val em { font-style: normal; color: var(--text-faint); font-size: 11px;
+  margin-right: 3px; font-weight: 700; }
+.vjog-val.moving { color: var(--text); }
+.vjog-val.moving em { color: var(--accent); }
+.vjog-val.capped { color: var(--warn); }
+.vjog-val.blocked { color: var(--bad); }
+.vjog-units { font-size: 10px; color: var(--text-faint); margin-left: auto; }
+
+.vjog-pads { display: flex; gap: 12px; align-items: stretch; justify-content: center;
+  flex: 1 1 auto; min-height: 0; }
+
+/* Square, and it has to genuinely be square rather than merely draw a circle in
+   the middle of whatever shape it lands in. An SVG letterboxes its viewBox, so
+   a pad stretched tall keeps a round face with dead space above and below it —
+   which looks almost right and is the difference between "the top of the pad"
+   and "full speed". (The maths agrees with the drawing either way; see
+   deflection() in the panel. This is so the drawing fills the panel.) */
+.vjog-stick { flex: 0 1 auto; align-self: center; height: 100%; width: auto; max-width: 100%;
+  aspect-ratio: 1; touch-action: none; cursor: grab; }
+.vjog-stick.live { cursor: grabbing; }
+.vjog-strip { height: 100%; width: auto; aspect-ratio: 48 / 224; touch-action: none;
+  cursor: ns-resize; }
+.vjog-striph { display: flex; flex-direction: column; align-items: center; gap: 4px;
+  flex: 0 0 auto; height: 100%; min-height: 0; }
+.vjog-strip-name { font-weight: 700; font-size: 13px; color: var(--text-dim); flex: 0 0 auto; }
+.vjog-home { flex: 0 0 auto; min-height: 26px; height: 26px; padding: 0 8px; font-size: 14px;
+  color: var(--text-dim); }
+.vjog-limit { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--bad); flex: 0 0 auto; }
+
+.vjog-face { fill: var(--bg-raised); stroke: var(--border-strong); stroke-width: 1.5; }
+.vjog-dead { fill: var(--bg); stroke: var(--border); stroke-width: 1;
+  stroke-dasharray: 3 3; }
+.vjog-axis { stroke: var(--border); stroke-width: 1; }
+.vjog-rose-label { fill: var(--text-faint); font-size: 11px; font-weight: 600;
+  text-anchor: middle; }
+.vjog-vector { stroke: var(--accent); stroke-width: 3; stroke-linecap: round; }
+/* No transition on the knob. It is showing where the finger is; easing it into
+   place would put it somewhere the finger is not, which on a control whose only
+   feedback is its own position reads as lag in the machine. */
+.vjog-knob { fill: var(--bg); stroke: var(--border-strong); stroke-width: 2; }
+.vjog-stick.live .vjog-knob, .vjog-strip.live .vjog-knob { fill: var(--accent);
+  stroke: var(--accent); }
+.vjog-stick.disabled, .vjog-strip.disabled { opacity: 0.35; pointer-events: none; }
+
+.vjog-foot { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; flex: 0 0 auto; }
+.vjog-stop { min-width: 64px; font-weight: 600; }
+.vjog-estop { color: var(--bad); border-color: var(--bad); }
+.vjog-health { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+.vjog-warn { font-size: 11px; color: var(--warn); }
+.vjog-recheck { margin-left: auto; font-size: 11px; }
+.vjog-blocked { color: var(--warn); font-size: 12px; flex: 0 0 auto; }
+.vjog-hint { font-size: 10px; color: var(--text-faint); line-height: 1.4; flex: 0 0 auto; }
+
+/* Under about 420px of height the sliders and the two rows of text crowd the
+   pad down to nothing, and the pad is the panel. The hint is the first thing to
+   go — it is read once — then the cursors collapse to a single column. */
+@media (max-height: 420px) {
+  .vjog-hint { display: none; }
+  .vjog .jog-cursors { gap: 8px; }
+  .vjog .jog-cursor-foot { display: none; }
+}
+
 /* ---------- Status ---------- */
 
 .status-panel { padding: 10px 12px; display: flex; flex-direction: column; gap: 12px; }

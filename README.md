@@ -110,6 +110,35 @@ machine unplugged from the world.
 
 Outline fonts and V-carving are a different operation and are not built yet.
 
+### It jogs by speed, not by distance
+
+Every web front end for RRF moves the machine by picking a distance and pressing
+a button, because that is all the firmware offered. Hold the button and it fires
+the same short move over and over — the queue fills, the control goes numb, and
+the machine carries on after you let go.
+
+The **Jog** panel is a thumbstick instead: deflection is speed, push further to
+go faster, let go and it stops. It needs `M700`, which is not in stock
+RepRapFirmware — it is in the [`meeloo/RepRapFirmware`][fork] fork on branch
+`feature/velocity-jog`, and the panel asks the board whether it has it before
+showing anything. The distance rose is still there for machines that do not.
+
+Velocity control puts the safety burden on the host, so: the vector is resent
+thirty times a second — silence for 250ms and the firmware stops the machine by
+itself — releasing sends an explicit zero and sends it again behind anything
+still in flight, and losing the window, the tab, the pointer, the panel or the
+connection is a stop. Arrow keys work the same way while the panel has focus.
+
+Two ceilings apply to any commanded speed, and neither produces an error: the
+axis maximum from `M203`, and `2 × acceleration × lookahead`, which is the
+planner refusing to enter a move faster than it could stop inside it. Ask for
+more and the machine simply runs slower. So the panel computes both, shows the
+binding one, and scales the whole vector to fit rather than trimming each axis
+— clamping axis by axis is what the firmware does and it bends the heading, so
+the machine ends up moving somewhere other than where your thumb is pointing.
+
+[fork]: https://github.com/meeloo/RepRapFirmware/tree/feature/velocity-jog
+
 ### It is honest about what it cannot do
 
 Panels hide themselves when the controller cannot back them, rather than
@@ -121,8 +150,10 @@ jobs and are never conflated.
 
 ## The panels
 
-Twenty-six, arranged onto pages you lay out yourself.
+Twenty-seven, arranged onto pages you lay out yourself.
 
+- **Jog** — a thumbstick that moves the machine at the speed you push it,
+  continuously, for as long as you hold it (needs `M700`; hidden without it)
 - **Motion** — a jog rose of concentric rings, eight directions each, with
   distances that are always numbers a person would choose
 - **At the machine** — position and jogging on one phone screen, in either
@@ -227,6 +258,14 @@ globals a real ATC configuration declares. It simulates motion and job progress,
 moves and the viewer's live cutter tracking has something to follow. Two sample
 programs are included, one with arcs and a full circle to exercise the
 tessellator.
+
+It also implements `M700` velocity jogging, including the two parts a host has
+to be written against and cannot see without them: the watchdog that stops the
+machine when commands stop arriving, and the silent clamping of any speed above
+`2 × acceleration × lookahead`. `GET /__jog` reports what the board thinks is
+happening — the commanded speeds, the clamped ones, and why it last stopped —
+which is how `npm run velocity-check` tells a stop that was *sent* from one the
+watchdog cleaned up 250ms later.
 
 Open <http://localhost:8081> and it connects to itself.
 
@@ -358,7 +397,7 @@ proven on a sample of exactly one. The RRF driver is complete enough for real
 work; the Carvera/Z1 driver is a stub.
 
 Known gaps: job history and an ATC carousel view. Verification is a real
-headless browser driven against the mocks, plus three harnesses that live in
+headless browser driven against the mocks, plus a set of harnesses that live in
 the repo and check the things whose failures are silent:
 
 ```
@@ -366,6 +405,11 @@ npm run merge-oracle    # our object-model merge against Duet3D's own implementa
 npm run rewrite-check   # the in-place config edit: offsets, widths, line endings
 npm run gcode-params    # which doc bullets are parameters and which are prose
 npm run hershey-check   # text layout: sizes, rotation, alignment, every glyph
+npm run outline-check   # outline fonts: cap height, contour winding, flattening
+npm run vcarve-check    # V-carve depths against the geometry they claim
+npm run steps-check     # jog labels never round up and always fit their sector
+npm run fontstore-check # fonts on the card: round trip, validation, path escapes
+npm run velocity-check  # velocity jogging: the stop, the watchdog, the clamps
 ```
 
 `rewrite-check` takes a directory and will sweep real config files for the

@@ -1,0 +1,246 @@
+// Velocity jogging, checked against a machine that behaves like the real one.
+//
+// Almost nothing here can be verified by reading the code, because the whole
+// feature is about time. A stop that is sent but overtaken looks identical to
+// one that worked. A host that stops resending looks, for 250ms, exactly like
+// one that is working fine. A speed that the firmware quietly halves reports
+// success. So this starts tools/mock-rrf.mjs — which implements M700 including
+// its watchdog and its silent clamping — drives the real modules against it,
+// and asks the board afterwards what actually happened.
+//
+// The four properties worth the trouble, in order of how much they would cost
+// to get wrong:
+//
+//   releasing stops the machine PROMPTLY, and stops it because we said so
+//     rather than because the watchdog eventually noticed — the mock records
+//     which, so this cannot pass for the wrong reason
+//   going quiet stops the machine anyway, so a dead host is not a runaway
+//   a commanded speed above the axis ceiling is clamped, not refused, and the
+//     ceiling this app computes agrees with the one the firmware applies
+//   an axis that reaches its soft limit stops while the others carry on
+//
+// The browser shims below are the smallest set that lets this browser code load
+// under Node. Deliberately dumb: anything cleverer starts being a fake browser
+// and hiding real behaviour.
+//
+// Run it with `npm run velocity-check`.
+
+import { spawn } from 'node:child_process';
+import { build } from 'esbuild';
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, dirname } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const PORT = 8124;
+const URL_ = `http://127.0.0.1:${PORT}`;
+
+const kv = new Map();
+globalThis.localStorage = {
+  getItem: (k) => (kv.has(k) ? kv.get(k) : null),
+  setItem: (k, v) => kv.set(k, String(v)),
+  removeItem: (k) => kv.delete(k),
+  clear: () => kv.clear(),
+};
+globalThis.window = globalThis;
+globalThis.addEventListener ??= () => {};
+globalThis.removeEventListener ??= () => {};
+globalThis.location = { href: `${URL_}/index.html`, origin: URL_, protocol: 'http:', host: `127.0.0.1:${PORT}` };
+globalThis.document = { hidden: false, baseURI: `${URL_}/`, addEventListener() {} };
+
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const dir = await mkdtemp(join(tmpdir(), 'vjog-'));
+const out = join(dir, 'v.mjs');
+// One entry re-exporting all three, so the bundle carries a single copy of the
+// module graph. Three bundles would each get their own store singleton, and the
+// driver the store connected would not be the one velocity.ts sends through.
+const entry = join(dir, 'entry.ts');
+await writeFile(
+  entry,
+  `export * as v from ${JSON.stringify(join(root, 'src/core/velocity.ts'))};\n` +
+    `export * as st from ${JSON.stringify(join(root, 'src/core/store.ts'))};\n` +
+    `export * as rrf from ${JSON.stringify(join(root, 'src/machine/drivers/rrf/driver.ts'))};\n`,
+);
+await build({ entryPoints: [entry], bundle: true, format: 'esm', outfile: out, logLevel: 'error',
+  platform: 'neutral', mainFields: ['module', 'main'], conditions: ['browser'] });
+const { v, st, rrf } = await import(pathToFileURL(out).href);
+
+const mock = spawn(process.execPath, [join(root, 'tools/mock-rrf.mjs'), String(PORT)], { stdio: 'ignore' });
+const stopMock = () => { try { mock.kill(); } catch { /* already gone */ } };
+process.on('exit', stopMock);
+process.on('SIGINT', () => { stopMock(); process.exit(130); });
+for (let i = 0; i < 50; i++) {
+  try { await fetch(`${URL_}/rr_connect?password=`); break; } catch { await new Promise((r) => setTimeout(r, 100)); }
+}
+
+const fails = [];
+const ok = (c, w, x = '') => { console.log(`${c ? 'PASS' : 'FAIL'}  ${w}${x ? '  ' + x : ''}`); if (!c) fails.push(w); };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const jogState = () => fetch(`${URL_}/__jog`).then((r) => r.json());
+const raw = (g) => fetch(`${URL_}/rr_gcode?gcode=${encodeURIComponent(g)}`).then((r) => r.json());
+const near = (a, b, tol) => Math.abs(a - b) <= tol;
+
+// --- Input shaping, which is pure and can be reasoned about ----------------
+
+const S = { maxSpeed: 20, deadzone: 0.1, expo: 2 };
+
+ok(v.shapeStick(0.05, 0.05, S).x === 0, 'inside the deadzone the pad commands nothing');
+
+// Radial, not per-axis. A diagonal nudge of 0.09 on each axis is 0.127 from
+// centre, which is outside a 0.1 deadzone — a per-axis test would swallow it
+// and leave a square hole in the middle of a round pad.
+ok(v.shapeStick(0.09, 0.09, S).x !== 0, 'and the deadzone is radial, not a square hole');
+
+const edge = v.shapeStick(0.101, 0, S);
+ok(edge.x > 0 && edge.x < S.maxSpeed * 0.05,
+   'just past the deadzone the machine eases off, it does not jump',
+   `${edge.x.toFixed(4)} mm/s`);
+
+const full = v.shapeStick(1, 0, S);
+ok(near(full.x, S.maxSpeed, 1e-9), 'full deflection is exactly the chosen speed', `${full.x}`);
+
+const past = v.shapeStick(3, 0, S);
+ok(near(past.x, S.maxSpeed, 1e-9), 'and a pointer dragged off the pad is not faster than full', `${past.x}`);
+
+// The property the response curve is easiest to break: curving each axis on its
+// own bends the direction as well as the magnitude, so a 45° push comes out at
+// some other angle and the machine does not go where the thumb points.
+const diag = v.shapeStick(0.6, 0.6, S);
+ok(near(diag.x, diag.y, 1e-9), 'a 45° push stays at 45° whatever the response curve',
+   `${diag.x.toFixed(3)}, ${diag.y.toFixed(3)}`);
+
+// And unlike the distance rose — where a diagonal is deliberately the full step
+// on BOTH axes — a diagonal here is the commanded SPEED, shared between them.
+// Both of these are full deflection, one into a corner and one straight up, so
+// they must be the same speed: a stick in its corner must not travel √2 times
+// faster than one pushed north, which is what per-axis scaling would give.
+const corner = v.shapeStick(Math.SQRT1_2, Math.SQRT1_2, S);
+ok(near(Math.hypot(corner.x, corner.y), v.shapeStick(0, 1, S).y, 1e-9),
+   'a diagonal is the same speed as a straight push, shared between the axes',
+   `${Math.hypot(corner.x, corner.y).toFixed(3)} vs ${v.shapeStick(0, 1, S).y.toFixed(3)} mm/s`);
+
+// --- Reading the firmware's status line ------------------------------------
+
+const doc = rrf.parseJogStatus('Jogging active, chunk 20ms, timeout 250ms, queue 2, speeds X10.0 Y-5.0');
+ok(doc !== null && doc.active && doc.chunkMs === 20 && doc.watchdogMs === 250 && doc.queueDepth === 2
+   && doc.speeds.X === 10 && doc.speeds.Y === -5,
+   'the documented status line parses', JSON.stringify(doc));
+
+// "inactive" contains "active". Getting this backwards would have the panel
+// show motion on a machine standing still.
+const idle = rrf.parseJogStatus('Jogging inactive, chunk 20ms, timeout 250ms, queue 2, speeds none');
+ok(idle !== null && idle.active === false, 'and an inactive machine does not read as active');
+
+// Null is the answer that matters: it is how a board without M700 is told apart
+// from one that has it, and everything downstream hides itself on null.
+ok(rrf.parseJogStatus('Error: unsupported command: M700') === null, 'an unsupported command reads as no support');
+ok(rrf.parseJogStatus('Error: Insufficient axes homed') === null, 'so does a refusal');
+ok(rrf.parseJogStatus('') === null, 'so does silence');
+ok(rrf.parseJogStatus('ok') === null, 'and so does an answer about something else');
+
+// --- Live, against the mock ------------------------------------------------
+
+st.controllerUrl.set(URL_);
+try { await st.connect(URL_, 'rrf'); } catch (e) { console.log('connect threw:', e.message); }
+if (!st.activeDriver()) { console.log('could not connect a driver; aborting'); process.exit(2); }
+
+ok(await v.probeSupport(), 'the board is asked whether it has M700, and says yes');
+
+// The ceiling this app computes has to be the one the firmware applies, or
+// every number on the panel is decoration. X in the mock has M201 250 and M203
+// 6000: 2·250·0.02 = 10 mm/s, well under M203's 100, so the lookahead ceiling
+// is the binding one and that is the interesting case.
+const ceilX = v.axisSpeedCeiling('X', 20);
+ok(near(ceilX, 10, 1e-9), 'the XY speed ceiling is computed from acceleration and lookahead',
+   `${ceilX} mm/s`);
+ok(near(v.axisSpeedCeiling('X', 100), 50, 1e-9),
+   '  and rises with lookahead, until M203 becomes the binding limit',
+   `${v.axisSpeedCeiling('X', 100)} mm/s at 100ms`);
+
+// Bringing a vector under the ceilings must not turn it into a different
+// vector. In the mock, X and Y cap at 10 mm/s and Z at 4: a push mostly north
+// with a little Z in it, clamped axis by axis, comes back out as a diagonal.
+// The machine would be moving, at a sensible speed, in the wrong direction —
+// which is the one thing a jog pad exists not to do.
+const asked = { X: 4, Y: 20, Z: 2 };
+const fitted = v.fitToCeilings(asked, 20);
+ok(near(fitted.Y, 10, 1e-9), 'fitting to the ceilings brings the fastest axis down to it',
+   `Y ${fitted.Y}`);
+ok(near(fitted.X / fitted.Y, asked.X / asked.Y, 1e-9) && near(fitted.Z / fitted.Y, asked.Z / asked.Y, 1e-9),
+   '  and keeps the heading, rather than clamping each axis on its own',
+   JSON.stringify(fitted));
+ok(Math.abs(fitted.Z) <= v.axisSpeedCeiling('Z', 20) + 1e-9,
+   '  leaving every axis under its own ceiling', `Z ${fitted.Z} vs ${v.axisSpeedCeiling('Z', 20)}`);
+ok(v.fitToCeilings({ X: 3, Y: 4 }, 20) !== undefined
+   && near(v.fitToCeilings({ X: 3, Y: 4 }, 20).X, 3, 1e-9),
+   '  and a vector already under them is left exactly alone');
+
+// Ask for twenty times the ceiling. The firmware does not refuse it — that is
+// the whole trap — so the check is that it ran at the ceiling and said so.
+await raw('G53 G1 X260 Y600 Z115');
+await sleep(150);
+const before = (await jogState()).positions;
+v.setJogVector({ X: 200 });
+await sleep(500);
+const during = await jogState();
+ok(during.active, 'a vector set through the app makes the machine move');
+ok(near(during.speeds.X, 10, 1e-6) && near(during.commanded.X, 200, 1e-6),
+   '  and 200 mm/s is silently clamped to the ceiling rather than refused',
+   `asked ${during.commanded.X}, running ${during.speeds.X}`);
+ok(during.positions.X > before.X + 2,
+   '  and the axis really travelled', `${(during.positions.X - before.X).toFixed(2)}mm`);
+
+// Releasing. Both halves matter: that it stopped, and that OUR stop is what
+// stopped it. Without the second half this passes on a host that sends nothing
+// at all and lets the watchdog clean up 250ms later.
+v.stopJog();
+await sleep(120);
+const stopped = await jogState();
+ok(!stopped.active, 'releasing stops the machine');
+ok(stopped.stoppedBy === 'commanded',
+   '  because the stop was sent, not because the watchdog fired', String(stopped.stoppedBy));
+
+// The backstop, checked by being a host that dies: one command straight to the
+// board, then nothing. Nothing is resending, so this is purely the firmware's
+// watchdog — and it has to fire, because it is what stands between a crashed
+// tab and a machine that keeps going.
+await raw('M700 X5');
+await sleep(80);
+ok((await jogState()).active, 'a raw M700 with no follow-up starts moving');
+await sleep(400);
+const dead = await jogState();
+ok(!dead.active && dead.stoppedBy === 'watchdog',
+   '  and a host that goes quiet is stopped by the watchdog', String(dead.stoppedBy));
+
+// An axis at its soft limit stops while the others carry on. Correct firmware
+// behaviour, invisible unless someone says so — the panel marks it, and this is
+// the behaviour it is marking.
+await raw('G53 G1 X523 Y600');
+await sleep(150);
+v.setJogVector({ X: 50, Y: 50 });
+await sleep(500);
+const split = await jogState();
+ok(near(split.positions.X, 524, 0.001), 'an axis that reaches its limit stops there',
+   `X ${split.positions.X.toFixed(3)}`);
+ok(split.positions.Y > 601, '  while the others carry on at their commanded speed',
+   `Y ${split.positions.Y.toFixed(3)}`);
+v.stopJog();
+await sleep(120);
+
+// A jog cannot be started while a program is running. The refusal comes back as
+// console text long after `rr_gcode` returned success, so nothing throws and
+// nothing rejects — the only evidence is that the machine did not move. That is
+// exactly why the app watches the log for these strings instead of the return
+// value, and it is what makes this worth checking rather than assuming.
+await raw('M32 "/gcodes/anything.nc"');
+await sleep(150);
+await raw('M700 X5');
+await sleep(150);
+const busy = await jogState();
+ok(!busy.active && busy.stoppedBy === 'printing', 'a jog is refused while a program is running',
+   String(busy.stoppedBy));
+await raw('M0');
+await sleep(150);
+
+console.log(fails.length ? `\n${fails.length} FAILED: ${fails.join(', ')}` : '\nall passed');
+process.exit(fails.length ? 1 : 0);

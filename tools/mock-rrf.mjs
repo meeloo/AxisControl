@@ -40,6 +40,37 @@ const axes = [
   { speed: 8000, letter: 'U', babystep: 0, acceleration: 500, jerk: 1000, stepsPerMm: 800, current: 1500, machinePosition: 30, userPosition: 30, workplaceOffsets: [0,0,0,0,0,0,0,0,0], homed: true, min: 0, max: 70, visible: true },
 ];
 
+/**
+ * Velocity jogging (M700), as the meeloo/RepRapFirmware fork implements it.
+ *
+ * Reproduced here rather than stubbed because the two properties a host has to
+ * get right are both invisible without a machine that has them:
+ *
+ *   the watchdog — go quiet and this stops on its own, which is the only way
+ *     to see whether a host is really resending rather than relying on it
+ *   silent clamping — a speed above `2 × acceleration × chunkMs` or above M203
+ *     is not refused, it is quietly run slower, so a host that never reads the
+ *     status back cannot tell it asked for something impossible
+ *
+ * `commanded` is kept alongside `speeds` for the same reason: a test needs to
+ * distinguish "the clamp fired" from "the host sent that".
+ */
+const jog = {
+  active: false,
+  chunkMs: 20,
+  watchdogMs: 250,
+  queueDepth: 2,
+  /** Running speed per axis letter, mm/s, after clamping. */
+  speeds: {},
+  /** What was actually asked for, before clamping. */
+  commanded: {},
+  lastCommandAt: 0,
+  /** Commands received since the last stop, for a test to check the cadence. */
+  commands: 0,
+  /** Why it last stopped on its own, or null. */
+  stoppedBy: null,
+};
+
 /** Probing grid set by M557, and the compensation G29 turns on. */
 let grid = { xMin: 0, xMax: 300, yMin: 0, yMax: 300, sx: 25, sy: 25 };
 let compensation = { type: 'none' };
@@ -476,6 +507,7 @@ setInterval(() => {
     axes[1].machinePosition = 600 + Math.cos(t * 0.4) * 200;
     axes[2].machinePosition = 115 + Math.sin(t * 2) * 3;
   }
+  stepJog(100);
   for (const a of axes) {
     a.userPosition = a.machinePosition - a.workplaceOffsets[workplaceNumber];
   }
@@ -484,6 +516,115 @@ setInterval(() => {
     spindle.current += (spindle.active - spindle.current) * 0.2;
   }
 }, 100);
+
+/** The speed this axis will actually run at, mm/s. See `jog` above. */
+function clampJogSpeed(axis, asked) {
+  const caps = [2 * axis.acceleration * (jog.chunkMs / 1000)];
+  if (axis.speed > 0) caps.push(axis.speed / 60);
+  const cap = Math.min(...caps);
+  return Math.sign(asked) * Math.min(Math.abs(asked), cap);
+}
+
+function stopJog(why) {
+  // The reason is recorded even when nothing was running. A refusal — "cannot
+  // jog while a print is running" — arrives at an already-stopped machine, and
+  // it is the one case where a test most needs to know WHY nothing moved.
+  jog.stoppedBy = why;
+  if (!jog.active) return;
+  jog.active = false;
+  jog.speeds = {};
+  jog.commanded = {};
+  bumpSeq('move');
+}
+
+/** Advance a jog by `ms`, and let the watchdog stop it if the host went quiet. */
+function stepJog(ms) {
+  if (!jog.active) return;
+  if (Date.now() - jog.lastCommandAt > jog.watchdogMs) {
+    stopJog('watchdog');
+    return;
+  }
+  let moved = false;
+  for (const a of axes) {
+    const v = jog.speeds[a.letter];
+    if (!v) continue;
+    // Clamped to the soft limits per axis, which is the firmware's behaviour and
+    // the reason it is worth reproducing: the axis that runs out stops while the
+    // others carry on at their commanded speed, so a diagonal turns into a
+    // straight line rather than failing.
+    const next = Math.max(a.min, Math.min(a.max, a.machinePosition + v * (ms / 1000)));
+    if (next !== a.machinePosition) {
+      a.machinePosition = next;
+      moved = true;
+    }
+  }
+  if (moved) bumpSeq('move');
+}
+
+function handleJog(upper) {
+  // Bare M700 is a status report, not a command — the distinction that makes
+  // `M700` with no axes a very different thing from `M700 S0`.
+  if (/^M700$/.test(upper.trim())) {
+    pushReply(
+      `Jogging ${jog.active ? 'active' : 'inactive'}, chunk ${jog.chunkMs}ms, ` +
+        `timeout ${jog.watchdogMs}ms, queue ${jog.queueDepth}, speeds ` +
+        (Object.entries(jog.speeds)
+          .map(([l, v]) => `${l}${v.toFixed(1)}`)
+          .join(' ') || 'none'),
+    );
+    return;
+  }
+
+  const p = /\bP(\d+(?:\.\d+)?)/.exec(upper);
+  const r = /\bR(\d+(?:\.\d+)?)/.exec(upper);
+  const d = /\bD(\d+)/.exec(upper);
+  if (p) jog.chunkMs = Math.min(200, Math.max(10, Number(p[1])));
+  if (r) jog.watchdogMs = Number(r[1]);
+  if (d) jog.queueDepth = Math.min(8, Math.max(2, Number(d[1])));
+
+  if (/\bS0\b/.test(upper)) {
+    stopJog('commanded');
+    return;
+  }
+
+  if (state.status === 'processing') {
+    pushReply('Error: Cannot jog while a print is running');
+    stopJog('printing');
+    return;
+  }
+  if (axes.some((a) => !a.homed)) {
+    pushReply('Error: Insufficient axes homed');
+    stopJog('unhomed');
+    return;
+  }
+
+  const commanded = {};
+  const speeds = {};
+  for (const a of axes) {
+    // P/R/D are consumed above and must not be read as axis letters; only real
+    // axis letters are looked for, which is also how the firmware parses it.
+    const m = new RegExp(`(?:^|\\s)${a.letter}(-?[\\d.]+)`).exec(upper);
+    if (!m) continue;
+    const asked = Number(m[1]);
+    if (!Number.isFinite(asked) || asked === 0) continue;
+    commanded[a.letter] = asked;
+    speeds[a.letter] = clampJogSpeed(a, asked);
+  }
+
+  // An M700 naming no axis at all is a stop, because every axis it did not
+  // name is commanded to zero and it named none of them.
+  if (!Object.keys(speeds).length) {
+    stopJog('commanded');
+    return;
+  }
+
+  jog.commanded = commanded;
+  jog.speeds = speeds;
+  jog.active = true;
+  jog.stoppedBy = null;
+  jog.commands++;
+  jog.lastCommandAt = Date.now();
+}
 
 function bumpSeq(key) {
   seqs[key] = (seqs[key] ?? 0) + 1;
@@ -732,6 +873,16 @@ const server = createServer(async (req, res) => {
       return sendJson(res, { sent: sent.slice(since), total: sent.length });
     }
 
+    // Not a firmware route. The velocity-jog state as the board holds it,
+    // including the clamp and the watchdog — neither of which a client can see
+    // from the object model, and both of which a jog host has to get right.
+    case '/__jog': {
+      // Stepped on read as well as on the timer, so a test that checks the
+      // watchdog does not have to sleep for a tick boundary to see it fire.
+      stepJog(0);
+      return sendJson(res, { ...jog, positions: Object.fromEntries(axes.map((a) => [a.letter, a.machinePosition])) });
+    }
+
     // Not a firmware route. Puts the SD card back to how it started so a test
     // that writes files can be run twice and mean the same thing both times.
     case '/__key_requests':
@@ -947,7 +1098,9 @@ function handleGcode(gcode) {
 
     if (applyAxisSetting(upper)) continue;
 
-    if (upper.startsWith('M997')) {
+    if (/^M700\b/.test(upper.trim())) {
+      handleJog(upper);
+    } else if (upper.startsWith('M997')) {
       // The firmware refuses to flash unless the files it named are actually
       // on the card — which is the whole safety property, so the mock enforces
       // it rather than accepting anything and reporting success.

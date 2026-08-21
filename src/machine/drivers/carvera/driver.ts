@@ -20,6 +20,7 @@ import {
   type HeightMapCommands,
   type MachineState,
   type ScanArea,
+  type VelocityJogStatus,
 } from '../../types.js';
 
 function todo(what: string): never {
@@ -85,6 +86,22 @@ export class CarveraDriver implements MachineDriver {
     _opts?: { feedRate?: number },
   ): Promise<void> {
     todo('moveToMachine');
+  }
+  /**
+   * Not `todo()`, unlike everything else here, and not an oversight.
+   *
+   * `capabilities.velocityJog` is false for this machine, so nothing should be
+   * calling these — but the one that would call them is a live jog pad with a
+   * thumb on it, and the cost of being wrong is different in each direction.
+   * Throwing from the *stop* path on a machine that is somehow moving is the
+   * one failure this driver must not have. Reporting "no velocity jogging" is
+   * true, costs nothing, and lets the panel hide itself.
+   */
+  async velocityJog(_speeds: Record<string, number>): Promise<number | null> {
+    return null;
+  }
+  async velocityJogStatus(): Promise<VelocityJogStatus | null> {
+    return null;
   }
   async home(_axes?: string[]): Promise<void> {
     todo('home');

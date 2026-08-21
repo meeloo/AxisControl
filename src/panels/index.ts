@@ -6,6 +6,7 @@ import './wcs.js';
 import './hand.js';
 import './text.js';
 import './jog.js';
+import './velocity.js';
 import './spindle.js';
 import './job.js';
 import './console.js';

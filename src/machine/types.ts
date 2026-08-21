@@ -201,6 +201,29 @@ export interface MachineState {
   volumes: Volume[];
 }
 
+/**
+ * What the controller says about velocity jogging when asked.
+ *
+ * The one field worth reading closely is `speeds`: those are what the firmware
+ * is *actually* running, after its own clamping, not what was asked for. A
+ * velocity command is capped by two separate things — the axis maximum (M203)
+ * and a ceiling set by how far ahead motion is prepared, `2 × acceleration ×
+ * chunkMs` — and neither produces an error. Ask for 80 mm/s on an axis whose
+ * ceiling is 40 and the machine runs at 40 while reporting success. Reading
+ * this back is the only way to know that happened.
+ */
+export interface VelocityJogStatus {
+  active: boolean;
+  /** How much motion is prepared at a time, ms. Sets latency and the speed ceiling. */
+  chunkMs: number;
+  /** Motion stops if no command arrives inside this, ms. */
+  watchdogMs: number;
+  /** How many chunks are queued ahead. */
+  queueDepth: number;
+  /** Running speed per axis letter, mm/s — after clamping. */
+  speeds: Record<string, number>;
+}
+
 /** A mounted filesystem on the controller. */
 export interface Volume {
   /** How the controller names it, e.g. "SD card" or "usb0". Never empty. */
@@ -336,6 +359,20 @@ export interface Capabilities {
   resumeFromOffset: boolean;
   /** Selecting a tool by number means something to this controller. */
   toolSelection: boolean;
+  /**
+   * This driver knows how to express movement as a *velocity* rather than a
+   * destination — "run X at 25 mm/s until I say otherwise".
+   *
+   * Note carefully what this does and does not promise. It says the driver can
+   * form the command; it does NOT say the machine on the other end of the wire
+   * will accept it. Capabilities are fixed per driver and this one depends on
+   * the firmware build — RRF only gained M700 in a fork — so the driver claims
+   * the ability and the caller confirms it against the actual board with
+   * `velocityJogStatus()`. Treating the flag as the answer puts a jog pad in
+   * front of an operator on a machine that will silently refuse every command
+   * it sends.
+   */
+  velocityJog: boolean;
   /** Directory the driver considers the natural root for G-code jobs. */
   gcodeRoot: string;
   /** Directory holding controller configuration, if browsable. */
@@ -360,6 +397,7 @@ export function defaultCapabilities(): Capabilities {
     babystep: false,
     resumeFromOffset: false,
     toolSelection: false,
+    velocityJog: false,
     gcodeRoot: '/gcodes',
     configRoot: null,
     macroRoot: null,

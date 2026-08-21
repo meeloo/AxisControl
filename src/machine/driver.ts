@@ -20,6 +20,7 @@ import type {
   FileEntry,
   LogLine,
   MachineState,
+  VelocityJogStatus,
 } from './types.js';
 
 export interface ConnectionConfig {
@@ -42,6 +43,36 @@ export interface JogOptions {
   feedRate: number;
   /** Machine coordinates rather than work coordinates. */
   machineCoords?: boolean;
+}
+
+/**
+ * Tuning for the velocity-jog stream. Omit anything you have no opinion about
+ * and the firmware keeps its own default, which is the right choice for all of
+ * these — they are measured optima, not preferences.
+ */
+export interface VelocityJogOptions {
+  /**
+   * How much motion the controller prepares at a time, ms.
+   *
+   * The one knob with a real trade-off in it, in both directions. Larger means
+   * a higher speed ceiling (`2 × acceleration × chunkMs`) and more lag between
+   * moving the stick and the machine answering. Smaller does NOT keep buying
+   * lower latency: below roughly 40ms of queued motion the planner starves and
+   * latency gets *worse*, so there is a floor and the default already sits just
+   * above it.
+   */
+  chunkMs?: number;
+  /**
+   * Motion stops if no command arrives inside this, ms.
+   *
+   * The safety property that matters most, and the reason velocity jogging is
+   * safe to expose at all: if the host process dies, the tab closes or the
+   * network drops mid-move, the machine decelerates under its normal limits
+   * instead of running until it hits something.
+   */
+  watchdogMs?: number;
+  /** How many chunks are queued ahead. Deeper is smoother and laggier. */
+  queueDepth?: number;
 }
 
 export interface MachineDriver {
@@ -94,6 +125,53 @@ export interface MachineDriver {
    * refusing it and every caller knows the limits.
    */
   moveToMachine(targets: Record<string, number>, opts?: { feedRate?: number }): Promise<void>;
+
+  /**
+   * Drive axes by VELOCITY rather than by destination — "run X at 25 mm/s until
+   * I say otherwise". Only when `capabilities.velocityJog`, and only after
+   * `velocityJogStatus()` has confirmed the firmware really has it.
+   *
+   * This is a different thing from `jog()`, not a variant of it. `jog()` sends
+   * a distance and the machine gets there; an analogue control does not have a
+   * distance to send, because a stick deflection is a speed. Building
+   * continuous jogging out of repeated short `jog()` moves — which is what this
+   * app did before, and what DWC still does — has the failure everyone who has
+   * used it knows: the queue fills, the button stops feeling connected, and the
+   * machine keeps going after release.
+   *
+   * Three rules, and they are the whole contract:
+   *
+   *   1. **The map is the entire velocity vector.** Any axis not in it is set
+   *      to ZERO, not left alone. Send every axis you want moving, every time.
+   *      This is deliberate on the firmware side: a truncated or half-parsed
+   *      command cannot leave an axis running.
+   *   2. **Keep sending.** The watchdog stops everything if nothing arrives
+   *      inside `watchdogMs`. 20–50 Hz is the intended cadence, and "nothing
+   *      changed" is not a reason to go quiet — resend the same vector.
+   *   3. **Stopping means sending zero.** An empty map (or one that is all
+   *      zeroes) is the stop, and it decelerates promptly. Falling silent also
+   *      stops, but not until the watchdog expires — up to a quarter of a
+   *      second of travel later.
+   *
+   * @param speeds signed mm/s per axis letter (deg/s for rotational axes).
+   *   Machine units always: a G20 inches mode does not rescale these.
+   * @returns free space left in the controller's command queue, in whatever
+   *   unit it counts in, or null if it does not say. Only the trend is
+   *   meaningful — heading towards zero means the sender is outrunning the
+   *   machine and should slow down.
+   */
+  velocityJog(speeds: Record<string, number>, opts?: VelocityJogOptions): Promise<number | null>;
+  /**
+   * Ask the controller what it thinks the velocity-jog state is.
+   *
+   * Doubles as the feature probe, which is why it returns null rather than
+   * throwing: null means this firmware does not implement velocity jogging at
+   * all, and the caller should hide the controls rather than offer a pad that
+   * silently does nothing. It is also the only way to see the speeds *after*
+   * clamping — see VelocityJogStatus.
+   */
+  velocityJogStatus(): Promise<VelocityJogStatus | null>;
+
   home(axes?: string[]): Promise<void>;
   /**
    * Set the work offset for `axis` so the current position reads `value`.

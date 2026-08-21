@@ -280,10 +280,19 @@ export class RrfClient {
 
   // --- G-code ------------------------------------------------------------
 
-  /** Queue a command. Resolves when RRF has accepted it into its buffer. */
-  async gcode(command: string): Promise<void> {
+  /**
+   * Queue a command. Resolves when RRF has accepted it into its buffer.
+   *
+   * @returns `buff` — bytes of free space left in that buffer, or null if the
+   *   board did not report it. Nothing needs this for a command sent once, and
+   *   a stream of them needs it badly: it is the only backpressure signal RRF
+   *   offers, and a sender that ignores it finds out it was too fast by the
+   *   machine lagging seconds behind the control rather than by an error.
+   */
+  async gcode(command: string): Promise<number | null> {
     const res = await this.json<{ buff?: number; err?: number }>('rr_gcode', { gcode: command });
     if (res.err) throw new RrfError(`rr_gcode rejected: ${command}`, res.err);
+    return typeof res.buff === 'number' ? res.buff : null;
   }
 
   /** Fetch buffered reply text. Empty string when there is nothing waiting. */
