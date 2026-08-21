@@ -103,6 +103,21 @@ const RATE_HELP =
   'busy board. The machine stops itself if nothing arrives for 250ms, so this is also the margin ' +
   'against a dropped request.';
 
+/**
+ * One axis's speed, in a form whose width does not depend on its value.
+ *
+ * Always one decimal below 100 and none above it, so the string is at most five
+ * characters — and the box it sits in is sized for five, right-aligned. That is
+ * the whole point: a readout that reflows as the numbers change moves
+ * everything to the right of it, thirty times a second, while the operator's
+ * thumb is on the pad. Reserving the space costs nothing and it cannot happen.
+ */
+function speedText(v: number): string {
+  if (v === 0) return '0.0';
+  const mag = Math.abs(v);
+  return `${v > 0 ? '+' : '−'}${mag >= 100 ? mag.toFixed(0) : mag.toFixed(1)}`;
+}
+
 /** Which keys drive which axis, and which way. */
 const KEY_AXES: Record<string, { axis: string; sign: 1 | -1 }> = {
   ArrowRight: { axis: 'X', sign: 1 },
@@ -453,7 +468,11 @@ export class VelocityJogPanel extends PanelElement {
         >
           ⌂
         </button>
-        ${limit ? html`<span class="vjog-limit">${limit}</span>` : nothing}
+        <!-- Always rendered, empty when there is no limit to report. An axis
+             reaching its stop is a thing that happens mid-jog, and a badge
+             appearing then would grow the column and shove the pad sideways
+             under the thumb that caused it. -->
+        <span class="vjog-limit">${limit ?? ''}</span>
       </div>
     `;
   }
@@ -488,7 +507,7 @@ export class VelocityJogPanel extends PanelElement {
                 : capped
                   ? `${letter} is held at its ceiling of ${cap.toFixed(1)} mm/s`
                   : ''}>
-              <em>${letter}</em>${v === 0 ? '0' : `${v > 0 ? '+' : '−'}${Math.abs(v).toFixed(1)}`}
+              <em>${letter}</em><b>${speedText(v)}</b>
             </span>
           `;
         })}
@@ -615,6 +634,12 @@ export class VelocityJogPanel extends PanelElement {
     // request, not a machine falling behind.
     const behind = h.sent > 20 && h.skipped > h.sent * 0.3;
 
+    // The live text is on a row of its own, below the controls rather than
+    // among them. In the row it changed length as the jog ran — "firmware:
+    // chunk 20ms, watchdog 250ms, queue 2" is far wider than "412 sent · buffer
+    // 1024" — which moved the flex row's wrap points and threw the Rate buttons
+    // onto a different line mid-jog. Nothing an operator is holding may move
+    // because of what it is reporting.
     return html`
       <div class="vjog-foot">
         <button
@@ -636,19 +661,6 @@ export class VelocityJogPanel extends PanelElement {
         >
           E-stop
         </button>
-        <span class="vjog-health">
-          ${running
-            ? html`${h.sent} sent${h.skipped ? html` · ${h.skipped} skipped` : nothing}${h.buff !==
-              null
-                ? html` · buffer ${h.buff}`
-                : nothing}`
-            : status
-              ? `firmware: chunk ${status.chunkMs}ms, watchdog ${status.watchdogMs}ms, queue ${status.queueDepth}`
-              : nothing}
-        </span>
-        ${behind
-          ? html`<span class="vjog-warn">Falling behind — try a lower rate</span>`
-          : nothing}
         <span class="label">Rate</span>
         <div class="segmented" title=${RATE_HELP}>
           ${RATES.map(
@@ -670,6 +682,18 @@ export class VelocityJogPanel extends PanelElement {
         >
           Re-check
         </button>
+      </div>
+      <div class=${behind ? 'vjog-health warn' : 'vjog-health'}>
+        ${behind
+          ? 'Falling behind — try a lower rate'
+          : running
+            ? html`${h.sent} sent${h.skipped ? html` · ${h.skipped} skipped` : nothing}${h.buff !==
+              null
+                ? html` · buffer ${h.buff}`
+                : nothing}`
+            : status
+              ? `firmware: chunk ${status.chunkMs}ms, watchdog ${status.watchdogMs}ms, queue ${status.queueDepth}`
+              : ''}
       </div>
     `;
   }

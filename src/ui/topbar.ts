@@ -313,8 +313,11 @@ export class TopBar extends PanelElement {
    */
   private renderStatusPill(): TemplateResult {
     const status = machine.get().status;
-    if (jogRunning.get()) return html`<span class="pill busy">Jogging</span>`;
-    return html`<span class="pill ${statusClass(status)}">${statusLabel(status)}</span>`;
+    // `status-pill` reserves a fixed width; see the note in styles.css. Without
+    // it the bar's contents slide sideways every time the word changes, which
+    // while jogging means every time a thumb goes down.
+    if (jogRunning.get()) return html`<span class="pill status-pill busy">Jogging</span>`;
+    return html`<span class="pill status-pill ${statusClass(status)}">${statusLabel(status)}</span>`;
   }
 
   protected override render(): TemplateResult {

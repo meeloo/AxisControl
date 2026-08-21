@@ -256,6 +256,18 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
    ambiguous. The tool's NAME drops on a narrow screen and its number does not,
    so the pill reads "T1" rather than a truncated word. */
 .status-area .pill { flex: none; white-space: nowrap; }
+/* The status pill is sized for a word rather than for its current word, so that
+   changing state does not shove the tool pill and the machine name along the
+   bar. It matters most while jogging — which says "Jogging" over a machine that
+   calls itself idle, and does so for as long as a thumb is down — but
+   Idle→Busy→Running did the same thing on every job that ever ran.
+
+   Wide enough for seven characters, which covers everything reachable while a
+   hand is on a control: Idle, Busy, Paused, Homing, Jogging, Running. "Tool
+   change" and "Disconnected" are longer and will still widen it — reserving for
+   those would cost forty pixels of top bar permanently, and neither is a state
+   you are holding a jog pad through. */
+.status-area .status-pill { min-width: 76px; text-align: center; }
 .topbar .estop, .topbar .restart { flex: none; }
 /* The firmware string is the first thing worth losing: it names a machine you
    are standing in front of. A media query rather than flex sizing because the
@@ -762,11 +774,26 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .vjog-banner.warn { border-color: var(--warn); color: var(--text); }
 .vjog-banner code { font-family: var(--mono); font-size: 11px; }
 
-/* Readout. Fixed-width figures and a sign always in the same column, so the
-   numbers do not shuffle sideways thirty times a second while the pad moves. */
+/* Readout.
+   Every part of this is about the numbers never moving. Tabular figures so each
+   digit is the same width; a box sized for the longest value a speed can be
+   ("−100.0", five characters after the axis letter) so a value growing cannot
+   widen its own box; right-aligned inside it so the digits line up as they
+   would on a DRO; and nowrap so the row cannot rewrap. Without the reserved
+   width, X going from 0.0 to +5.4 pushed Y, Z and U sideways — at thirty
+   updates a second, under the thumb causing it.
+
+   Wrapping is left on. It was the variable widths that made it dangerous, not
+   the wrapping: items that never change size cannot move the row's wrap points,
+   so a phone can still put the axes on two lines and they will stay there.
+   Clipping them instead would be a worse answer to a problem that no longer
+   exists. */
 .vjog-readout { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap;
-  font-family: var(--mono); font-size: 15px; font-variant-numeric: tabular-nums; flex: 0 0 auto; }
-.vjog-val { color: var(--text-faint); }
+  font-family: var(--mono); font-size: 15px; font-variant-numeric: tabular-nums;
+  flex: 0 0 auto; }
+.vjog-val { color: var(--text-faint); display: inline-flex; align-items: baseline;
+  flex: 0 0 auto; white-space: nowrap; }
+.vjog-val b { min-width: 5ch; text-align: right; font-weight: inherit; }
 .vjog-val em { font-style: normal; color: var(--text-faint); font-size: 11px;
   margin-right: 3px; font-weight: 700; }
 .vjog-val.moving { color: var(--text); }
@@ -794,8 +821,10 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .vjog-strip-name { font-weight: 700; font-size: 13px; color: var(--text-dim); flex: 0 0 auto; }
 .vjog-home { flex: 0 0 auto; min-height: 26px; height: 26px; padding: 0 8px; font-size: 14px;
   color: var(--text-dim); }
+/* Always present, usually empty — min-height reserves its line so an axis
+   hitting its stop mid-jog does not grow the column. */
 .vjog-limit { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
-  color: var(--bad); flex: 0 0 auto; }
+  color: var(--bad); flex: 0 0 auto; min-height: 13px; line-height: 13px; }
 
 .vjog-face { fill: var(--bg-raised); stroke: var(--border-strong); stroke-width: 1.5; }
 .vjog-dead { fill: var(--bg); stroke: var(--border); stroke-width: 1;
@@ -815,8 +844,14 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .vjog-foot { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; flex: 0 0 auto; }
 .vjog-stop { min-width: 64px; font-weight: 600; }
 .vjog-estop { color: var(--bad); border-color: var(--bad); }
-.vjog-health { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
-.vjog-warn { font-size: 11px; color: var(--warn); }
+/* Its own row, below the controls rather than among them. This text changes
+   length as the jog runs, and in the flex row above it that moved the row's
+   wrap points — which threw the Rate buttons onto a different line mid-jog.
+   min-height keeps the row when the text is empty. */
+.vjog-health { font-family: var(--mono); font-size: 10px; color: var(--text-faint);
+  flex: 0 0 auto; min-height: 13px; line-height: 13px; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+.vjog-health.warn { color: var(--warn); }
 .vjog-recheck { margin-left: auto; font-size: 11px; }
 .vjog-blocked { color: var(--warn); font-size: 12px; flex: 0 0 auto; }
 .vjog-hint { font-size: 10px; color: var(--text-faint); line-height: 1.4; flex: 0 0 auto; }
