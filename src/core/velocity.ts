@@ -275,9 +275,11 @@ export function canVelocityJog(): { ok: boolean; why: string } {
   const support = jogSupport.get();
   if (support === 'no') return { ok: false, why: 'This firmware does not implement M700' };
   if (support !== 'yes') return { ok: false, why: 'Checking the firmware…' };
-  // JOG_BLOCKED_STATES, not BUSY_STATES. A machine being jogged reports `busy`,
-  // so refusing on busy means refusing every command after the first one — see
-  // the note on the set itself.
+  // JOG_BLOCKED_STATES, not BUSY_STATES, and note what this does NOT do: it
+  // never asks the status whether a jog is already running. It cannot — the
+  // firmware leaves the status at `idle` throughout an M700 jog. `jogRunning`
+  // is the answer to that question and it is kept here, client-side. All this
+  // decides is whether something else has the machine.
   const status = machine.get().status;
   if (JOG_BLOCKED_STATES.has(status)) return { ok: false, why: `Machine is ${status}` };
   return { ok: true, why: '' };
@@ -534,10 +536,12 @@ if (typeof window !== 'undefined') {
       stopJog(jogRunning.peek() ? 'Connection lost' : undefined);
     } else if (JOG_BLOCKED_STATES.has(status) && jogRunning.peek()) {
       // The states that mean something ELSE has taken the machine — a program
-      // started, homing began, the estop was hit. Emphatically not `busy`,
-      // which is what the machine reports because this jog is working: stopping
-      // on that stopped the jog a fraction of a second after it started, every
-      // time, on any machine that reports its status honestly.
+      // started, homing began, the estop was hit. Emphatically not `busy`: an
+      // ordinary move reports that, and a jog beginning while one is still
+      // finishing is normal. (The firmware no longer reports busy for the jog
+      // itself either, but this must not depend on that: an earlier version did
+      // report it, and stopping on it killed every jog a fraction of a second
+      // after it started.)
       stopJog(`Machine went ${status}`);
     }
   });

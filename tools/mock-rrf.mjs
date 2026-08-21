@@ -553,8 +553,10 @@ function stopJog(why) {
   jog.active = false;
   jog.speeds = {};
   jog.commanded = {};
-  // Left to settleMoving to drop back to idle, so a jog that ends while an
-  // ordinary move is still notionally running does not clear the status early.
+  // The status is not touched here and was not touched on the way in either: a
+  // jog does not change it. If the machine reads busy at this moment it is
+  // because of an ordinary move that has not finished, and settleMoving owns
+  // when that ends.
   bumpSeq('move');
 }
 
@@ -646,12 +648,15 @@ function handleJog(upper) {
   jog.commands++;
   jog.lastCommandAt = Date.now();
 
-  // A moving machine reports "busy", and that includes a machine moving because
-  // it is being jogged. Reproduced here because a host that treats "busy" as a
-  // reason not to send is a host that stops itself the instant it succeeds — and
-  // without this the mock sits at "idle" through an entire jog, which lets that
-  // bug pass every test there is. It did.
-  markMoving();
+  // Deliberately NOT markMoving(). The firmware leaves state.status at "idle"
+  // for the whole of an M700 jog — it used to report "busy" and no longer does —
+  // so a host cannot use the status to tell whether a jog is running and has to
+  // track the stick itself. Reproduced exactly, because a mock that reports busy
+  // here would let a host that depends on the status pass, and it would then
+  // fail on the machine.
+  //
+  // Ordinary moves DO still report busy; see markMoving on the G0/G1 branch.
+  // That is what keeps a running macro or print distinguishable.
 }
 
 function handleFollow(cmd, upper) {
@@ -748,7 +753,8 @@ function markMoving() {
 /** Drop back to idle once the move and any jog are done. Called from the tick. */
 function settleMoving() {
   if (state.status !== 'busy') return;
-  if (jog.active) return;
+  // Not gated on jog.active: a jog does not hold the status busy, so a jog
+  // running past the end of an ordinary move must not keep reporting one.
   if (Date.now() < movingUntil) return;
   state.status = 'idle';
   bumpSeq('state');

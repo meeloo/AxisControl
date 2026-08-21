@@ -185,19 +185,36 @@ await sleep(500);
 const during = await jogState();
 ok(during.active, 'a vector set through the app makes the machine move');
 
-// The bug this exists to prevent, and it shipped: a machine that is moving
-// reports "busy", so a host treating "busy" as a reason not to send stops itself
-// the instant it succeeds. 500ms at 30Hz is fifteen commands, all of which have
-// to have been sent AFTER the status went busy.
-ok(st.machine.peek().status === 'busy',
-   '  and the machine reports itself busy while being jogged, as a real one does',
+// The status says NOTHING about a jog. The firmware used to report "busy" while
+// jogging and no longer does, so `idle` here is correct and a host cannot use
+// the status to tell whether a jog is running.
+ok(st.machine.peek().status === 'idle',
+   '  and the machine still reports itself idle, because a jog does not change the status',
    st.machine.peek().status);
-ok(v.canVelocityJog().ok,
-   '  which must not stop the app sending — busy is what success looks like here',
+
+// Which makes this the only authority on it, and it has to be the app's own.
+ok(v.jogRunning.peek(), '  so the app has to know from its own state that a jog is running');
+ok((await jogState()).active, '  and the board really is jogging', 'per /__jog');
+
+// The app must not consult the status either way. Checked from both sides: it
+// keeps sending here, and — further down — it still refuses while a program
+// runs. 500ms at 30Hz is fifteen commands.
+ok(v.canVelocityJog().ok, '  and nothing about the status stops it sending',
    v.canVelocityJog().why || 'allowed');
-ok(v.jogRunning.peek(), '  so the jog is still running a moment later');
 ok((await jogState()).commands > 5,
-   '  and commands kept arriving throughout', `${(await jogState()).commands} sent`);
+   '  so commands keep arriving throughout', `${(await jogState()).commands} sent`);
+
+// An ordinary move DOES still report busy, which is what keeps a running macro
+// or print distinguishable — and a jog beginning while one is finishing must
+// still be allowed.
+await raw('G53 G1 X261 F1000');
+await sleep(600);
+ok(st.machine.peek().status === 'busy',
+   '  while an ordinary move still reports busy, so a macro stays distinguishable',
+   st.machine.peek().status);
+ok(v.canVelocityJog().ok, '  and jogging is allowed during one anyway',
+   v.canVelocityJog().why || 'allowed');
+ok(v.jogRunning.peek(), '  with the jog uninterrupted by it');
 ok(near(during.speeds.X, 10, 1e-6) && near(during.commanded.X, 200, 1e-6),
    '  and 200 mm/s is silently clamped to the ceiling rather than refused',
    `asked ${during.commanded.X}, running ${during.speeds.X}`);

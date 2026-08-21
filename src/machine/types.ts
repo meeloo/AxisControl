@@ -27,13 +27,18 @@ export type MachineStatus =
 /**
  * Statuses in which hand-driven motion cannot happen.
  *
- * Deliberately NOT `BUSY_STATES`, and the whole difference is `busy`. A machine
- * that is moving reports `busy` — including a machine that is moving *because
- * the operator is jogging it*. Treat that as a reason to stop sending and the
- * control defeats itself the instant it works: the first command starts a move,
- * the status goes busy, the next command is refused, and continuous jogging
- * lasts exactly one command. The Jog panel did precisely that on a real machine
- * while passing every test here, because the mock stayed idle through a jog.
+ * Deliberately NOT `BUSY_STATES`, and the whole difference is `busy`. An
+ * ordinary move reports `busy` for as long as it runs — which includes the
+ * distance rose's own G1s, so refusing on busy greyed the rose out under the
+ * operator's thumb the moment a jog started.
+ *
+ * Velocity jogging (M700) is a separate case and has moved: the firmware used
+ * to report `busy` while jogging and now leaves the status at `idle`. That is
+ * why nothing in this app infers "a jog is running" from the status — see
+ * `jogRunning` in core/velocity.ts, which is client-side and is the only
+ * authority on it. This set is still what it was, though, because a velocity
+ * jog can begin while the machine is still busy finishing something else, and
+ * refusing then would be just as wrong.
  *
  * `paused` is absent for the same kind of reason. Jogging while paused is when
  * you most want it — clearing a chip, checking a cut, moving the head to see
@@ -41,7 +46,8 @@ export type MachineStatus =
  *
  * What is left is the cases where something else genuinely owns the machine, or
  * where there is nothing to drive: a program running, a homing move or tool
- * change in progress, an emergency stop, motors off, no connection.
+ * change in progress, an emergency stop, motors off, no connection. Those are
+ * still reported, so a running macro or print stays distinguishable.
  */
 export const JOG_BLOCKED_STATES: ReadonlySet<MachineStatus> = new Set<MachineStatus>([
   'disconnected',

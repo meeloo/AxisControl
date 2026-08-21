@@ -30,6 +30,7 @@ import {
   selectPage,
 } from './layout.js';
 import { statusClass, statusLabel } from './widgets.js';
+import { jogRunning } from '../core/velocity.js';
 import { theme, toggleTheme } from '../core/theme.js';
 import {
   applySettings,
@@ -65,6 +66,7 @@ export class TopBar extends PanelElement {
       driverId.get();
       theme.get();
       pageTabs.get();
+      jogRunning.get();
       renamingPage.get();
     });
   }
@@ -296,6 +298,25 @@ export class TopBar extends PanelElement {
     void actions.reset();
   }
 
+  /**
+   * What the machine is doing, which is not always what it says it is doing.
+   *
+   * A velocity jog leaves the firmware's status at `idle` — it used to report
+   * `busy` and no longer does — so the pill would read Idle while the gantry
+   * moves under the operator's thumb, which is the one thing a status pill must
+   * never do. `jogRunning` is this app's own record of the stick being
+   * deflected, and it is the only authority on that; see core/velocity.ts.
+   *
+   * Only the jog is overridden. Everything else the machine reports is still
+   * the machine's to report, and a running program still says so, which is what
+   * keeps the two distinguishable.
+   */
+  private renderStatusPill(): TemplateResult {
+    const status = machine.get().status;
+    if (jogRunning.get()) return html`<span class="pill busy">Jogging</span>`;
+    return html`<span class="pill ${statusClass(status)}">${statusLabel(status)}</span>`;
+  }
+
   protected override render(): TemplateResult {
     const state = machine.get();
     const live = connected.get();
@@ -319,7 +340,7 @@ export class TopBar extends PanelElement {
         <span class="topbar-spacer"></span>
 
         <div class="status-area">
-          <span class="pill ${statusClass(state.status)}">${statusLabel(state.status)}</span>
+          ${this.renderStatusPill()}
           ${state.tool
             ? html`<span class="pill active tool-pill" title="Active tool">
                 T${state.tool.number}${state.tool.name

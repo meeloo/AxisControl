@@ -129,6 +129,13 @@ itself — releasing sends an explicit zero and sends it again behind anything
 still in flight, and losing the window, the tab, the pointer, the panel or the
 connection is a stop. Arrow keys work the same way while the panel has focus.
 
+The host owns knowing that a jog is happening, too. The firmware leaves its
+status at `idle` for the whole of a velocity jog, so nothing here infers one
+from the machine — the app tracks the stick itself, and that is what the status
+pill reads when it says **Jogging** over a machine calling itself idle. Ordinary
+moves still report `busy`, so a running macro or program stays distinguishable
+from a hand on the pad.
+
 Two ceilings apply to any commanded speed, and neither produces an error: the
 axis maximum from `M203`, and `2 × acceleration × lookahead`, which is the
 planner refusing to enter a move faster than it could stop inside it. Ask for
@@ -298,6 +305,12 @@ machine when commands stop arriving, and the silent clamping of any speed above
 happening — the commanded speeds, the clamped ones, and why it last stopped —
 which is how `npm run velocity-check` tells a stop that was *sent* from one the
 watchdog cleaned up 250ms later.
+
+It also leaves `state.status` at `idle` throughout a jog, exactly as the
+firmware does — a mock that reported `busy` there would let a host that depends
+on the status pass, and it would then fail on the machine. Ordinary `G0`/`G1`
+moves do report `busy` for a window afterwards, which is what keeps the two
+apart.
 
 `M604` axis following is there too, including the two behaviours a host has to
 be written against: engaging **captures** the current separation rather than

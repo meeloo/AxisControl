@@ -22,6 +22,7 @@ import {
   saveSetting,
 } from '../core/store.js';
 import { BUSY_STATES, type FileEntry } from '../machine/types.js';
+import { jogRunning } from '../core/velocity.js';
 import { empty } from '../ui/widgets.js';
 import { dirPicker, panelDir } from '../ui/folder.js';
 
@@ -75,6 +76,9 @@ export class MacrosPanel extends PanelElement {
       connected.get();
       capabilities.get();
       machine.get();
+      // The status no longer covers a velocity jog, so the buttons have to
+      // re-render off this too or they stay live through one. See canRun.
+      jogRunning.get();
     });
   }
 
@@ -93,8 +97,22 @@ export class MacrosPanel extends PanelElement {
     }
   }
 
+  /**
+   * A macro moves the machine, so it needs the machine to itself.
+   *
+   * `jogRunning` is checked alongside the status because the status stopped
+   * covering it: the firmware leaves itself at `idle` throughout a velocity
+   * jog, so without this a macro could be launched into a machine already
+   * moving under someone's thumb. The firmware would resolve it — anything
+   * waiting for standstill cancels a jog — but resolving it by yanking the
+   * control out of the operator's hand mid-move is not a thing to offer.
+   *
+   * Only as good as one browser: `jogRunning` is this client's state, so a jog
+   * driven from a phone is invisible here. The status used to cover that case
+   * and no longer can, which is worth knowing rather than papering over.
+   */
   private get canRun(): boolean {
-    return connected.get() && !BUSY_STATES.has(machine.get().status);
+    return connected.get() && !BUSY_STATES.has(machine.get().status) && !jogRunning.get();
   }
 
   // --- Loading ------------------------------------------------------------
