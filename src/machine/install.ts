@@ -24,6 +24,99 @@ import { BUILD, type BuildStamp } from '../core/build.js';
 /** Where a copy lives on the SD card, and what URL that makes it. */
 export const INSTALL_DIR = '/www/AxisControl';
 
+/**
+ * The other place it can go: `/www` itself, which RepRapFirmware serves as `/`.
+ *
+ * This is DWC's directory. Installing here does not delete DWC — nothing here
+ * deletes anything — but it does overwrite `/www/index.html`, which is what the
+ * machine hands out at `/`, so DWC stops being what you get when you type the
+ * machine's address. Every other DWC file stays exactly where it is, and that
+ * is deliberate: it is what lets `preserveDwc` leave a working way back.
+ *
+ * Worth being clear about what is given up, because it is not nothing. DWC is
+ * how firmware is updated, how the network is configured, and where the config
+ * tool lives — none of which this app does. Replacing it is a reasonable choice
+ * on a machine that has a laptop within reach, and a bad one on a machine whose
+ * only interface is the tablet bolted to it.
+ */
+export const ROOT_DIR = '/www';
+
+export type InstallTarget = 'beside' | 'replace';
+
+export function targetDir(target: InstallTarget): string {
+  return target === 'replace' ? ROOT_DIR : INSTALL_DIR;
+}
+
+/** True for the install that answers the machine's bare address. */
+export function isRootInstall(dir: string): boolean {
+  return dir === ROOT_DIR;
+}
+
+/**
+ * Where DWC's own front page is kept once this app has taken `/`.
+ *
+ * A copy rather than a rename, because RRF's file API has a move but a copy is
+ * one read and one write through the same driver every other file goes through,
+ * and a rename that half-worked would leave no front page at all.
+ */
+export const DWC_FALLBACK = '/www/dwc.html';
+
+/** Reads as this app's own front page rather than DWC's. */
+function looksLikeUs(html: string): boolean {
+  return /cnc\.js/.test(html);
+}
+
+export type PreserveResult =
+  | { kind: 'saved'; at: string }
+  | { kind: 'kept'; at: string }
+  | { kind: 'none'; why: string };
+
+/**
+ * Put DWC's front page somewhere it can still be reached, before taking `/`.
+ *
+ * The one thing that makes replacing DWC reversible from the machine itself. It
+ * runs before any file is written, and it never overwrites an existing copy:
+ * the first backup is the real one, and a second install — by which point `/`
+ * is already this app — would otherwise save OUR index.html over the only copy
+ * of DWC's and quietly destroy the way back.
+ */
+export async function preserveDwc(driver: MachineDriver): Promise<PreserveResult> {
+  try {
+    const existing = await driver.readFile(DWC_FALLBACK);
+    if (existing.length) return { kind: 'kept', at: DWC_FALLBACK };
+  } catch {
+    // Not there yet, which is the normal first-install case.
+  }
+
+  let current: Uint8Array;
+  try {
+    current = await driver.readFile(`${ROOT_DIR}/index.html`);
+  } catch {
+    return { kind: 'none', why: 'there is no /www/index.html to keep — nothing was serving / yet' };
+  }
+
+  if (looksLikeUs(new TextDecoder().decode(current))) {
+    return {
+      kind: 'none',
+      why: 'the page at / is already this app, and no copy of DWC was found to keep',
+    };
+  }
+
+  await driver.writeFile(DWC_FALLBACK, current);
+  return { kind: 'saved', at: DWC_FALLBACK };
+}
+
+/** Where DWC ends up being reachable, for the panel to link to. */
+export function dwcFallbackUrl(controllerUrl: string): string {
+  const base = normaliseControllerUrl(controllerUrl);
+  const path = DWC_FALLBACK.replace(/^\/www/, '');
+  try {
+    return new URL(path, base).href;
+  } catch {
+    return `${base}${path}`;
+  }
+}
+
 /** The manifest a build writes about itself. */
 export interface BuildManifest extends BuildStamp {
   builtAt: string;
@@ -256,6 +349,9 @@ export function totalBytes(files: Map<string, Uint8Array>): number {
  * This is NOT a URL to open. See `entryUrl`.
  */
 export function installedUrl(controllerUrl: string, dir = INSTALL_DIR): string {
+  // '' for a root install, which `new URL('/', base)` resolves to the origin —
+  // exactly right. Written out because `${path}/` reading as `/` only by
+  // accident of the empty string is the kind of thing that gets "tidied up".
   const path = dir.replace(/^\/www/, '');
   // Normalised rather than trusted. The catch below used to hand back the
   // address with the path glued on, which for an address typed without a
@@ -316,6 +412,13 @@ export function shortcutUrl(controllerUrl: string, dir = INSTALL_DIR): string {
 }
 
 export async function writeShortcut(driver: MachineDriver, dir = INSTALL_DIR): Promise<void> {
+  // A root install already answers the machine's bare address, so there is no
+  // short URL to invent — and `shortcutPath('/www')` would be `/www.html`,
+  // a file beside the web root rather than in it. Refused rather than skipped
+  // silently: a caller asking for this has misunderstood something.
+  if (isRootInstall(dir)) {
+    throw new InstallError('a root install is already at /, so it has no shortcut to write');
+  }
   const target = `${dir.replace(/^\/www/, '')}/index.html`;
   // A meta refresh rather than a script: it works with scripting disabled, it
   // needs no framework, and it is understood by every browser this app claims

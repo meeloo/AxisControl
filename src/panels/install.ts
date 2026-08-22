@@ -18,6 +18,13 @@ import { activeDriver, appendLog, connected, controllerUrl, machine, saveSetting
 import { BUILD, describeBuild, isDirtyBuild } from '../core/build.js';
 import {
   INSTALL_DIR,
+  ROOT_DIR,
+  DWC_FALLBACK,
+  dwcFallbackUrl,
+  isRootInstall,
+  preserveDwc,
+  targetDir,
+  type InstallTarget,
   entryServesUs,
   entryUrl,
   fetchBuild,
@@ -59,6 +66,15 @@ interface Settings {
   betas: boolean;
   /** Write /www/AxisControl.html, so the short URL works. */
   shortcut: boolean;
+  /**
+   * Beside DWC in its own directory, or at `/` in place of it.
+   *
+   * Remembered, because it decides where the panel LOOKS as well as where it
+   * writes: a machine with a root install has nothing at /www/AxisControl, and
+   * a panel that kept checking there would report it as not installed and offer
+   * to install it again.
+   */
+  target: InstallTarget;
   lastCheck: number;
 }
 
@@ -67,9 +83,21 @@ export class InstallPanel extends PanelElement {
     autoCheck: true,
     betas: false,
     shortcut: true,
+    target: 'beside',
     lastCheck: 0,
     ...loadSetting<Partial<Settings>>('install', {}),
   };
+
+  /**
+   * Where this panel writes and looks, from the remembered choice.
+   *
+   * `installDir` rather than `dir`: HTMLElement already has a `dir` — the text
+   * direction — and a custom element that redefines it is not an HTMLElement
+   * any more as far as the type system is concerned.
+   */
+  private get installDir(): string {
+    return targetDir(this.settings.target);
+  }
 
   /** What is on the machine, null for nothing, undefined for not looked yet. */
   private installed: BuildManifest | null | undefined = undefined;
@@ -89,6 +117,8 @@ export class InstallPanel extends PanelElement {
    * "the machine will not serve the files, check your SD card".
    */
   private caveat: string | null = null;
+  /** Where DWC ended up, after an install that took its place. Null otherwise. */
+  private dwcNote: string | null = null;
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -144,7 +174,7 @@ export class InstallPanel extends PanelElement {
   private async readInstalled(): Promise<void> {
     if (!connected.peek()) return;
     const driver = activeDriver();
-    this.installed = driver ? (await verifyInstalled(driver, INSTALL_DIR)).manifest : null;
+    this.installed = driver ? (await verifyInstalled(driver, this.installDir)).manifest : null;
     this.requestUpdate();
   }
 
@@ -249,12 +279,13 @@ export class InstallPanel extends PanelElement {
    */
   private async checkServed(): Promise<string | null> {
     const url = controllerUrl.peek();
-    const entry = entryUrl(url);
+    const dir = this.installDir;
+    const entry = entryUrl(url, dir);
 
-    let probe = await probeManifest(installedUrl(url));
+    let probe = await probeManifest(installedUrl(url, dir));
     for (let attempt = 0; !probe.manifest && attempt < 3; attempt++) {
       await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
-      probe = await probeManifest(installedUrl(url));
+      probe = await probeManifest(installedUrl(url, dir));
     }
     if (!probe.manifest) {
       return (
@@ -267,7 +298,8 @@ export class InstallPanel extends PanelElement {
     if (!(await entryServesUs(entry))) {
       return (
         `The files are on the machine, but ${entry} is being answered by something else — ` +
-        'almost certainly DWC. That is what a "404 page not found" drawn inside the DWC shell means.'
+        `almost certainly DWC${isRootInstall(dir) ? ', which may still be cached in this browser' : ''}. ` +
+        'That is what a "404 page not found" drawn inside the DWC shell means.'
       );
     }
     return null;
@@ -284,18 +316,39 @@ export class InstallPanel extends PanelElement {
       );
     }
 
-    await installBuild(driver, INSTALL_DIR, files, (p) =>
+    const dir = this.installDir;
+    const root = isRootInstall(dir);
+
+    // Before a single byte is written, and only when taking `/`: DWC's front
+    // page is about to stop being what the machine hands out, and this is what
+    // leaves a way back to it. Done first because an install that dies halfway
+    // should still have the copy.
+    if (root) {
+      this.step('keeping a copy of DWC', 0, 1);
+      const kept = await preserveDwc(driver);
+      this.dwcNote =
+        kept.kind === 'none'
+          ? `DWC was not preserved: ${kept.why}.`
+          : `DWC is still reachable at ${dwcFallbackUrl(controllerUrl.peek())}` +
+            `${kept.kind === 'kept' ? ' — the copy from a previous install' : ''}.`;
+    } else {
+      this.dwcNote = null;
+    }
+
+    await installBuild(driver, dir, files, (p) =>
       this.step(`writing ${p.file}`, p.done, p.total),
     );
     // Last, and only now: the manifest is what claims a complete copy is here.
-    await sealInstall(driver, INSTALL_DIR, manifest);
-    if (this.settings.shortcut) await writeShortcut(driver, INSTALL_DIR);
+    await sealInstall(driver, dir, manifest);
+    // A root install already answers the bare address; there is no short URL to
+    // make, and writeShortcut refuses one.
+    if (this.settings.shortcut && !root) await writeShortcut(driver, dir);
 
     // Did the bytes land? Asked through the driver, over the same channel the
     // uploads went through. This is the only question whose answer means the
     // install failed.
     this.step('confirming the copy on the machine', 1, 1);
-    const written = await verifyInstalled(driver, INSTALL_DIR);
+    const written = await verifyInstalled(driver, dir);
     if (!written.manifest) {
       throw new Error(`The upload finished but the copy is not readable: ${written.reason}`);
     }
@@ -314,7 +367,7 @@ export class InstallPanel extends PanelElement {
   // --- Render -------------------------------------------------------------
 
   private renderStatus(): TemplateResult {
-    const url = entryUrl(controllerUrl.get());
+    const url = entryUrl(controllerUrl.get(), this.installDir);
     const installed = this.installed;
     const same = isSameBuild(installed ?? null, BUILD);
 
@@ -371,10 +424,18 @@ export class InstallPanel extends PanelElement {
           ?disabled=${!live || !!this.busy || this.machineBusy}
           title=${this.machineBusy
             ? 'Not while the machine is running'
-            : 'Copy the build this page is running from onto the machine'}
+            : `Copy the build this page is running from into ${this.installDir}`}
           @click=${() => this.installThisCopy()}
         >
-          ${this.installed ? 'Replace with this copy' : 'Install on the machine'}
+          <!-- "Reinstall" rather than "Replace with this copy": with a root
+               install on the table, "replace" now means DWC to anyone reading
+               this panel, and a button that appears to say "replace DWC" when
+               it means "write this version again" is the wrong word twice. -->
+          ${this.installed
+            ? 'Reinstall this copy'
+            : isRootInstall(this.installDir)
+              ? 'Install in place of DWC'
+              : 'Install on the machine'}
         </button>
         ${updateAvailable
           ? html`<button
@@ -391,7 +452,60 @@ export class InstallPanel extends PanelElement {
     `;
   }
 
+  /**
+   * Where it goes, and what that costs.
+   *
+   * A select rather than a checkbox because these are two places, not a
+   * modifier on one — and the warning is deliberately not a tooltip. Replacing
+   * DWC is the only thing this panel does that another tool cannot undo from
+   * the machine: DWC is how firmware is updated and how the network is
+   * configured, and this app does neither.
+   */
+  private renderTarget(): TemplateResult {
+    const root = isRootInstall(this.installDir);
+    return html`
+      <div class="inst-target">
+        <label class="param">
+          <span>Install to</span>
+          <select
+            ?disabled=${!!this.busy}
+            @change=${(e: Event) => {
+              this.settings.target = (e.target as HTMLSelectElement).value as InstallTarget;
+              this.save();
+              // The other location is a different question with a different
+              // answer, and the one on screen is now about the wrong place.
+              this.installed = undefined;
+              this.done = null;
+              this.caveat = null;
+              this.dwcNote = null;
+              void this.readInstalled();
+              this.requestUpdate();
+            }}
+          >
+            <option value="beside" ?selected=${!root}>${INSTALL_DIR} — beside DWC</option>
+            <option value="replace" ?selected=${root}>${ROOT_DIR} — in place of DWC</option>
+          </select>
+        </label>
+        ${root
+          ? html`<div class="warn-banner">
+              <strong>This takes over the machine's address.</strong> Typing the machine's name into
+              a browser will give you this app instead of DWC. Nothing is deleted — DWC's own files
+              stay where they are, and its front page is copied to
+              <code>${DWC_FALLBACK.replace('/www', '')}</code> before anything is written, so it
+              stays reachable there.
+              <br />
+              What you give up is what this app does not do:
+              <strong>firmware updates, network configuration and the config tool are all DWC's</strong>.
+              Worth it on a machine with a laptop within reach; not on one whose only interface is
+              the tablet bolted to it.
+            </div>`
+          : nothing}
+      </div>
+    `;
+  }
+
   protected override render(): TemplateResult {
+    const root = isRootInstall(this.installDir);
     const available = this.available;
     const updateAvailable =
       available && this.installed && isNewer(available, this.installed);
@@ -399,16 +513,20 @@ export class InstallPanel extends PanelElement {
     return html`
       <div class="pack inst">
         <div class="pack-blurb">
-          Serve this app from the machine itself, beside DWC, which stays exactly where it is. A
-          tablet then needs nothing but the machine, and the controller is same-origin so no CORS
-          setting is involved.
+          Serve this app from the machine itself. A tablet then needs nothing but the machine, and
+          the controller is same-origin so no CORS setting is involved.
         </div>
-        <div class="pack-blurb inst-urlnote">
-          The address ends in <code>/index.html</code>. RepRapFirmware has no directory index:
-          <code>${INSTALL_DIR.replace('/www', '')}</code> on its own resolves to no file, and the
-          firmware answers an unresolvable path with DWC — which then shows its own
-          <em>404 page not found</em>. That page means the address, not the install.
-        </div>
+
+        ${this.renderTarget()}
+
+        ${root
+          ? nothing
+          : html`<div class="pack-blurb inst-urlnote">
+              The address ends in <code>/index.html</code>. RepRapFirmware has no directory index:
+              <code>${INSTALL_DIR.replace('/www', '')}</code> on its own resolves to no file, and
+              the firmware answers an unresolvable path with DWC — which then shows its own
+              <em>404 page not found</em>. That page means the address, not the install.
+            </div>`}
 
         ${this.renderStatus()}
 
@@ -440,6 +558,7 @@ export class InstallPanel extends PanelElement {
         ${this.error ? html`<div class="warn-banner bad">${this.error}</div>` : nothing}
         ${this.done ? html`<div class="pack-note good">${this.done}</div>` : nothing}
         ${this.caveat ? html`<div class="warn-banner">${this.caveat}</div>` : nothing}
+        ${this.dwcNote ? html`<div class="pack-note">${this.dwcNote}</div>` : nothing}
 
         ${this.renderActions()}
 
@@ -456,21 +575,27 @@ export class InstallPanel extends PanelElement {
             />
             Check ${REPO} for updates, once a day
           </label>
-          <label
-            class="check"
-            title="Writes ${shortcutPath()}, one line of HTML that redirects to the entry point. The only file written outside the install directory."
-          >
-            <input
-              type="checkbox"
-              .checked=${this.settings.shortcut}
-              @change=${(e: Event) => {
-                this.settings.shortcut = (e.target as HTMLInputElement).checked;
-                this.save();
-                this.requestUpdate();
-              }}
-            />
-            Add a ${shortcutUrl(controllerUrl.get()).replace(/^https?:\/\//, '')} shortcut
-          </label>
+          <!-- Nothing to shorten when the app already answers the bare address,
+               and shortcutPath('/www') would name a file beside the web root
+               rather than in it. Hidden rather than disabled: a control that
+               cannot apply is noise, and the row above already explains why. -->
+          ${root
+            ? nothing
+            : html`<label
+                class="check"
+                title="Writes ${shortcutPath()}, one line of HTML that redirects to the entry point. The only file written outside the install directory."
+              >
+                <input
+                  type="checkbox"
+                  .checked=${this.settings.shortcut}
+                  @change=${(e: Event) => {
+                    this.settings.shortcut = (e.target as HTMLInputElement).checked;
+                    this.save();
+                    this.requestUpdate();
+                  }}
+                />
+                Add a ${shortcutUrl(controllerUrl.get()).replace(/^https?:\/\//, '')} shortcut
+              </label>`}
           <label class="check">
             <input
               type="checkbox"

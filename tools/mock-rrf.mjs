@@ -250,6 +250,16 @@ function removeFromListing(full) {
   if (at >= 0) list.splice(at, 1);
 }
 
+/**
+ * Paths written through rr_upload during this run.
+ *
+ * The mock serves dist/ as well as the card, and for a top-level name like
+ * /index.html both have an answer. This is how it tells "the fixture" from
+ * "something an install actually put there" — see the note at the static
+ * handler.
+ */
+const uploaded = new Set();
+
 const FILE_CONTENT = {
   // DWC, near enough: a single-page app at the root of /www. Present so a test
   // can tell "the machine served Axis Control" from "the machine served the
@@ -1062,6 +1072,7 @@ const server = createServer(async (req, res) => {
       // rubbish that still looks like a successful upload.
       const body = Buffer.concat(chunks);
       FILE_CONTENT[name] = body;
+      uploaded.add(name);
       // ...and it appears in the directory. Storing the content without
       // listing it is the mock being kinder than the firmware in the one
       // direction that matters: anything that writes files and then checks
@@ -1139,18 +1150,30 @@ const server = createServer(async (req, res) => {
   // the plain files would work here and be slow on the real board — while one
   // that uploaded only the .gz files would work on the board and 404 against a
   // mock that did not do this.
-  // Static: serve dist/ so same-origin can be tested too. First, because this
-  // is the mock standing in for the app's own dev server — on a real machine
-  // /index.html IS /www/index.html, but here it has to be the build under test.
+  // Static: serve dist/ so same-origin can be tested too. Before the card,
+  // because this mock also stands in for the app's own dev server — on a real
+  // machine /index.html IS /www/index.html, but here it usually has to be the
+  // build under test.
+  //
+  // Except once something has actually been uploaded to that path. A real board
+  // has one file there and serves it; this mock has two and has to choose, and
+  // choosing dist unconditionally makes an install to /www untestable — the
+  // page served at / would be the build under test whether or not a single byte
+  // reached the card. So an uploaded file wins, and the pre-seeded DWC stand-in
+  // at /www/index.html does not, which keeps every existing test loading the
+  // app from / exactly as before.
+  const onCard = `/www${path === '/' ? '/index.html' : path}`;
   const file = join(DIST, path === '/' ? 'index.html' : path.replace(/^\/+/, ''));
-  try {
-    await stat(file);
-    const body = await readFile(file);
-    cors(res);
-    res.writeHead(200, { 'Content-Type': MIME[extname(file)] ?? 'application/octet-stream' });
-    return res.end(body);
-  } catch {
-    // Not part of the build; fall through to what is on the card.
+  if (!uploaded.has(onCard) && !uploaded.has(`${onCard}.gz`)) {
+    try {
+      await stat(file);
+      const body = await readFile(file);
+      cors(res);
+      res.writeHead(200, { 'Content-Type': MIME[extname(file)] ?? 'application/octet-stream' });
+      return res.end(body);
+    } catch {
+      // Not part of the build; fall through to what is on the card.
+    }
   }
 
   // A file under /www, resolved the way the firmware resolves one.

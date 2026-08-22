@@ -14,8 +14,10 @@ run — and it is honest about what the controller can and cannot do rather than
 showing buttons that quietly fail.
 
 It is written against RepRapFirmware's documented HTTP API, contains no DWC or
-RRF code, and is not a replacement for either: firmware updates, the config
-tool and network setup are all still DWC's job, and DWC stays installed at `/`.
+RRF code, and is not a replacement for either: firmware updates, the config tool
+and network setup are all still DWC's job. It installs beside DWC by default and
+leaves it exactly where it is; it can be installed over DWC instead, which keeps
+DWC reachable at `/dwc.html` — see [Deploying to the controller](#deploying-to-the-controller).
 
 > **This drives machinery that can injure you.** It moves a spindle and a
 > gantry, and it will do exactly what it is told. Nothing here replaces your own
@@ -348,7 +350,21 @@ Open <http://localhost:8081> and it connects to itself.
 ## Deploying to the controller
 
 Easiest is the **Install** panel, which copies the running copy across for you
-and writes the redirect described below. By hand, either host it anywhere on
+and writes the redirect described below. It offers two places to put it:
+`/www/AxisControl`, beside DWC, which is the default and changes nothing about
+how the machine already behaves; or `/www` itself, **in place of DWC**, so the
+machine's bare address gives you this app.
+
+Replacing DWC deletes nothing — DWC's own files stay where they are, and its
+front page is copied to `/dwc.html` before anything is written, so it stays
+reachable there. The copy is made once and never overwritten, because every
+update after the first runs against a machine where `/` is already this app and
+saving *that* page over the backup would destroy the only way back.
+
+What you give up is what this app does not do: firmware updates, network
+configuration and the config tool are all DWC's. Reasonable on a machine with a
+laptop within reach; a bad idea on one whose only interface is the tablet bolted
+to it. By hand, either host it anywhere on
 the LAN and point it at the controller, or copy `dist/` onto the SD card:
 
 ```
@@ -488,6 +504,7 @@ npm run fontstore-check # fonts on the card: round trip, validation, path escape
 npm run velocity-check  # velocity jogging: the stop, the watchdog, the clamps
 npm run dustshoe-check  # who moves the dust shoe, and what each macro emits
 npm run gamepad-check   # stick axis conventions, deadzone, and the deadman
+npm run install-check   # installing over DWC, and keeping a way back to it
 ```
 
 `rewrite-check` takes a directory and will sweep real config files for the
