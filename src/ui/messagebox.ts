@@ -10,6 +10,11 @@ import { PanelElement } from './panel.js';
 import { actions, machine } from '../core/store.js';
 import type { MachinePrompt } from '../machine/types.js';
 
+/** The modes that are answered with a value rather than with a button. */
+function needsValue(mode: MachinePrompt['mode']): boolean {
+  return mode === 'input-int' || mode === 'input-float' || mode === 'input-string';
+}
+
 export class MessageBox extends PanelElement {
   private value = '';
   /** Prompt seq we last prefilled for, so typing isn't clobbered by polling. */
@@ -21,12 +26,7 @@ export class MessageBox extends PanelElement {
   }
 
   private answer(prompt: MachinePrompt, accept: boolean): void {
-    const needsValue =
-      prompt.mode === 'input-int' ||
-      prompt.mode === 'input-float' ||
-      prompt.mode === 'input-string';
-
-    if (!accept || !needsValue) {
+    if (!accept || !needsValue(prompt.mode)) {
       void actions.answerPrompt(prompt.seq, accept);
       return;
     }
@@ -40,7 +40,16 @@ export class MessageBox extends PanelElement {
           : parseFloat(raw);
 
     if (typeof value === 'number' && !isFinite(value)) return; // reject empty/garbage
+    // A number the firmware will refuse is worth refusing here, where the
+    // operator can see why, rather than in a macro that aborts.
+    if (typeof value === 'number' && prompt.min != null && value < prompt.min) return;
+    if (typeof value === 'number' && prompt.max != null && value > prompt.max) return;
     void actions.answerPrompt(prompt.seq, true, value);
+  }
+
+  /** Mode 4 is answered by the index of the option, not by its text. */
+  private choose(prompt: MachinePrompt, index: number): void {
+    void actions.answerPrompt(prompt.seq, true, index);
   }
 
   protected override render(): TemplateResult | typeof nothing {
@@ -52,11 +61,14 @@ export class MessageBox extends PanelElement {
       this.value = prompt.defaultValue != null ? String(prompt.defaultValue) : '';
     }
 
-    const needsValue =
-      prompt.mode === 'input-int' ||
-      prompt.mode === 'input-float' ||
-      prompt.mode === 'input-string';
-    const cancellable = prompt.mode === 'ok-cancel' || prompt.mode === 'close';
+    const wantsValue = needsValue(prompt.mode);
+    const choices = prompt.mode === 'choice' ? (prompt.choices ?? []) : [];
+    // The controller's own answer where it gave one, and the mode's default
+    // where it did not. An input box the operator cannot escape is how a macro
+    // strands the machine.
+    const cancellable =
+      prompt.cancelButton ??
+      (prompt.mode === 'ok-cancel' || prompt.mode === 'close' || wantsValue || prompt.mode === 'choice');
 
     return html`
       <div class="modal-backdrop">
@@ -85,12 +97,26 @@ export class MessageBox extends PanelElement {
               `
             : nothing}
 
-          ${needsValue
+          ${choices.length
+            ? html`
+                <div class="modal-choices">
+                  ${choices.map(
+                    (choice, i) => html`
+                      <button class="choice" @click=${() => this.choose(prompt, i)}>${choice}</button>
+                    `,
+                  )}
+                </div>
+              `
+            : nothing}
+
+          ${wantsValue
             ? html`
                 <input
                   class="modal-input"
                   type=${prompt.mode === 'input-string' ? 'text' : 'number'}
                   step=${prompt.mode === 'input-float' ? 'any' : '1'}
+                  min=${prompt.min ?? nothing}
+                  max=${prompt.max ?? nothing}
                   .value=${this.value}
                   autofocus
                   @input=${(e: Event) => (this.value = (e.target as HTMLInputElement).value)}
@@ -109,7 +135,11 @@ export class MessageBox extends PanelElement {
               : nothing}
             ${prompt.mode === 'none'
               ? html`<span class="hint">Waiting for the machine…</span>`
-              : html`<button class="primary" @click=${() => this.answer(prompt, true)}>OK</button>`}
+              : prompt.mode === 'choice'
+                ? // The options are the buttons; an OK beside them would send
+                  // no answer at all.
+                  nothing
+                : html`<button class="primary" @click=${() => this.answer(prompt, true)}>OK</button>`}
           </div>
         </div>
       </div>

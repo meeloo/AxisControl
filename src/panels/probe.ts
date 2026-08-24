@@ -191,6 +191,7 @@ export class ProbePanel extends PanelElement {
           ...common,
           nominalDiameter: this.nominalDiameter,
           outside: this.outsideFeature,
+          probeDepth: this.probeDepth,
         });
     }
   }
@@ -323,6 +324,9 @@ export class ProbePanel extends PanelElement {
         return html`
           ${checkField('Outside feature (boss)', this.outsideFeature, (v) => ((this.outsideFeature = v), this.requestUpdate()))}
           ${numberField('Nominal ⌀', this.nominalDiameter, (v) => ((this.nominalDiameter = v), this.requestUpdate()), { suffix: 'mm' })}
+          ${this.outsideFeature
+            ? numberField('Probe depth', this.probeDepth, (v) => ((this.probeDepth = v), this.requestUpdate()), { suffix: 'mm' })
+            : nothing}
           ${shared}
         `;
     }

@@ -509,6 +509,14 @@ export class RrfDriver implements MachineDriver {
             mode: mapPromptMode(box.mode),
             axisControls: expandAxisControls(box.axisControls ?? 0, omAxes),
             timeout: box.timeout || null,
+            // Everything the macro author put in the M291 and we used to drop
+            // on the floor: the prefill, the options, the bounds, and whether
+            // there is a way out.
+            ...(box.default != null ? { defaultValue: box.default } : {}),
+            ...(box.choices?.length ? { choices: box.choices.filter((c) => typeof c === 'string') } : {}),
+            ...(typeof box.cancelButton === 'boolean' ? { cancelButton: box.cancelButton } : {}),
+            ...(box.min != null ? { min: box.min } : {}),
+            ...(box.max != null ? { max: box.max } : {}),
           }
         : null,
       // ×60: currentMove is mm/s in the object model, the neutral model is
@@ -528,10 +536,9 @@ export class RrfDriver implements MachineDriver {
       volumes: (m.volumes ?? []).filter(Boolean).map((v, i) => ({
         name: v.name || `Volume ${i}`,
         mountPath: v.path ?? null,
-        // partitionSize is the usable size and capacity is the card's; the
-        // usable one is what a free-space figure has to be a fraction of, or
-        // the bar reads wrong on any card whose partition is smaller than it.
-        capacity: v.partitionSize ?? v.capacity ?? null,
+        // `capacity` is the only size the object model reports — there is no
+        // partition size in it, whatever a card's partitioning might be.
+        capacity: v.capacity ?? null,
         free: v.freeSpace ?? null,
         mounted: v.mounted ?? true,
       })),

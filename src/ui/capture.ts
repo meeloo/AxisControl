@@ -24,6 +24,7 @@
 
 import { html, type TemplateResult } from 'lit';
 import { connected, machine } from '../core/store.js';
+import { wcsCode } from '../wcs/names.js';
 
 /** Which set of numbers a field is expressed in. */
 export type Frame = 'machine' | 'work';
@@ -84,7 +85,7 @@ export function captureValue(capture: Capture): number | null {
 function frameName(frame: Frame): string {
   if (frame === 'machine') return 'machine coordinates';
   const wcs = machine.peek().wcs || 1;
-  return `G${53 + wcs}`;
+  return wcsCode(wcs);
 }
 
 /**

@@ -1085,6 +1085,10 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .modal-message { white-space: pre-wrap; color: var(--text-dim); margin: 0 0 16px; line-height: 1.5; }
 .modal-input { width: 100%; margin-bottom: 14px; font-family: var(--mono); }
 .modal-buttons { display: flex; gap: 8px; justify-content: flex-end; align-items: center; }
+/* M291 S4: one button per option, stacked so a long option stays readable and
+   so the operator is not picking between two targets a thumb-width apart. */
+.modal-choices { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.modal-choices .choice { width: 100%; justify-content: center; text-align: center; }
 .modal-jog { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
 .modal-jog-axis { display: flex; gap: 4px; align-items: center; }
 .modal-jog-axis span { width: 20px; font-weight: 700; color: var(--text-dim); }

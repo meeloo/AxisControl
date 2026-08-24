@@ -10,6 +10,7 @@
 // preflight that blocks on a check it got subtly wrong is worse than no
 // preflight, because the next thing anyone does is learn to bypass it.
 
+import { wcsCode } from '../wcs/names.js';
 import type { MachineState } from '../machine/types.js';
 import type { ParsedToolpath } from '../viewer/parse.js';
 import { formatDiameter, getTool, type ToolInfo } from '../tools/table.js';
@@ -82,7 +83,7 @@ export function preflight(input: PreflightInput): Check[] {
         ? {
             level: 'error',
             title: 'Toolpath leaves the work envelope',
-            detail: `Exceeds ${over.join(', ')} from the current ${wcsName(state.wcs)} origin. Either the origin is wrong or the job does not fit where it is placed.`,
+            detail: `Exceeds ${over.join(', ')} from the current ${wcsCode(state.wcs)} origin. Either the origin is wrong or the job does not fit where it is placed.`,
           }
         : {
             level: 'ok',
@@ -98,7 +99,7 @@ export function preflight(input: PreflightInput): Check[] {
   if (!originSet) {
     checks.push({
       level: 'warn',
-      title: `${wcsName(state.wcs)} origin is zero`,
+      title: `${wcsCode(state.wcs)} origin is zero`,
       detail: 'No work offset is set on any axis. If you meant to probe the stock, that has not happened yet.',
     });
   } else if (zAxis && Math.abs(zAxis.machine - zAxis.work) < 1e-6) {
@@ -108,7 +109,7 @@ export function preflight(input: PreflightInput): Check[] {
       detail: `X and Y have offsets but Z does not. Cutting depth will be measured from machine zero.`,
     });
   } else {
-    checks.push({ level: 'ok', title: `${wcsName(state.wcs)} origin set`, detail: '' });
+    checks.push({ level: 'ok', title: `${wcsCode(state.wcs)} origin set`, detail: '' });
   }
 
   // --- Tools -------------------------------------------------------------
@@ -209,9 +210,7 @@ export function preflight(input: PreflightInput): Check[] {
   return checks;
 }
 
-function wcsName(wcs: number): string {
-  return wcs <= 6 ? `G${53 + wcs}` : `G59.${wcs - 6}`;
-}
+
 
 function formatSpan(seconds: number): string {
   if (!isFinite(seconds) || seconds <= 0) return '—';

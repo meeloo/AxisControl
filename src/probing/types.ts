@@ -164,4 +164,10 @@ export interface BoreProbeParams extends ProbeCommon {
   nominalDiameter: number;
   /** Outside feature (boss) rather than inside (bore). */
   outside: boolean;
+  /**
+   * How far below the start height to probe, mm. Only the boss case uses it:
+   * a bore is probed from wherever the operator already put the probe, while a
+   * boss is approached from above and has to be descended beside.
+   */
+  probeDepth: number;
 }

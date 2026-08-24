@@ -506,12 +506,25 @@ npm run dustshoe-check  # who moves the dust shoe, and what each macro emits
 npm run gamepad-check   # stick axis conventions, deadzone, and the deadman
 npm run install-check   # installing over DWC, and keeping a way back to it
 npm run probe-check     # probe state, against Duet's own schema and the mock
+npm run om-check        # what we believe the object model contains, vs Duet's own
+npm run prompt-check    # the M291 dialog, in a browser (needs playwright; skips without)
 ```
 
 `rewrite-check` takes a directory and will sweep real config files for the
 invariant the config editor rests on — that every parameter is still found at
-the offsets recorded for it. The browser-driven end-to-end scripts are not in
-the repo yet, which is the real gap.
+the offsets recorded for it.
+
+`om-check` is the one to add to when something is learned about the object
+model the hard way. It exists because a probe field that does not exist got as
+far as a user: anything this app writes down about RepRapFirmware — a field
+name, an enum's numbering — is a belief nothing checks at runtime, and a wrong
+one shows as a confident constant rather than as an error.
+
+`prompt-check` is the only browser-driven script here, and it needs playwright,
+which is deliberately not a dependency — it skips cleanly when absent. Set
+`CHROME_PATH` if a Chromium is installed that playwright did not download. The
+rest of the browser-driven end-to-end coverage is still missing, which remains
+the real gap.
 
 Browser support goes back further than you would expect: the bundle targets
 ES2019, and there is a compatibility layer for Safari 12 (an iPad mini 2 makes a

@@ -82,7 +82,15 @@ export interface OmMessageBox {
   message: string;
   timeout: number;
   axisControls: number;
-  controls?: unknown[];
+  /** Prefill for the input modes; `null` when the macro supplied none. */
+  default?: number | string | null;
+  /** The options for mode 4, answered with M292 R<index>. */
+  choices?: string[] | null;
+  /** Whether the firmware is offering a way out of this box. */
+  cancelButton?: boolean;
+  /** Bounds on a numeric input, from M291's L and H parameters. */
+  min?: number | null;
+  max?: number | null;
 }
 
 export interface OmState {
@@ -272,7 +280,6 @@ export interface OmVolume {
   mounted?: boolean;
   capacity?: number | null;
   freeSpace?: number | null;
-  partitionSize?: number | null;
   path?: string;
   speed?: number | null;
 }
@@ -351,9 +358,18 @@ export function mapStatus(status: string | undefined): import('../../types.js').
 
 /**
  * M291 S<mode> → neutral prompt mode.
- *   0 no buttons, 1 close, 2 OK, 3 OK+Cancel, 4 int, 5 float, 6 string,
- *   7 = string with no cancel (3.5+).
- * Modes 4-7 are answered with M292 R<value>; see driver.answerPrompt.
+ *
+ * The numbers are Duet's `MessageBoxMode`, not a reading of the M291
+ * documentation:
+ *
+ *   0 no buttons, 1 close only, 2 OK, 3 OK+Cancel,
+ *   4 multiple choice, 5 integer, 6 float, 7 string
+ *
+ * This was wrong by one across the whole input range until it was checked
+ * against @duet3d/objectmodel — 4 was read as the integer box, which slid
+ * every mode after it along, so a float question was answered with a quoted
+ * string that the firmware rejects and the macro waited forever. Modes 4-7 are
+ * answered with M292 R<value>; see driver.answerPrompt.
  */
 export function mapPromptMode(mode: number): import('../../types.js').MachinePrompt['mode'] {
   switch (mode) {
@@ -366,10 +382,11 @@ export function mapPromptMode(mode: number): import('../../types.js').MachinePro
     case 3:
       return 'ok-cancel';
     case 4:
-      return 'input-int';
+      return 'choice';
     case 5:
-      return 'input-float';
+      return 'input-int';
     case 6:
+      return 'input-float';
     case 7:
       return 'input-string';
     default:

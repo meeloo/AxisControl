@@ -15,6 +15,7 @@
 // trades repeatability for nothing.
 
 import { Gcode, n, type GeneratedProgram } from '../cam/format.js';
+import { wcsCode } from '../wcs/names.js';
 import type {
   BoreProbeParams,
   CornerProbeParams,
@@ -40,7 +41,7 @@ export function probeZ(p: ZProbeParams): GeneratedProgram {
   g.header('Probe Z surface', [
     `probe K${p.probeIndex}`,
     p.plateThickness > 0 ? `touch plate ${p.plateThickness}mm` : 'probing the surface directly',
-    `sets Z in G${53 + p.wcs}`,
+    `sets Z in ${wcsCode(p.wcs)}`,
   ]);
   g.blank();
   g.comment('Position the probe over the surface before running');
@@ -53,7 +54,7 @@ export function probeZ(p: ZProbeParams): GeneratedProgram {
   return {
     name: 'probe-z.g',
     gcode: g.toString(),
-    summary: `Probe Z with K${p.probeIndex} and set Z=${p.plateThickness} in G${53 + p.wcs}`,
+    summary: `Probe Z with K${p.probeIndex} and set Z=${p.plateThickness} in ${wcsCode(p.wcs)}`,
     warnings: ['Jog the probe over the surface, within ' + p.maxTravel + 'mm, before running.'],
   };
 }
@@ -69,7 +70,7 @@ export function probeEdge(p: EdgeProbeParams): GeneratedProgram {
   g.header(`Probe ${p.axis} edge`, [
     `probe K${p.probeIndex}, approaching ${p.direction > 0 ? '+' : '-'}${p.axis}`,
     `tip ⌀${p.tipDiameter}mm`,
-    `sets ${p.axis}=${p.setTo} in G${53 + p.wcs}`,
+    `sets ${p.axis}=${p.setTo} in ${wcsCode(p.wcs)}`,
   ]);
   g.blank();
   g.comment('Position the probe beside the edge, at cutting depth, before running');
@@ -104,7 +105,7 @@ export function probeCorner(p: CornerProbeParams): GeneratedProgram {
   g.header('Probe corner', [
     `probe K${p.probeIndex}, ${p.cornerY}-${p.cornerX} corner`,
     `tip ⌀${p.tipDiameter}mm, side probing ${p.probeDepth}mm below the top face`,
-    `sets X0 Y0${p.includeZ ? ' Z0' : ''} in G${53 + p.wcs}`,
+    `sets X0 Y0${p.includeZ ? ' Z0' : ''} in ${wcsCode(p.wcs)}`,
   ]);
   g.blank();
   g.comment('Position the probe above the stock, just inside the corner, before running');
@@ -155,13 +156,13 @@ export function probeCorner(p: CornerProbeParams): GeneratedProgram {
   g.raw(`G1 Y${n(-yDir * p.backoff)} F${n(p.feedFast, 1)}`);
   g.raw('G90');
   if (p.includeZ) g.feed({ z: p.safeZ, f: p.feedFast });
-  g.raw(`M291 P"Corner found. Origin set in G${53 + p.wcs}." R"Probe complete" S1`);
+  g.raw(`M291 P"Corner found. Origin set in ${wcsCode(p.wcs)}." R"Probe complete" S1`);
   g.end('macro');
 
   return {
     name: 'probe-corner.g',
     gcode: g.toString(),
-    summary: `Find the ${p.cornerY}-${p.cornerX} corner with K${p.probeIndex} and set the G${53 + p.wcs} origin`,
+    summary: `Find the ${p.cornerY}-${p.cornerX} corner with K${p.probeIndex} and set the ${wcsCode(p.wcs)} origin`,
     warnings: p.includeZ
       ? [
           'Start with the probe above the stock, inside the corner by more than the standoff.',
@@ -267,7 +268,7 @@ export function probeSkew(p: SkewProbeParams): GeneratedProgram {
   g.header('Probe skew', [
     `probe K${p.probeIndex}, edge along ${p.edgeAxis}, approaching ${p.approach > 0 ? '+' : '-'}${perpAxis}`,
     `two touches ${span}mm apart, travelling ${p.travel > 0 ? '+' : '-'}${p.edgeAxis}`,
-    `rotates G${53 + p.wcs} about X${p.centreX} Y${p.centreY}`,
+    `rotates ${wcsCode(p.wcs)} about X${p.centreX} Y${p.centreY}`,
   ]);
   g.blank();
   g.comment('Position the probe beside the edge at probing depth, near the first point');
@@ -313,7 +314,7 @@ export function probeSkew(p: SkewProbeParams): GeneratedProgram {
   return {
     name: 'probe-skew.g',
     gcode: g.toString(),
-    summary: `Measure the ${p.edgeAxis} edge over ${span}mm with K${p.probeIndex} and rotate G${53 + p.wcs} to match`,
+    summary: `Measure the ${p.edgeAxis} edge over ${span}mm with K${p.probeIndex} and rotate ${wcsCode(p.wcs)} to match`,
     warnings: [
       'Set the work origin first — the rotation pivots about it, so moving the origin afterwards re-skews the part.',
       'Z is never moved: position the probe at side-probing depth before running.',
@@ -327,47 +328,100 @@ export function probeSkew(p: SkewProbeParams): GeneratedProgram {
  * Bore or boss centre: probe both ways on each axis and split the difference.
  * Reserved for the `feature` role, so it cannot run on the tool setter or the
  * corner probe.
+ *
+ * The two cases are not the same routine with a sign flipped, which is what
+ * this file used to assume. Inside a bore, one standoff position reaches both
+ * walls: probe out to one, cross the hole, probe out to the other, and the
+ * probe never leaves the pocket. Outside a boss there is no such position —
+ * the walls face away from each other, so the second touch of each axis has to
+ * start from the far side, and getting there means lifting over the boss.
+ * Probing both directions from one spot sent the second G38.2 into open air
+ * every time, and the position it aimed at afterwards was the middle of the
+ * boss with the probe still down at cutting depth.
  */
 export function probeBore(p: BoreProbeParams): GeneratedProgram {
-  const reach = p.outside
-    ? p.nominalDiameter / 2 + p.maxTravel
-    : Math.min(p.maxTravel, p.nominalDiameter);
-
   const g = new Gcode();
   g.header(p.outside ? 'Probe boss centre' : 'Probe bore centre', [
     `probe K${p.probeIndex}, nominal ⌀${p.nominalDiameter}mm`,
-    `sets X0 Y0 at the centre in G${53 + p.wcs}`,
+    `sets X0 Y0 at the centre in ${wcsCode(p.wcs)}`,
   ]);
   g.blank();
-  g.comment(
-    p.outside
-      ? 'Position the probe outside the boss, at probing depth, roughly on centre'
-      : 'Position the probe inside the bore, at probing depth, roughly on centre',
-  );
 
-  const axisPair = (axis: 'X' | 'Y', idx: number) => {
+  if (p.outside) {
+    // Stand off the nominal wall far enough to descend past it: the back-off
+    // distance plus the tip, because the stylus sticks out by its own radius
+    // and it is the stylus that would clip the boss on the way down. The
+    // search then runs that standoff plus maxTravel, and it is maxTravel that
+    // absorbs an off-centre start or a boss that is not the size it was called.
+    const standoff = p.backoff + p.tipDiameter;
+    const halfSpan = p.nominalDiameter / 2 + standoff;
+    const search = standoff + Math.abs(p.maxTravel);
+
+    g.comment('Position the probe ABOVE the centre of the boss, clear of its top face');
     g.blank();
-    g.comment(`--- ${axis} ---`);
-    twoStage(g, p, axis, reach);
-    g.raw(`var ${axis.toLowerCase()}Plus = move.axes[${idx}].machinePosition`);
-    g.raw('G91');
-    g.raw(`G1 ${axis}${n(-p.backoff)} F${n(p.feedFast, 1)}`);
-    g.raw('G90');
-    twoStage(g, p, axis, -reach * 2);
-    g.raw(`var ${axis.toLowerCase()}Minus = move.axes[${idx}].machinePosition`);
-    g.raw(
-      `var ${axis.toLowerCase()}Centre = {(var.${axis.toLowerCase()}Plus + var.${axis.toLowerCase()}Minus) / 2}`,
-    );
-    g.raw(`G53 G1 ${axis}{var.${axis.toLowerCase()}Centre} F${n(p.feedFast, 1)}`);
-  };
+    g.comment('every move below is measured from where the probe starts');
+    g.raw('var startX = move.axes[0].machinePosition');
+    g.raw('var startY = move.axes[1].machinePosition');
+    g.raw('var startZ = move.axes[2].machinePosition');
 
-  axisPair('X', 0);
-  axisPair('Y', 1);
+    const side = (axis: 'X' | 'Y', idx: number, sign: 1 | -1, name: string) => {
+      const start = `var.start${axis}`;
+      g.blank();
+      g.comment(`${axis}${sign > 0 ? '+' : '-'} side`);
+      g.raw(`G53 G0 ${axis}{${start} ${sign > 0 ? '+' : '-'} ${n(halfSpan)}}`);
+      g.raw(`G53 G1 Z{var.startZ - ${n(p.probeDepth)}} F${n(p.feedFast, 1)}`);
+      twoStage(g, p, axis, -sign * search);
+      g.raw(`var ${name} = move.axes[${idx}].machinePosition`);
+      g.comment('clear the wall, then lift back over the boss');
+      g.raw('G91');
+      g.raw(`G1 ${axis}${n(sign * p.backoff)} F${n(p.feedFast, 1)}`);
+      g.raw('G90');
+      g.raw('G53 G0 Z{var.startZ}');
+    };
+
+    const axisPair = (axis: 'X' | 'Y', idx: number) => {
+      const low = `${axis.toLowerCase()}Minus`;
+      const high = `${axis.toLowerCase()}Plus`;
+      g.blank();
+      g.comment(`--- ${axis} ---`);
+      side(axis, idx, -1, low);
+      side(axis, idx, 1, high);
+      g.raw(`var ${axis.toLowerCase()}Centre = {(var.${low} + var.${high}) / 2}`);
+      // Lifted already, so crossing the boss to its centre line is safe.
+      g.raw(`G53 G0 ${axis}{var.${axis.toLowerCase()}Centre}`);
+    };
+
+    axisPair('X', 0);
+    axisPair('Y', 1);
+  } else {
+    const reach = Math.min(Math.abs(p.maxTravel), p.nominalDiameter);
+
+    g.comment('Position the probe inside the bore, at probing depth, roughly on centre');
+
+    const axisPair = (axis: 'X' | 'Y', idx: number) => {
+      g.blank();
+      g.comment(`--- ${axis} ---`);
+      twoStage(g, p, axis, reach);
+      g.raw(`var ${axis.toLowerCase()}Plus = move.axes[${idx}].machinePosition`);
+      g.raw('G91');
+      g.raw(`G1 ${axis}${n(-p.backoff)} F${n(p.feedFast, 1)}`);
+      g.raw('G90');
+      twoStage(g, p, axis, -reach * 2);
+      g.raw(`var ${axis.toLowerCase()}Minus = move.axes[${idx}].machinePosition`);
+      g.raw(
+        `var ${axis.toLowerCase()}Centre = {(var.${axis.toLowerCase()}Plus + var.${axis.toLowerCase()}Minus) / 2}`,
+      );
+      g.raw(`G53 G1 ${axis}{var.${axis.toLowerCase()}Centre} F${n(p.feedFast, 1)}`);
+    };
+
+    axisPair('X', 0);
+    axisPair('Y', 1);
+  }
 
   g.blank();
   g.raw(`G10 L20 P${p.wcs} X0 Y0`);
   g.raw(
-    `echo "Measured size X " ^ {abs(var.xPlus - var.xMinus) + ${n(p.tipDiameter)}} ^ " Y " ^ {abs(var.yPlus - var.yMinus) + ${n(p.tipDiameter)}}`,
+    `echo "Measured size X " ^ {abs(var.xPlus - var.xMinus) ${p.outside ? '-' : '+'} ${n(p.tipDiameter)}} ^ " Y " ^ {abs(var.yPlus - var.yMinus) ${p.outside ? '-' : '+'} ${n(p.tipDiameter)}}`,
   );
   g.raw(`M291 P"Centre found and set as origin." R"Probe complete" S1`);
   g.end('macro');
@@ -376,9 +430,15 @@ export function probeBore(p: BoreProbeParams): GeneratedProgram {
     name: p.outside ? 'probe-boss.g' : 'probe-bore.g',
     gcode: g.toString(),
     summary: `Find the ${p.outside ? 'boss' : 'bore'} centre with K${p.probeIndex} and set it as the origin`,
-    warnings: [
-      'The measured size includes the tip diameter — calibrate the tip before trusting it.',
-      'Start roughly centred; a badly off-centre start can miss the wall entirely.',
-    ],
+    warnings: p.outside
+      ? [
+          'The measured size excludes the tip diameter — calibrate the tip before trusting it.',
+          `Start above the centre of the boss: the routine steps out ${n(p.nominalDiameter / 2 + p.backoff + p.tipDiameter)}mm each way and drops ${n(p.probeDepth)}mm to probe, so the nominal diameter has to be close.`,
+          'Nothing here knows how tall the boss is. Start high enough that the drop lands beside it and not on it.',
+        ]
+      : [
+          'The measured size includes the tip diameter — calibrate the tip before trusting it.',
+          'Start roughly centred; a badly off-centre start can miss the wall entirely.',
+        ],
   };
 }

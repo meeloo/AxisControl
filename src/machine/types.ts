@@ -145,12 +145,34 @@ export interface MachinePrompt {
   seq: number;
   title: string;
   message: string;
-  /** none = informational; ok = single button; ok-cancel = two; input-* = needs a value. */
-  mode: 'none' | 'close' | 'ok' | 'ok-cancel' | 'input-int' | 'input-float' | 'input-string';
+  /**
+   * none = informational; ok = single button; ok-cancel = two; choice = pick
+   * one of `choices`; input-* = needs a value.
+   */
+  mode:
+    | 'none'
+    | 'close'
+    | 'ok'
+    | 'ok-cancel'
+    | 'choice'
+    | 'input-int'
+    | 'input-float'
+    | 'input-string';
   /** Show jog controls inside the dialog (RRF axisControls bitmap, expanded). */
   axisControls: string[];
   timeout: number | null;
   defaultValue?: string | number;
+  /** Options for `choice`, answered by index. */
+  choices?: string[];
+  /**
+   * Whether the controller is offering a way out. Absent means it did not say,
+   * which is not the same as "no" — see the messagebox, which only takes the
+   * cancel button away when the controller explicitly says there is none.
+   */
+  cancelButton?: boolean;
+  /** Bounds on a numeric input, when the prompt carried them. */
+  min?: number;
+  max?: number;
 }
 
 /**

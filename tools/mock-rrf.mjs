@@ -891,6 +891,15 @@ const round = (n) => Math.round(n * 1000) / 1000;
  * be exercised without a probe to poke — the real board reports this from the
  * input pin and nothing else changes it.
  */
+/**
+ * Message-box sequence. Monotonic for the life of the mock, because that is
+ * what the board's is: it never goes back, and a client is entitled to treat a
+ * repeat as the same box it already answered. Deriving it from the box that is
+ * currently up made it reset to 1 after every M292, so two prompts in a row
+ * looked like one and a dialog kept the previous box's answer in its input.
+ */
+let promptSeq = 0;
+
 const probesTriggered = [false, false];
 
 /** Every G-code the board has been sent, for the test hook below. */
@@ -1312,7 +1321,7 @@ function handleGcode(gcode) {
         }, 3000);
       }
       bumpSeq('state');
-    } else if (/^M999\b/.test(upper.trim()) && !/PROBE/.test(upper)) {
+    } else if (/^M999\b/.test(upper.trim()) && !/PROBE|PROMPT/.test(upper)) {
       // A restart. The real board reboots — it stops answering for a few
       // seconds and comes back with nothing homed — so the parts a client can
       // observe are reproduced: the halt clears and the reference is gone.
@@ -1536,12 +1545,43 @@ function handleGcode(gcode) {
       const mode = /S(\d+)/.exec(cmd);
       state.messageBox = {
         mode: mode ? Number(mode[1]) : 2,
-        seq: (state.messageBox?.seq ?? 0) + 1,
+        seq: ++promptSeq,
         title: title ? title[1] : 'Message',
         message: msg ? msg[1] : '',
         timeout: 0,
         axisControls: 0,
       };
+      bumpSeq('state');
+    } else if (/^M999 PROMPT([0-7])$/.test(upper.trim())) {
+      // Test hook, not a real RRF command: raise a message box of each mode
+      // with the fields a real one carries, so the dialog can be exercised
+      // without a macro that prompts.
+      //
+      // Deliberately NOT an M291 parser. The mapping from M291's parameter
+      // letters to these fields is firmware detail this mock has no business
+      // guessing at — what the app reads is the object model, and this is the
+      // object model. The fields are the ones @duet3d/objectmodel declares:
+      // every one of them used to be dropped on the way to the dialog.
+      const mode = Number(/^M999 PROMPT([0-7])$/.exec(upper.trim())[1]);
+      const wants = mode >= 5;
+      state.messageBox = {
+        mode,
+        seq: ++promptSeq,
+        title: `Mode ${mode}`,
+        message: [
+          'No buttons — the machine is working.', 'Close when you have read this.',
+          'Confirm to continue.', 'Continue, or stop here?', 'Which one?',
+          'How many?', 'How far, in mm?', 'What shall it be called?',
+        ][mode],
+        timeout: 0,
+        axisControls: 0,
+        cancelButton: mode !== 0,
+        choices: mode === 4 ? ['The first one', 'The second one', 'Neither'] : null,
+        default: wants ? (mode === 5 ? 3 : mode === 6 ? 12.5 : 'workpiece') : null,
+        min: mode === 5 ? 1 : mode === 6 ? 0 : null,
+        max: mode === 5 ? 8 : mode === 6 ? 50 : null,
+      };
+      pushReply(`prompt ${mode} raised`);
       bumpSeq('state');
     } else if (upper.startsWith('M292')) {
       state.messageBox = null;
