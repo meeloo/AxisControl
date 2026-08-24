@@ -188,10 +188,33 @@ export interface OmNetwork {
 export interface OmProbe {
   type?: number;
   value?: number[];
-  triggered?: boolean;
   threshold?: number;
   diveHeight?: number;
   lastStopHeight?: number;
+}
+
+/**
+ * Whether a probe is currently triggered.
+ *
+ * There is no `triggered` field on a probe — that one belongs to
+ * `sensors.endstops[]`. A probe reports `value[0]`, the raw reading, and
+ * `threshold`, the G31 P value the firmware itself compares it against.
+ * Digital probes (types 5 and 8) report 0 or 1000 against a default threshold
+ * of 500, so the same comparison answers for them and for analog probes alike;
+ * inversion (M558 I1) is already applied by the firmware before the reading
+ * reaches us.
+ *
+ * Returns null when there is no reading or no usable threshold. That is not
+ * the same answer as "open", and callers must keep them apart: a probe we
+ * cannot read drawn as a probe that is not triggered is exactly the mistake
+ * that gets a spindle driven into the work.
+ */
+export function probeTriggered(probe: OmProbe): boolean | null {
+  const reading = probe.value?.[0];
+  if (typeof reading !== 'number' || !Number.isFinite(reading)) return null;
+  const threshold = probe.threshold;
+  if (typeof threshold !== 'number' || !(threshold > 0)) return null;
+  return reading >= threshold;
 }
 
 export interface OmSensors {
