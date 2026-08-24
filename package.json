@@ -30,7 +30,8 @@
     "velocity-check": "node tools/velocity-check.mjs",
     "dustshoe-check": "node tools/dustshoe-check.mjs",
     "gamepad-check": "node tools/gamepad-check.mjs",
-    "install-check": "node tools/install-check.mjs"
+    "install-check": "node tools/install-check.mjs",
+    "probe-check": "node tools/probe-check.mjs"
   },
   "dependencies": {
     "clipper-lib": "^6.4.2",

@@ -863,10 +863,17 @@ function buildModel(liveOnly) {
       ],
     },
     // Two probes, matching config-probe.g: K0 tool setter, K1 workpiece.
+    //
+    // Fields exactly as the real object model has them, which for a probe
+    // means a reading and a threshold and NO `triggered` — that field is on
+    // endstops. Reported here once, this mock had the front end believing in a
+    // field the board never sends, and the probes panel read "open" on real
+    // hardware no matter what the probe was doing (issue #1). A mock that is
+    // kinder than the firmware does not test anything.
     sensors: {
       probes: [
-        { value: [probeTriggered(0) ? 1000 : 0], type: 8, triggered: probeTriggered(0), threshold: 500 },
-        { value: [probeTriggered(1) ? 1000 : 0], type: 8, triggered: probeTriggered(1), threshold: 500 },
+        { value: [probeTriggered(0) ? 1000 : 0], type: 8, threshold: 500 },
+        { value: [probeTriggered(1) ? 1000 : 0], type: 8, threshold: 500 },
       ],
     },
     seqs,

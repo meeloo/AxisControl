@@ -12,6 +12,7 @@ import {
   type Axis,
   type Capabilities,
   type DiagnosticItem,
+  type DiagnosticLevel,
   type DiagnosticSection,
   type FileEntry,
   type FirmwareInfo,
@@ -29,6 +30,7 @@ import {
   mapPromptMode,
   mapSpindleState,
   mapStatus,
+  probeTriggered,
   type ObjectModel,
   type OmRange,
   type OmSeqs,
@@ -1057,18 +1059,23 @@ export class RrfDriver implements MachineDriver {
     sections.push({
       title: 'Probes',
       emptyNote: 'No probes configured — see M558 in config-probe.g.',
-      items: probes.map((probe, i) => ({
-        label: `K${i}`,
-        value: probe.triggered ? 'TRIGGERED' : 'open',
-        level: probe.triggered ? 'warn' : 'ok',
-        detail: [
-          probe.value?.length ? `reading ${probe.value.join(', ')}` : null,
-          probe.type != null ? `type ${probe.type}` : null,
-          probe.threshold != null ? `threshold ${probe.threshold}` : null,
-        ]
-          .filter(Boolean)
-          .join(' · ') || undefined,
-      })),
+      items: probes.map((probe, i) => {
+        const triggered = probeTriggered(probe);
+        return {
+          label: `K${i}`,
+          // Three states, not two: a probe whose reading we cannot make sense
+          // of says so rather than borrowing the reassuring answer.
+          value: triggered == null ? 'unknown' : triggered ? 'TRIGGERED' : 'open',
+          level: (triggered == null ? 'info' : triggered ? 'warn' : 'ok') as DiagnosticLevel,
+          detail: [
+            probe.value?.length ? `reading ${probe.value.join(', ')}` : null,
+            probe.type != null ? `type ${probe.type}` : null,
+            probe.threshold != null ? `threshold ${probe.threshold}` : null,
+          ]
+            .filter(Boolean)
+            .join(' · ') || undefined,
+        };
+      }),
     });
 
     // --- Connection ---
