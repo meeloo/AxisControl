@@ -345,13 +345,14 @@ proven on a sample of exactly one. The RRF driver is complete enough for real
 work; the Carvera/Z1 driver is a stub.
 
 Known gaps: job history and an ATC carousel view. Verification is a real
-headless browser driven against the mocks, plus three harnesses that live in
+headless browser driven against the mocks, plus four harnesses that live in
 the repo and check the things whose failures are silent:
 
 ```
 npm run merge-oracle    # our object-model merge against Duet3D's own implementation
 npm run rewrite-check   # the in-place config edit: offsets, widths, line endings
 npm run gcode-params    # which doc bullets are parameters and which are prose
+npm run probe-check     # probe state, against Duet's own schema and the mock
 ```
 
 `rewrite-check` takes a directory and will sweep real config files for the
