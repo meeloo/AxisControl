@@ -28,7 +28,7 @@ try {
 }
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const PORT = 8168, URL_ = `http://127.0.0.1:${PORT}`;
+const PORT = 8170, URL_ = `http://127.0.0.1:${PORT}`;
 const mock = spawn(process.execPath, [`${ROOT}/tools/mock-rrf.mjs`, String(PORT)], { stdio: 'ignore' });
 process.on('exit', () => { try { mock.kill(); } catch {} });
 for (let i=0;i<60;i++){ try { await fetch(`${URL_}/rr_connect?password=`); break; } catch { await new Promise(r=>setTimeout(r,100)); } }
