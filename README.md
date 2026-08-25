@@ -100,6 +100,30 @@ hand, and the only two things that matter are where it is and moving it a bit.
 
 Installed to the home screen it runs full screen with no address bar.
 
+### It takes plugins, without handing them the machine
+
+A plugin is JavaScript that adds a panel, reads the machine and keeps data
+other plugins can read. It runs in a sandboxed frame with an opaque origin, so
+the browser — not this app's good intentions — denies it the host DOM, storage,
+cookies, and any network at all. Everything it can do arrives over one
+`postMessage` door where the permission is checked, and the permissions are
+sentences rather than jargon: *this plugin can move the machine and run
+G-code.* Refusing disables the plugin, because half a plugin fails in ways its
+author never saw.
+
+Data is shared through **domains** — a reverse-DNS name for a body of data
+rather than for the plugin that made it, so a feeds-and-speeds plugin can read
+the tool-table plugin's numbers with one grant. A domain's bytes live on the
+controller's card by default, beside `/fonts`, so they follow the machine to
+the next laptop.
+
+Press **New plugin** in the Plugins panel and you get a working one — a live
+position readout and a counter that survives a reload — open in the editor,
+where Save reloads it. `npm run plugin-isolation-check` runs a deliberately
+hostile plugin in a real browser and asserts that nothing it aims at the app
+ever arrives; `docs/plugins.md` has the design and what the boundary does not
+fix.
+
 ### It engraves text without going near CAM
 
 A name on a fixture, a scale beside a slot, "MAX 24V" under a socket. Type it,
@@ -508,6 +532,12 @@ npm run install-check   # installing over DWC, and keeping a way back to it
 npm run probe-check     # probe state, against Duet's own schema and the mock
 npm run om-check        # what we believe the object model contains, vs Duet's own
 npm run prompt-check    # the M291 dialog, in a browser (needs playwright; skips without)
+npm run plugin-manifest-check   # manifest rules, the @plugin header scanner, hashing
+npm run plugin-guest-check      # the frame document: CSP, escaping, the axis global
+npm run plugin-storage-check    # domains, ownership, the byte cap, one write per burst
+npm run plugin-bridge-check     # the permission table, path guards, the rate limiter
+npm run plugin-isolation-check  # a hostile plugin, in a browser, failing to get out
+npm run plugin-e2e-check        # scaffold a plugin and watch it run (browser)
 ```
 
 `rewrite-check` takes a directory and will sweep real config files for the

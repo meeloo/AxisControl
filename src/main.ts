@@ -9,6 +9,7 @@ import './core/compat.js';
 import './panels/index.js';
 import './ui/topbar.js';
 import './ui/messagebox.js';
+import './ui/grant.js';
 import './ui/layout.js';
 
 import {
@@ -21,12 +22,19 @@ import {
   machine,
 } from './core/store.js';
 import { syncOnConnect } from './core/settings.js';
+import { loadInstalled, registerCachedPanels } from './plugins/host.js';
 import { initTheme } from './core/theme.js';
 import { suppressDoubleTapZoom } from './ui/touch.js';
 
 // Before first paint, so there is no flash of the wrong theme.
 initTheme();
 suppressDoubleTapZoom();
+
+// Before the dashboard is built, not after: the layout drops a saved panel
+// whose definition it cannot find, and then persists what is left. A plugin
+// panel registered a second later — which is as fast as the card can be read —
+// would already have been erased from the layout it was arranged into.
+registerCachedPanels();
 
 const root = document.getElementById('app');
 if (!root) throw new Error('#app not found');
@@ -35,6 +43,7 @@ root.innerHTML = `
   <cnc-topbar></cnc-topbar>
   <cnc-dashboard></cnc-dashboard>
   <cnc-messagebox></cnc-messagebox>
+  <cnc-plugin-grant></cnc-plugin-grant>
 `;
 
 // Reconnect on load if enabled. Served from the controller itself, this makes
@@ -42,9 +51,31 @@ root.innerHTML = `
 if (loadSetting('autoConnect', true)) {
   void connect(controllerUrl.peek(), driverId.peek())
     .then(adoptMachineSettings)
+    .then(startPlugins)
     .catch(() => {
       // Already surfaced in the top bar.
     });
+}
+
+// Plugins, once and then again when there is a machine to read them from.
+//
+// Most of them live on the controller's card, which is unreadable until a
+// driver is connected — but a browser-stored plugin is not, and someone
+// working on one with the machine switched off should still see it. So this
+// runs regardless, and again on connect; loadInstalled is written to be safe
+// to call twice.
+void startPlugins();
+
+async function startPlugins(): Promise<void> {
+  try {
+    await loadInstalled();
+  } catch (err) {
+    appendLog({
+      level: 'error',
+      text: `Plugins failed to load: ${(err as Error).message}`,
+      time: new Date(),
+    });
+  }
 }
 
 /**

@@ -31,8 +31,14 @@
     "dustshoe-check": "node tools/dustshoe-check.mjs",
     "gamepad-check": "node tools/gamepad-check.mjs",
     "install-check": "node tools/install-check.mjs",
+    "plugin-storage-check": "node tools/plugin-storage-check.mjs",
+    "plugin-bridge-check": "node tools/plugin-bridge-check.mjs",
     "probe-check": "node tools/probe-check.mjs",
     "om-check": "node tools/om-check.mjs",
+    "plugin-manifest-check": "node tools/plugin-manifest-check.mjs",
+    "plugin-guest-check": "node tools/plugin-guest-check.mjs",
+    "plugin-isolation-check": "node tools/plugin-isolation-check.mjs",
+    "plugin-e2e-check": "node tools/plugin-e2e-check.mjs",
     "prompt-check": "node tools/prompt-browser.mjs"
   },
   "dependencies": {

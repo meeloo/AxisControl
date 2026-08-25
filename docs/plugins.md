@@ -6,7 +6,13 @@ default it runs where it cannot touch the app, the DOM, the network, or the
 browser's storage — only the plugin API. A plugin that needs more asks for it
 by name, and the operator grants or refuses; refusing disables the plugin.
 
-Nothing here is built yet. This is the design and the order to build it in.
+Built, and described here as it stands. `src/plugins/` holds it: `manifest.ts`
+reads and judges a manifest, `permissions.ts` remembers what was granted,
+`storage.ts` is the domains, `guest.ts` is the frame document and the `axis`
+global inside it, `bridge.ts` is the one door every call goes through,
+`host.ts` installs and runs them, and `src/panels/plugins.ts` is where a person
+does all of it. The order below is the order it was built in, and each step
+still names a system that works without the ones after it.
 
 ## Why an isolation boundary at all
 
@@ -135,9 +141,9 @@ a feeds-and-speeds plugin declares `uses: org.axiscontrol.tools` with `read`
 and is granted it once, by the operator, at install.
 
 ```js
-const notes = await macadam.storage.open('net.meeloo.surface-notes');
+const notes = await axis.storage.open('net.meeloo.surface-notes');
 await notes.set('last-scan', { at: Date.now(), deviation: 0.04 });
-const tools = await macadam.storage.open('org.axiscontrol.tools'); // read-only
+const tools = await axis.storage.open('org.axiscontrol.tools'); // read-only
 for (const key of await tools.keys()) { /* … */ }
 notes.subscribe((key, value) => { /* another panel changed it */ });
 ```
@@ -172,25 +178,25 @@ a reinstall. Note that IndexedDB is not used anywhere in the app today — the
 
 ## The API surface
 
-One global, `macadam`, inside the frame. Everything is async, because
+One global, `axis`, inside the frame. Everything is async, because
 everything is a message.
 
 ```
-macadam.version                      -> { api: 1, app: "0.1.3" }
-macadam.machine.state()              -> MachineState snapshot
-macadam.machine.subscribe(cb)        -> unsubscribe
-macadam.machine.capabilities()
-macadam.machine.jog(deltas, feed)            [machine.motion]
-macadam.machine.moveTo(targets, feed)        [machine.motion]
-macadam.machine.home(axes?)                  [machine.motion]
-macadam.machine.send(gcode)                  [machine.command]
-macadam.machine.runMacro(path)               [machine.command]
-macadam.files.list(dir) / read(path)         [files.read]
-macadam.files.write(path, bytes)             [files.write]
-macadam.storage.open(domain)
-macadam.ui.title(text) / notify(text, level) [ui.notify]
-macadam.ui.onMount(cb) / onUnmount(cb) / onVisible(cb)
-macadam.log.info|warn|error(...)
+axis.version                      -> { api: 1, app: "0.1.3" }
+axis.machine.state()              -> MachineState snapshot
+axis.machine.subscribe(cb)        -> unsubscribe
+axis.machine.capabilities()
+axis.machine.jog(deltas, feed)            [machine.motion]
+axis.machine.moveTo(targets, feed)        [machine.motion]
+axis.machine.home(axes?)                  [machine.motion]
+axis.machine.send(gcode)                  [machine.command]
+axis.machine.runMacro(path)               [machine.command]
+axis.files.list(dir) / read(path)         [files.read]
+axis.files.write(path, bytes)             [files.write]
+axis.storage.open(domain)
+axis.ui.title(text) / notify(text, level) [ui.notify]
+axis.ui.onMount(cb) / onUnmount(cb) / onVisible(cb)
+axis.log.info|warn|error(...)
 ```
 
 The machine methods mirror `core/store.ts`'s `actions`, **not** the driver
@@ -256,7 +262,7 @@ format change.
 ## Order of work
 
 1. **Loader and bridge.** Manifest parsing and validation, the frame, the
-   `postMessage` RPC with request ids and timeouts, `macadam.version`,
+   `postMessage` RPC with request ids and timeouts, `axis.version`,
    `ui.onMount`, `log.*`. A plugin that renders "hello" and nothing else.
 2. **Panels.** Register a `PanelDefinition` per installed plugin at runtime —
    `registerPanel` is already a live map — so a plugin panel is picked from the
@@ -299,6 +305,29 @@ The check suites in `tools/` are the model: the failures here are silent ones.
 - The mock stands in for the controller throughout, and — the lesson from issue
   #1 — it must not be kinder than the real thing: a denied permission in the
   test must be denied by the same code path that denies it in the app.
+
+## What the tests found
+
+Two things worth recording, because both were the design being wrong rather
+than the code being wrong.
+
+**A plugin's WebSocket is not refused, it fails.** The isolation check first
+asserted that `new WebSocket(...)` throws under `default-src 'none'`. It does
+not — Chrome constructs the object and then immediately fails it. The
+assertion was rewritten to watch from the server's side instead: the harness
+records every request that reaches the origin, and asserts that nothing the
+plugin aimed at it ever arrived. That is the property worth having, and it is
+not an implementation detail of how one browser reports a block.
+
+**`var status` is not a variable.** The plugin's code runs at global scope, so
+an inline `onclick=` resolves and a breakpoint lands where the author wrote the
+line. The cost is that `var status = document.createElement('p')` calls
+`window.status`'s legacy setter, which coerces the node to a string; nothing
+throws, and the failure surfaces later as `appendChild` being handed a string.
+The scaffold hit it on the first run. The frame now deletes the legacy Window
+members that silently corrupt a top-level variable of the same name —
+`status`, `name`, `defaultStatus`, `origin`, `length` — all of which are
+meaningless inside a plugin frame anyway.
 
 ## Open questions
 

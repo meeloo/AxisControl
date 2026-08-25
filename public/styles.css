@@ -2381,3 +2381,168 @@ button.cfg-state { border: none; cursor: pointer; font-family: inherit; }
      nothing on the page to sweep. */
   .dro-table td.num.editing input { font-size: 16px; }
 }
+
+/* ---------- Plugin permission grant (ui/grant.ts) ---------- */
+
+/* This dialog is a decision about somebody else's code, made once, usually
+   standing at a machine, so it is laid out to be read rather than dismissed:
+   one sentence per permission on its own line, and what refusing does written
+   underneath in the same size as the rest. Nothing here is a hint. */
+.grant-id {
+  margin: -4px 0 14px; font-family: var(--mono); font-size: 12px;
+  color: var(--text-faint); word-break: break-word;
+}
+.grant-perms {
+  list-style: none; margin: 0 0 14px; padding: 0;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.grant-perms li {
+  padding: 9px 11px; background: var(--bg-raised); border: 1px solid var(--border);
+  border-radius: var(--radius); font-size: 13px; line-height: 1.45;
+}
+.grant-none, .grant-refusal { margin: 0 0 14px; font-size: 13px; line-height: 1.45; color: var(--text-dim); }
+
+/* Full access removes the boundary instead of widening it, and this dialog is
+   the only place anyone is told so. It gets the machine-danger colours the
+   E-stop and the delete buttons use, a border rather than a tint alone, and it
+   sits above the permission list because it makes the list beside the point. */
+.grant-unsafe {
+  margin: 0 0 14px; padding: 11px 12px;
+  border: 1px solid var(--bad); border-radius: var(--radius); background: var(--tint-bad);
+}
+.grant-unsafe strong { display: block; margin-bottom: 6px; color: var(--bad-text); }
+.grant-unsafe p { margin: 0; font-size: 13px; line-height: 1.45; }
+.modal.grant-unsafe-modal { border-color: var(--bad); }
+
+/* ---------- Plugins (panels/plugins.ts, panels/plugin-panel.ts) ---------- */
+
+/* The panel scrolls as one column. It is four things stacked — the list, the
+   install controls, the editor and the log — and none of them is worth pinning
+   to the bottom of a panel that may be 300px tall on a phone. */
+.plugins { display: flex; flex-direction: column; gap: 10px; padding: 0 0 12px; }
+.plug-section {
+  padding: 10px 12px 0; font-size: 12px; font-weight: 600;
+  color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.04em;
+}
+.plug-list { display: flex; flex-direction: column; gap: 8px; padding: 0 12px; }
+
+.plug {
+  display: flex; flex-direction: column; gap: 5px;
+  padding: 9px 11px; background: var(--bg-raised);
+  border: 1px solid var(--border); border-radius: var(--radius);
+}
+/* A plugin that is running outside the sandbox is not a plugin with one more
+   permission, so it does not get one more chip: it gets the machine-danger
+   colours the E-stop and the delete buttons use, on the card itself, because
+   the thing to notice is which of these entries it is — from across the
+   panel, without reading a list. */
+.plug-full { border-color: var(--bad); background: var(--tint-bad); }
+.plug-faulted { border-color: var(--warn); }
+
+.plug-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.plug-switch { display: flex; align-items: center; margin: 0; }
+.plug-switch input { width: 20px; height: 20px; min-height: 0; margin: 0; }
+.plug-name { font-weight: 600; }
+.plug-version { color: var(--text-faint); font-size: 12px; font-variant-numeric: tabular-nums; }
+.plug-badge {
+  padding: 2px 7px; border-radius: 999px;
+  background: var(--bad); color: var(--on-accent);
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
+}
+/* Pushed right, and the buttons after it: where a plugin lives is a fact about
+   it, the buttons act on it, and mixing the two along one row makes the row
+   read as five controls. */
+.plug-where { margin-left: auto; color: var(--text-faint); font-size: 11px; }
+.plug-buttons { display: flex; gap: 4px; flex-wrap: wrap; }
+.plug-id { font-family: var(--mono); font-size: 11px; color: var(--text-faint); word-break: break-all; }
+.plug-desc { font-size: 12px; color: var(--text-dim); }
+.plug-fault { font-size: 12px; color: var(--warn); }
+
+/* Label column wide enough for "Permissions", so the three rows of a card line
+   up with each other rather than with the width of their own first word. */
+.plug-line { display: flex; gap: 8px; align-items: baseline; font-size: 12px; flex-wrap: wrap; }
+.plug-key { flex: 0 0 78px; color: var(--text-dim); }
+.plug-perms, .plug-domains { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; flex: 1 1 200px; }
+.plug-perm, .plug-domain {
+  padding: 1px 7px; border: 1px solid var(--border-strong); border-radius: 999px;
+  background: var(--bg-input); font-family: var(--mono); font-size: 11px;
+}
+/* Asked for and not held. The plugin is refused this call by call, so the chip
+   is struck through rather than merely dimmed: dim reads as "less important",
+   and this one is the reason the plugin does nothing. */
+.plug-perm.ungranted { color: var(--text-faint); border-style: dashed; text-decoration: line-through; }
+.plug-perm.unsafe { border-color: var(--bad); color: var(--bad-text); font-weight: 700; }
+.plug-domain.borrowed { border-style: dashed; color: var(--text-dim); }
+.plug-domain.tight { border-color: var(--warn); color: var(--warn); }
+
+/* The removal question, opened under the plugin it is about. Bordered in the
+   danger colour because one of its two answers destroys data. */
+.plug-remove {
+  display: flex; flex-direction: column; gap: 8px;
+  margin-top: 4px; padding: 10px 11px;
+  border: 1px solid var(--bad); border-radius: var(--radius); background: var(--bg-panel);
+}
+.plug-remove p { margin: 0; font-size: 12px; line-height: 1.45; color: var(--text-dim); }
+/* The shared .check styles the box and not the label, so the two labels
+   in this panel lay themselves out. */
+.plug-remove .check, .plug-log-bar .check { display: flex; gap: 6px; align-items: center; font-size: 12px; }
+.plug-remove-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.plug-install { display: flex; flex-direction: column; gap: 8px; padding: 0 12px; }
+.plug-target { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--text-dim); }
+.plug-target select { flex: 1 1 240px; min-width: 0; font-size: 12px; min-height: 32px; padding: 4px 8px; }
+.plug-install-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.plug-file { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--text-dim); }
+.plug-file input { padding: 4px; font-size: 12px; }
+.plug-paste {
+  min-height: 74px; resize: vertical;
+  font-family: var(--mono); font-size: 12px; line-height: 1.5;
+}
+.plug-install-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/* A fixed height rather than a share of the panel. The editor sits in a column
+   that scrolls, so `flex: 1` would resolve against nothing and collapse the
+   textarea to its content — which for a file being edited is one line. */
+.plug-editor { display: flex; flex-direction: column; margin: 0 12px;
+  border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+/* The .editor-body of panels/files.ts gets its background from the colour
+   layer underneath the textarea. There is no colour layer here — this is
+   JavaScript, not G-code — and the textarea itself is transparent, so without
+   this the source would sit straight on the panel. */
+.plug-editor .editor-body { flex: 0 0 auto; height: 320px; background: var(--bg-input); }
+.plug-problems {
+  list-style: none; margin: 0; padding: 7px 10px;
+  background: var(--tint-warn); border-bottom: 1px solid var(--border);
+  font-size: 12px; line-height: 1.5; color: var(--warn);
+}
+.plug-problems code { color: var(--text); font-weight: 600; }
+
+.plug-log { display: flex; flex-direction: column; margin: 0 12px;
+  border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.plug-log-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  padding: 4px 8px; border-bottom: 1px solid var(--border); }
+.plug-log-bar .plug-section { flex: 1; padding: 0; }
+.plug-log-bar .check { color: var(--text-dim); }
+/* Bounded, and it scrolls. The ring behind it holds 400 lines from every
+   plugin at once, and a plugin logging from a render loop would otherwise make
+   this panel taller than the window every few seconds. */
+.plug-log-out { max-height: 220px; min-height: 90px; }
+.plug-log-who { color: var(--accent); flex: 0 0 auto; }
+
+/* --- A plugin's own panel (panels/plugin-panel.ts) --- */
+
+/* The frame fills the panel. bridge.ts already gives the iframe width and
+   height of 100%, so what this has to supply is something for those percentages
+   to be of: the custom element is a flex child of .dv-panel and has no height
+   of its own until it is told to take one. */
+cnc-plugin-panel { display: block; height: 100%; }
+.plugin-frame { height: 100%; width: 100%; overflow: hidden; }
+
+/* Shown instead of a frame when there is no plugin to run. Deliberately plain:
+   a layout outlives the plugins in it, so this is an ordinary state and not a
+   failure, and it is the panel's only chance to say which plugin it wanted. */
+.plugin-blank { padding: 18px 16px; font-size: 13px; line-height: 1.5; color: var(--text-dim); }
+.plugin-blank strong { display: block; margin-bottom: 6px; color: var(--text); font-size: 14px; }
+.plugin-blank p { margin: 0 0 8px; }
+.plugin-blank-fault { color: var(--warn); }
+.plugin-blank-id { font-family: var(--mono); font-size: 11px; color: var(--text-faint); word-break: break-all; }

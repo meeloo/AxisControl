@@ -107,6 +107,18 @@ export function registerPanel(def: PanelDefinition): void {
   registry.set(def.id, def);
 }
 
+/**
+ * Forget a panel type.
+ *
+ * The app's own panels register once and stay; plugins come and go while the
+ * page is open. A definition left behind after its plugin was removed keeps
+ * the panel in the picker and lets the layout build an element for code that
+ * is no longer installed.
+ */
+export function unregisterPanel(id: string): void {
+  registry.delete(id);
+}
+
 export function panelDefinitions(): PanelDefinition[] {
   return [...registry.values()];
 }

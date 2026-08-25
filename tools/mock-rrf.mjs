@@ -229,8 +229,34 @@ function splitPath(full) {
   return { dir: cut <= 0 ? '/' : full.slice(0, cut), name: full.slice(cut + 1) };
 }
 
+/**
+ * Make a directory exist in the listing, and its parents with it.
+ *
+ * A real card has no way to hold /plugins/net.example.thing/main.js without
+ * also having /plugins and /plugins/net.example.thing to list. This mock did:
+ * uploading created the file's own directory listing and nothing above it, so
+ * the file could be downloaded by name but `rr_filelist?dir=/plugins` answered
+ * "no such directory" forever. Anything that writes a tree and then walks it
+ * back — which is exactly how plugins are discovered at startup — saw an empty
+ * card and concluded, reasonably and wrongly, that its own write had failed.
+ */
+function ensureDirectory(dir) {
+  if (!dir || dir === '/') {
+    FILES['/'] ??= [];
+    return;
+  }
+  FILES[dir] ??= [];
+  const { dir: parent, name } = splitPath(dir);
+  ensureDirectory(parent);
+  const list = FILES[parent];
+  if (!list.some((e) => e.name === name && e.type === 'd')) {
+    list.push({ type: 'd', name, size: 0, date: new Date().toISOString().slice(0, 19) });
+  }
+}
+
 function addToListing(full, size) {
   const { dir, name } = splitPath(full);
+  ensureDirectory(dir);
   const list = (FILES[dir] ??= []);
   const date = new Date().toISOString().slice(0, 19);
   const existing = list.find((e) => e.name === name && e.type === 'f');
@@ -1110,7 +1136,15 @@ const server = createServer(async (req, res) => {
       return sendJson(res, { err: 0 });
     }
 
-    case '/rr_mkdir':
+    case '/rr_mkdir': {
+      // Actually create it. Answering err:0 and doing nothing meant a client
+      // could make a directory, list it, and be told it does not exist.
+      const dir = url.searchParams.get('dir') ?? '';
+      if (dir) ensureDirectory(dir.length > 1 ? dir.replace(/\/$/, '') : dir);
+      seqs.volumes++;
+      return sendJson(res, { err: 0 });
+    }
+
     case '/rr_move':
       return sendJson(res, { err: 0 });
 
