@@ -302,11 +302,15 @@ export interface AxisFollow {
  *
  * The one field worth reading closely is `speeds`: those are what the firmware
  * is *actually* running, after its own clamping, not what was asked for. A
- * velocity command is capped by two separate things — the axis maximum (M203)
- * and a ceiling set by how far ahead motion is prepared, `2 × acceleration ×
- * chunkMs` — and neither produces an error. Ask for 80 mm/s on an axis whose
- * ceiling is 40 and the machine runs at 40 while reporting success. Reading
- * this back is the only way to know that happened.
+ * velocity command is capped at the axis maximum (M203) and the cap does not
+ * produce an error — ask for 200 mm/s on an axis whose maximum is 100 and the
+ * machine runs at 100 while reporting success. Reading this back is the only
+ * way to know that happened, and it is the right way round: a refusal in the
+ * middle of a jog would be a stop.
+ *
+ * `chunkMs` and `queueDepth` are the board's own numbers, reported so the
+ * readouts can be honest about latency. They are not settings this app has any
+ * business choosing — see VelocityJogOptions.
  */
 export interface VelocityJogStatus {
   active: boolean;

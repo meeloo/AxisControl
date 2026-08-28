@@ -121,10 +121,27 @@ ok(near(Math.hypot(corner.x, corner.y), v.shapeStick(0, 1, S).y, 1e-9),
 
 // --- Reading the firmware's status line ------------------------------------
 
-const doc = rrf.parseJogStatus('Jogging active, chunk 20ms, timeout 250ms, queue 2, speeds X10.0 Y-5.0');
-ok(doc !== null && doc.active && doc.chunkMs === 20 && doc.watchdogMs === 250 && doc.queueDepth === 2
+const doc = rrf.parseJogStatus('Jogging active, chunk 15ms, timeout 250ms, queue 8, speeds X10.0 Y-5.0');
+ok(doc !== null && doc.active && doc.chunkMs === 15 && doc.watchdogMs === 250 && doc.queueDepth === 8
    && doc.speeds.X === 10 && doc.speeds.Y === -5,
    'the documented status line parses', JSON.stringify(doc));
+
+// The line grew a clause between the queue and the speeds when M700 learned to
+// clamp at M203. A parser counting fields, or expecting `speeds` right after
+// `queue N,`, breaks here — this one hunts for named fields, which is why it
+// did not.
+const clamped = rrf.parseJogStatus(
+  'Jogging active, chunk 15ms, timeout 250ms, queue 8, clamped to axis maximum: Y100.0, speeds Y100.0');
+ok(clamped !== null && clamped.active && clamped.chunkMs === 15 && clamped.queueDepth === 8
+   && clamped.speeds.Y === 100 && Object.keys(clamped.speeds).length === 1,
+   '  and so does one carrying a clamp clause before the speeds', JSON.stringify(clamped));
+// Same shape with the word "speed" inside the new clause, which is the version
+// that would move the tail if this looked for the first match rather than the
+// field.
+const reworded = rrf.parseJogStatus(
+  'Jogging active, chunk 15ms, timeout 250ms, queue 8, clamped to axis maximum speed: Y100.0, speeds Y100.0');
+ok(reworded !== null && reworded.speeds.Y === 100 && Object.keys(reworded.speeds).length === 1,
+   '  and a reworded one that puts the word "speed" in that clause', JSON.stringify(reworded));
 
 // "inactive" contains "active". Getting this backwards would have the panel
 // show motion on a machine standing still.
@@ -147,32 +164,36 @@ if (!st.activeDriver()) { console.log('could not connect a driver; aborting'); p
 ok(await v.probeSupport(), 'the board is asked whether it has M700, and says yes');
 
 // The ceiling this app computes has to be the one the firmware applies, or
-// every number on the panel is decoration. X in the mock has M201 250 and M203
-// 6000: 2·250·0.02 = 10 mm/s, well under M203's 100, so the lookahead ceiling
-// is the binding one and that is the interesting case.
-const ceilX = v.axisSpeedCeiling('X', 20);
-ok(near(ceilX, 10, 1e-9), 'the XY speed ceiling is computed from acceleration and lookahead',
-   `${ceilX} mm/s`);
-ok(near(v.axisSpeedCeiling('X', 100), 50, 1e-9),
-   '  and rises with lookahead, until M203 becomes the binding limit',
-   `${v.axisSpeedCeiling('X', 100)} mm/s at 100ms`);
+// every number on the panel is decoration. It is M203 now and nothing else:
+// the firmware ramps toward the commanded velocity instead of planning chunks
+// that each stop within themselves, so acceleration and chunk time no longer
+// cap the speed. X in the mock has M203 6000, which is 100 mm/s.
+const ceilX = v.axisSpeedCeiling('X');
+ok(near(ceilX, 100, 1e-9), 'the speed ceiling is the axis maximum, M203', `${ceilX} mm/s`);
+ok(near(v.speedCeiling(['X', 'Y']), 100, 1e-9),
+   '  and a combined move is held to the lowest of them', `${v.speedCeiling(['X', 'Y'])} mm/s`);
+// The old rule would have said 2 x 250 x 0.020 = 10 mm/s here, which is what
+// made the speed control useless on a machine that traverses at 100.
+ok(ceilX > 10 + 1e-9, '  rather than the 2 x acceleration x chunk figure it used to be');
 
 // Bringing a vector under the ceilings must not turn it into a different
 // vector. In the mock, X and Y cap at 10 mm/s and Z at 4: a push mostly north
 // with a little Z in it, clamped axis by axis, comes back out as a diagonal.
 // The machine would be moving, at a sensible speed, in the wrong direction —
 // which is the one thing a jog pad exists not to do.
-const asked = { X: 4, Y: 20, Z: 2 };
-const fitted = v.fitToCeilings(asked, 20);
-ok(near(fitted.Y, 10, 1e-9), 'fitting to the ceilings brings the fastest axis down to it',
+// Z caps lower than X and Y (M203 Z2000 = 33.3 mm/s), so a push with Z in it
+// is still the interesting case.
+const asked = { X: 40, Y: 200, Z: 20 };
+const fitted = v.fitToCeilings(asked);
+ok(near(fitted.Y, 100, 1e-9), 'fitting to the ceilings brings the fastest axis down to it',
    `Y ${fitted.Y}`);
 ok(near(fitted.X / fitted.Y, asked.X / asked.Y, 1e-9) && near(fitted.Z / fitted.Y, asked.Z / asked.Y, 1e-9),
    '  and keeps the heading, rather than clamping each axis on its own',
    JSON.stringify(fitted));
-ok(Math.abs(fitted.Z) <= v.axisSpeedCeiling('Z', 20) + 1e-9,
-   '  leaving every axis under its own ceiling', `Z ${fitted.Z} vs ${v.axisSpeedCeiling('Z', 20)}`);
-ok(v.fitToCeilings({ X: 3, Y: 4 }, 20) !== undefined
-   && near(v.fitToCeilings({ X: 3, Y: 4 }, 20).X, 3, 1e-9),
+ok(Math.abs(fitted.Z) <= v.axisSpeedCeiling('Z') + 1e-9,
+   '  leaving every axis under its own ceiling', `Z ${fitted.Z} vs ${v.axisSpeedCeiling('Z')}`);
+ok(v.fitToCeilings({ X: 3, Y: 4 }) !== undefined
+   && near(v.fitToCeilings({ X: 3, Y: 4 }).X, 3, 1e-9),
    '  and a vector already under them is left exactly alone');
 
 // Ask for twenty times the ceiling. The firmware does not refuse it — that is
@@ -217,16 +238,28 @@ ok(st.machine.peek().status === 'busy',
 ok(v.canVelocityJog().ok, '  and jogging is allowed during one anyway',
    v.canVelocityJog().why || 'allowed');
 ok(v.jogRunning.peek(), '  with the jog uninterrupted by it');
-// The ceiling is 2 x acceleration x chunk, and the chunk is no longer a fixed
-// 20ms — it is derived from the speed the operator asked for, so this asserts
-// the rule rather than the number it used to produce. The number matters too:
-// at a fixed 20ms chunk this machine's ceiling was 10 mm/s, which is why the
-// speed control could not offer anything usable.
-const chunkInUse = during.chunkMs ?? 20;
-const ceilingInUse = 2 * 250 * (chunkInUse / 1000);
-ok(near(during.speeds.X, ceilingInUse, 1e-6) && near(during.commanded.X, 200, 1e-6),
-   `  and 200 mm/s is silently clamped to the ${ceilingInUse} mm/s ceiling for the ${chunkInUse}ms chunk, not refused`,
+// The ceiling is M203 and nothing else now. Commanding twice it is not refused
+// — the board clamps and says so in its status line, which is what a host has
+// to be able to rely on, since a refusal mid-jog would be a stop.
+ok(near(during.speeds.X, 100, 1e-6) && near(during.commanded.X, 200, 1e-6),
+   '  and 200 mm/s is silently clamped to the M203 ceiling, not refused',
    `asked ${during.commanded.X}, running ${during.speeds.X}`);
+ok(during.speeds.X > 10 + 1e-6,
+   '    which is ten times what the old 2 x acceleration x chunk rule allowed',
+   `${during.speeds.X} mm/s`);
+// Nothing this app sends may carry P, D or R.
+//
+// The board's defaults are measured and they move — they were D2 P20 and are
+// now D8 P15 — and a host that pins the old pair runs at about half the speed
+// it asks for. There is nothing to gain by sending them either, now that P
+// buys stopping distance rather than speed. So the wire is checked directly:
+// every M700 that left this app, against the parameters it must not carry.
+const everySent = (await fetch(`${URL_}/__sent`).then((r) => r.json())).sent.filter((c) => /^M700/.test(c));
+const tuned = everySent.filter((c) => /\b[PDR]\d/.test(c));
+ok(everySent.length > 5, 'M700 commands went out', `${everySent.length} of them`);
+ok(tuned.length === 0, '  and not one of them tried to tune P, D or R',
+   tuned.slice(0, 3).join(' | ') || 'none did');
+
 ok(during.positions.X > before.X + 2,
    '  and the axis really travelled', `${(during.positions.X - before.X).toFixed(2)}mm`);
 
@@ -367,6 +400,23 @@ try { await st.connect(URL_, 'rrf'); } catch (e) { console.log('reconnect threw:
 for (let i = 0; i < 40 && !v.canVelocityJog().ok; i++) await sleep(100);
 ok(v.canVelocityJog().ok, '  and comes back by itself when it returns — no Re-check, no reload',
    v.canVelocityJog().why || 'allowed');
+
+// Everything this suite sent, now that it has done its stopping. A bare M700
+// is a status request, so a stop that went out as one would leave the machine
+// running while the panel showed it stopped — the one case where the shape of
+// the command is the difference between stopped and not.
+const allM700 = (await fetch(`${URL_}/__sent`).then((r) => r.json())).sent.filter((c) => /^M700/.test(c));
+ok(allM700.some((c) => /^M700 S0$/.test(c)), 'the stop goes out as an explicit S0',
+   allM700.filter((c) => /S0/.test(c)).length + ' of them');
+// A bare M700 does appear, and should: it is how probeSupport asks the board
+// whether it has the command at all. What matters is that no *stop* went out
+// that way — with no parameters M700 reports status and moves nothing, so a
+// stop shaped like one would leave the machine running while the panel showed
+// it stopped.
+ok(allM700.filter((c) => /^M700$/.test(c)).length <= 4,
+   '  with bare M700 used only to ask for status, not to stop',
+   `${allM700.filter((c) => /^M700$/.test(c)).length} status requests`);
+ok(!allM700.some((c) => /\b[PDR]\d/.test(c)), '  and nothing ever pinned P, D or R');
 
 console.log(fails.length ? `\n${fails.length} FAILED: ${fails.join(', ')}` : '\nall passed');
 process.exit(fails.length ? 1 : 0);

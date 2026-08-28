@@ -48,7 +48,7 @@ const axes = [
  *
  *   the watchdog — go quiet and this stops on its own, which is the only way
  *     to see whether a host is really resending rather than relying on it
- *   silent clamping — a speed above `2 × acceleration × chunkMs` or above M203
+ *   silent clamping — a speed above M203
  *     is not refused, it is quietly run slower, so a host that never reads the
  *     status back cannot tell it asked for something impossible
  *
@@ -57,9 +57,14 @@ const axes = [
  */
 const jog = {
   active: false,
-  chunkMs: 20,
+  // The firmware's current defaults. They moved from D2 P20 when M700 changed
+  // from planning self-stopping chunks to ramping toward a commanded velocity,
+  // and they are here as the board's numbers rather than as anything a host
+  // chose — a host that pins the old pair gets about half the speed it asks
+  // for, which is exactly the bug this fixture exists to make visible.
+  chunkMs: 15,
   watchdogMs: 250,
-  queueDepth: 2,
+  queueDepth: 8,
   /** Running speed per axis letter, mm/s, after clamping. */
   speeds: {},
   /** What was actually asked for, before clamping. */
@@ -610,11 +615,17 @@ setInterval(() => {
   }
 }, 100);
 
-/** The speed this axis will actually run at, mm/s. See `jog` above. */
+/**
+ * The speed this axis will actually run at, mm/s. See `jog` above.
+ *
+ * M203 and nothing else. It used to be the lesser of that and
+ * `2 x acceleration x chunk`, because each chunk had to be able to stop within
+ * itself; the firmware now ramps toward the commanded velocity, so the chunk
+ * time no longer caps the speed. A fixture still clamping the old way would
+ * make a host that asks for the machine's real traverse speed look wrong.
+ */
 function clampJogSpeed(axis, asked) {
-  const caps = [2 * axis.acceleration * (jog.chunkMs / 1000)];
-  if (axis.speed > 0) caps.push(axis.speed / 60);
-  const cap = Math.min(...caps);
+  const cap = axis.speed > 0 ? axis.speed / 60 : Infinity;
   return Math.sign(asked) * Math.min(Math.abs(asked), cap);
 }
 
@@ -662,9 +673,18 @@ function handleJog(upper) {
   // Bare M700 is a status report, not a command — the distinction that makes
   // `M700` with no axes a very different thing from `M700 S0`.
   if (/^M700$/.test(upper.trim())) {
+    // The clamp clause sits between the queue and the speeds, which is where
+    // the firmware puts it. It is here because a parser that assumed `queue N,`
+    // was followed directly by `speeds` would break on it, and the only way to
+    // find that out before a machine does is to say it here too.
+    const clamped = Object.entries(jog.commanded)
+      .filter(([l, v]) => Math.abs(v) > Math.abs(jog.speeds[l] ?? 0) + 1e-9)
+      .map(([l]) => `${l}${(jog.speeds[l] ?? 0).toFixed(1)}`);
     pushReply(
       `Jogging ${jog.active ? 'active' : 'inactive'}, chunk ${jog.chunkMs}ms, ` +
-        `timeout ${jog.watchdogMs}ms, queue ${jog.queueDepth}, speeds ` +
+        `timeout ${jog.watchdogMs}ms, queue ${jog.queueDepth}, ` +
+        (clamped.length ? `clamped to axis maximum: ${clamped.join(' ')}, ` : '') +
+        'speeds ' +
         (Object.entries(jog.speeds)
           .map(([l, v]) => `${l}${v.toFixed(1)}`)
           .join(' ') || 'none'),

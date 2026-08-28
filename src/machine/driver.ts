@@ -55,12 +55,14 @@ export interface VelocityJogOptions {
   /**
    * How much motion the controller prepares at a time, ms.
    *
-   * The one knob with a real trade-off in it, in both directions. Larger means
-   * a higher speed ceiling (`2 × acceleration × chunkMs`) and more lag between
-   * moving the stick and the machine answering. Smaller does NOT keep buying
-   * lower latency: below roughly 40ms of queued motion the planner starves and
-   * latency gets *worse*, so there is a floor and the default already sits just
-   * above it.
+   * Present for a caller that is measuring the firmware, and for nothing else.
+   * It used to buy speed, because the ceiling was `2 × acceleration × chunkMs`;
+   * the firmware now ramps toward the commanded velocity, so a larger chunk
+   * buys only stopping distance. Smaller does not buy lower latency either —
+   * below roughly 40ms of queued motion the planner starves and latency gets
+   * *worse*. The board's own default is measured, and it moves between
+   * releases: a host that pins a value is a host running at a fraction of the
+   * speed it asked for after the next one. Leave it unset.
    */
   chunkMs?: number;
   /**

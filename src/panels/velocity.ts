@@ -40,13 +40,11 @@ import { PanelElement, registerPanel } from '../ui/panel.js';
 import { actions, capabilities, connected, machine } from '../core/store.js';
 import { empty } from '../ui/widgets.js';
 import {
-  CHUNK_RANGE,
   DEFAULT_CHUNK_MS,
+  DEFAULT_QUEUE_DEPTH,
   RATE_RANGE,
-  achievableSpeed,
   applyVelocitySettings,
   axisSpeedCeiling,
-  chunkForSpeed,
   stopDistance,
   canVelocityJog,
   fitToCeilings,
@@ -353,15 +351,24 @@ export class VelocityJogPanel extends PanelElement {
    * the whole gesture over the range the machine actually has.
    *
    * The operator's chosen speed is kept as it was rather than written down to
-   * the ceiling, so raising the lookahead — or the axis M201 — gives it back.
+   * the ceiling, so a machine whose M203 is raised gives it back.
    */
-  /** The chunk actually in use, which follows the speed asked for. */
+  /**
+   * The chunk the board says it is using, for the readouts that mention it.
+   *
+   * Reported, never chosen: nothing here sends P any more. Falls back to the
+   * firmware's current default only until the first status line arrives.
+   */
   private get chunk(): number {
-    return chunkForSpeed(this.settings.maxSpeed, this.axisLetters, this.settings.chunkMs);
+    return jogStatus.get()?.chunkMs ?? DEFAULT_CHUNK_MS;
+  }
+
+  private get queueDepth(): number {
+    return jogStatus.get()?.queueDepth ?? DEFAULT_QUEUE_DEPTH;
   }
 
   private reach(letters: string[]): number {
-    const cap = speedCeiling(letters, this.chunk);
+    const cap = speedCeiling(letters);
     return isFinite(cap) ? Math.min(this.settings.maxSpeed, cap) : this.settings.maxSpeed;
   }
 
@@ -418,7 +425,7 @@ export class VelocityJogPanel extends PanelElement {
     // Owner-scoped. Another Jog panel may be driving, in which case this is
     // dropped rather than interleaved with theirs — and an empty vector from
     // here cannot stop a jog this panel never started.
-    setJogVector(fitToCeilings(out, this.settings.chunkMs), this.owner);
+    setJogVector(fitToCeilings(out), this.owner);
   }
 
   /** Everything back to centre, and the machine stopped. */
@@ -743,7 +750,7 @@ export class VelocityJogPanel extends PanelElement {
       <div class="vjog-readout">
         ${letters.map((letter) => {
           const v = vector[letter] ?? 0;
-          const cap = axisSpeedCeiling(letter, this.settings.chunkMs);
+          const cap = axisSpeedCeiling(letter);
           const capped = v !== 0 && isFinite(cap) && Math.abs(v) >= cap - 1e-6;
           const limit = this.atLimit(letter);
           // "Against its limit" only matters in the direction that is blocked:
@@ -776,17 +783,17 @@ export class VelocityJogPanel extends PanelElement {
     // learned to follow the speed, and taking the second one capped this
     // control at 20 mm/s on a machine that traverses at 100 — a speed control
     // that could not ask for the machine's speed.
-    const best = achievableSpeed(['X', 'Y']);
+    const best = speedCeiling(['X', 'Y']);
     const top = Math.max(1, Math.floor(isFinite(best) ? best : 100));
     // What a full push will ACTUALLY do, which is not always what was chosen.
-    // A preference of 25 saved when the lookahead was longer survives into a
-    // session where the ceiling is 10 — and showing the 25 there puts a number
-    // on screen that nothing on the machine will ever produce. The preference is
-    // kept rather than overwritten, because raising the lookahead should give it
-    // back; it is just not what gets displayed as the speed.
+    // A preference saved against one machine survives into a session on another
+    // whose M203 is lower, and showing it there puts a number on screen that
+    // nothing will ever produce. The preference is kept rather than
+    // overwritten — a machine with a higher maximum gives it back — it is just
+    // not what gets displayed as the speed.
     const effective = Math.min(this.settings.maxSpeed, top);
     const held = this.settings.maxSpeed > top + 1e-6;
-    const coast = stopDistance(effective, ['X', 'Y'], chunk, jogStatus.get()?.queueDepth ?? 2);
+    const coast = stopDistance(effective, ['X', 'Y'], chunk, this.queueDepth);
 
     return html`
       <div class="jog-cursors">
@@ -859,28 +866,12 @@ export class VelocityJogPanel extends PanelElement {
           <span class="jog-cursor-foot"><em>higher gives more of the pad to slow speeds</em></span>
         </label>
 
-        <label class="jog-cursor">
-          <span class="jog-cursor-head">
-            <span>Lookahead</span>
-            <strong>${chunk} ms</strong>
-          </span>
-          <input
-            type="range"
-            min=${CHUNK_RANGE.min}
-            max=${CHUNK_RANGE.max}
-            step="5"
-            .value=${String(chunk)}
-            @input=${(e: Event) =>
-              this.patch({ chunkMs: Number((e.target as HTMLInputElement).value) })}
-          />
-          <span class="jog-cursor-foot">
-            <em
-              >${chunk === DEFAULT_CHUNK_MS
-                ? 'default — lowest latency'
-                : `raises the ceiling, adds ~${chunk * 2 - 10}ms of lag`}</em
-            >
-          </span>
-        </label>
+        <!-- There was a Lookahead cursor here, and it is gone on purpose.
+             It set M700's P. That used to buy speed, because the ceiling was
+             2 x acceleration x P; the firmware now ramps toward the commanded
+             velocity, so P buys nothing but stopping distance and the board's
+             own default is measured and better than anything set from here.
+             The chunk the board is actually using is reported in the foot. -->
       </div>
     `;
   }

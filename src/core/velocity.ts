@@ -46,38 +46,27 @@ export interface VelocitySettings {
   expo: number;
   /** Commands per second. */
   rateHz: number;
-  /** M700's P — how much motion the board prepares at a time, ms. */
-  chunkMs: number;
 }
 
-/** The firmware's own default chunk, and the measured optimum. See CHUNK_RANGE. */
-export const DEFAULT_CHUNK_MS = 20;
-export const DEFAULT_WATCHDOG_MS = 250;
-
 /**
- * How far the chunk time may be pushed, and why it stops where it does.
+ * The firmware's own defaults for P and D, and why nothing here sends them.
  *
- * Upward it buys speed: the ceiling on any commanded velocity is
- * `2 × acceleration × chunkMs`, because the planner will not let a move enter
- * faster than it could stop within itself, and each chunk has to be able to be
- * the last one. So 100ms quintuples the top speed — at the price of a fifth of
- * a second between moving the stick and the machine answering, which is already
- * more lag than a hand tolerates. Past that it stops being a jog control.
+ * They are here to describe a status line that has not arrived yet, and for
+ * nothing else. The board's defaults are tuned by measurement and they move:
+ * they were `D2 P20` and are now `D8 P15`, and a host that pinned the old pair
+ * would get 53% of the speed it asked for instead of 97%. Sending either is
+ * how you find that out a year later.
  *
- * Downward it buys nothing, which is the counter-intuitive half. Latency
- * follows `queueDepth × chunkMs` only while there is enough prepared motion for
- * the planner to run at all — roughly 50ms of it. Below that the planner
- * starves and latency gets *worse*: the firmware's own measurements put
- * `D=2, P=10` at 127ms against 50ms for `D=2, P=20`. The floor is in the
- * firmware, not in how fast a host can send, so the default is also the
- * minimum here and there is no way to ask for less.
+ * There is no longer anything to gain by trying. P used to buy speed, because
+ * the ceiling was `2 × acceleration × P`; now the firmware ramps toward the
+ * commanded velocity and P buys nothing but stopping distance. So M700 goes out
+ * carrying the vector and nothing else, and the board's own numbers come back
+ * in the status line — see parseJogStatus, which reads them rather than
+ * assuming them.
  */
-// The firmware's own range for P. The old ceiling here was 100, which was not
-// a firmware limit but a guess, and it quietly halved the top speed available.
-export const CHUNK_RANGE = { min: DEFAULT_CHUNK_MS, max: 200 };
-
-/** The firmware's default queue depth (D), used when the board has not said. */
-export const DEFAULT_QUEUE_DEPTH = 2;
+export const DEFAULT_CHUNK_MS = 15;
+export const DEFAULT_WATCHDOG_MS = 250;
+export const DEFAULT_QUEUE_DEPTH = 8;
 
 /**
  * Command rate, in Hz.
@@ -94,7 +83,6 @@ export const VELOCITY_DEFAULTS: VelocitySettings = {
   deadzone: 0.08,
   expo: 2,
   rateHz: 30,
-  chunkMs: DEFAULT_CHUNK_MS,
 };
 
 export function loadVelocitySettings(): VelocitySettings {
@@ -107,7 +95,6 @@ export function loadVelocitySettings(): VelocitySettings {
     deadzone: Math.min(0.4, Math.max(0, raw.deadzone)),
     expo: Math.min(4, Math.max(1, raw.expo)),
     rateHz: Math.min(RATE_RANGE.max, Math.max(RATE_RANGE.min, raw.rateHz)),
-    chunkMs: Math.min(CHUNK_RANGE.max, Math.max(CHUNK_RANGE.min, raw.chunkMs)),
   };
 }
 
@@ -153,78 +140,25 @@ export function shapeStick(
 }
 
 /**
- * The fastest this axis can actually be driven, mm/s — or Infinity if the
- * controller has not said enough to know.
+ * The fastest this axis may be jogged, mm/s — or Infinity if the controller has
+ * not said.
  *
- * Two independent caps, and the second is the one that surprises people. M203
- * is the axis maximum and is the obvious one. The other is `2 × acceleration ×
- * chunkMs`, which exists because the planner caps each move's entry speed so
- * that any move can turn out to be the last one queued and still stop inside
- * itself. With M201 X1000 and the default 20ms chunk that is 40 mm/s — and
- * asking for 80 does not fail, it just runs at 40, which is why this is worth
- * computing and showing rather than leaving to be discovered.
+ * `M203`, and nothing else now. It used to be the lesser of that and
+ * `2 × acceleration × chunk`, because the firmware planned each chunk as a
+ * self-contained move that had to be able to stop within itself. That put the
+ * ceiling at 20 mm/s on a machine whose traverse is 100, and quietly made the
+ * chunk time into a speed control.
  *
- * The lever, if the ceiling is too low, is acceleration and not chunk time:
- * M201 X4000 gives 160 mm/s at the same latency.
+ * The firmware now ramps toward a commanded velocity and ramps down when the
+ * stream stops — an accelerator pedal rather than a series of hops — so the
+ * only limit left is the axis maximum, which is the number the operator already
+ * knows from their own config. Anything above it is clamped by the board and
+ * said so in the status line.
  */
-export function axisSpeedCeiling(letter: string, chunkMs: number): number {
+export function axisSpeedCeiling(letter: string): number {
   const axis = machine.get().axes.find((a) => a.letter === letter);
   if (!axis) return Infinity;
-  const caps: number[] = [];
-  if (axis.acceleration > 0) caps.push(2 * axis.acceleration * (chunkMs / 1000));
-  if (axis.maxFeed > 0) caps.push(axis.maxFeed / 60);
-  return caps.length ? Math.min(...caps) : Infinity;
-}
-
-/**
- * The fastest this machine can be jogged at all, whatever the chunk.
- *
- * Not the same question as `axisSpeedCeiling`, which answers for the chunk in
- * use. This is the best case: the longest chunk the firmware accepts, against
- * the axis's own M203. It is what the speed control should offer, because
- * capping the control at the ceiling for the *current* chunk is a control that
- * cannot ask for the machine's real speed — which is what it did, offering
- * 20 mm/s on a machine that traverses at 100.
- */
-export function achievableSpeed(letters: string[]): number {
-  const caps = letters.map((l) => axisSpeedCeiling(l, CHUNK_RANGE.max)).filter((c) => isFinite(c));
-  return caps.length ? Math.min(...caps) : Infinity;
-}
-
-/**
- * The shortest chunk that can carry this speed.
- *
- * The coupling nobody should have to work out by hand: a chunk may be the last
- * one queued, so the firmware only accepts a speed it could stop from inside
- * one, and that is `2 × acceleration × P`. Turned around, a speed needs a
- * chunk of at least `speed / (2 × acceleration)`.
- *
- * That is not a tax for the sake of it. Stopping from 166 mm/s at 500 mm/s²
- * takes a third of a second whatever P is; the chunk merely has to be long
- * enough to admit it. Which is also why this never goes below the floor the
- * operator set: a short chunk is the right default and the only cost of a long
- * one is felt at speeds that were impossible without it.
- */
-export function chunkForSpeed(speed: number, letters: string[], floorMs = DEFAULT_CHUNK_MS): number {
-  const accels = letters
-    .map((l) => machine.get().axes.find((a) => a.letter === l)?.acceleration ?? 0)
-    .filter((a) => a > 0);
-  if (!accels.length || !(speed > 0)) return floorMs;
-  const needed = Math.ceil((1000 * speed) / (2 * Math.min(...accels)));
-  return Math.min(CHUNK_RANGE.max, Math.max(floorMs, CHUNK_RANGE.min, needed));
-}
-
-/**
- * A watchdog that outlives the motion already queued.
- *
- * `R` stops the machine when no command has arrived for that long, and the
- * queue holds `D × P` of motion. If R were the shorter of the two, a jog at a
- * long chunk would trip its own watchdog while the operator was still pushing.
- * The default 250ms covers the default 2 × 20ms with room to spare; a longer
- * chunk has to carry the watchdog up with it.
- */
-export function watchdogFor(chunkMs: number, depth = DEFAULT_QUEUE_DEPTH): number {
-  return Math.max(DEFAULT_WATCHDOG_MS, depth * chunkMs + 150);
+  return axis.maxFeed > 0 ? axis.maxFeed / 60 : Infinity;
 }
 
 /**
@@ -248,8 +182,8 @@ export function stopDistance(speed: number, letters: string[], chunkMs: number, 
 }
 
 /** The lowest ceiling among `letters` — what a combined move is really limited to. */
-export function speedCeiling(letters: string[], chunkMs: number): number {
-  const caps = letters.map((l) => axisSpeedCeiling(l, chunkMs)).filter((c) => isFinite(c));
+export function speedCeiling(letters: string[]): number {
+  const caps = letters.map((l) => axisSpeedCeiling(l)).filter((c) => isFinite(c));
   return caps.length ? Math.min(...caps) : Infinity;
 }
 
@@ -268,13 +202,10 @@ export function speedCeiling(letters: string[], chunkMs: number): number {
  *
  * One factor, applied to everything, gives up speed and keeps the heading.
  */
-export function fitToCeilings(
-  vector: Record<string, number>,
-  chunkMs: number,
-): Record<string, number> {
+export function fitToCeilings(vector: Record<string, number>): Record<string, number> {
   let factor = 1;
   for (const [letter, v] of Object.entries(vector)) {
-    const cap = axisSpeedCeiling(letter, chunkMs);
+    const cap = axisSpeedCeiling(letter);
     if (isFinite(cap) && Math.abs(v) > cap) factor = Math.min(factor, cap / Math.abs(v));
   }
   if (factor >= 1) return vector;
@@ -525,22 +456,15 @@ function send(): void {
     stopJog('Lost the connection');
     return;
   }
-  // The chunk is derived from the speed the operator asked for, not from the
-  // instantaneous vector: it has to be stable while a thumb is on the pad, and
-  // the requested maximum is the only number here that does not move. The
-  // watchdog goes up with it, or a long chunk trips its own.
+  // No P, no D, no R.
   //
-  // Only sent when either differs from the firmware's own default, so the
-  // streamed command stays as short as it can be. See velocityJog in the driver.
-  const letters = Object.keys(vector);
-  const chunk = chunkForSpeed(settings.maxSpeed, letters.length ? letters : ['X', 'Y'], settings.chunkMs);
-  const depth = jogStatus.peek()?.queueDepth ?? DEFAULT_QUEUE_DEPTH;
-  const opts =
-    chunk === DEFAULT_CHUNK_MS
-      ? undefined
-      : { chunkMs: chunk, watchdogMs: watchdogFor(chunk, depth) };
+  // The board's defaults are measured and they move — they were D2 P20 and are
+  // now D8 P15 — so a host that pins them is a host that quietly runs at half
+  // the speed it asked for after the next firmware release. There is nothing
+  // to gain either: P bought speed only while the ceiling was 2 x acceleration
+  // x P, and now it buys stopping distance and nothing else.
   const request = driver
-    .velocityJog(vector, opts)
+    .velocityJog(vector)
     .then((buff) => {
       health = { buff, skipped: health.skipped, sent: health.sent + 1 };
       pushHealth();
