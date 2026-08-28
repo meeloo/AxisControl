@@ -174,7 +174,9 @@ ok(/refused as it should be/i.test(logText), 'a call past the granted permission
 ok(/machine\.command/.test(logText), '  and the refusal names the permission that was missing');
 ok(!/THE COMMAND WENT THROUGH/.test(logText), '  and the command did not reach the machine');
 
-await p.screenshot({ path: join(ROOT, 'plugin-e2e.png') });
+// Only when asked for: a check that leaves a file behind every time it runs
+// is a check that dirties the tree, and this one did until it was noticed.
+if (process.env.SCREENSHOT) await p.screenshot({ path: join(ROOT, 'plugin-e2e.png') });
 ok(errors.length === 0, 'no page errors throughout', errors.slice(0,2).join(' | '));
 await b.close();
 console.log(fails.length ? `\n${fails.length} FAILED: ${fails.join(', ')}` : '\nall passed');
