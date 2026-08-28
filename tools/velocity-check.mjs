@@ -217,8 +217,15 @@ ok(st.machine.peek().status === 'busy',
 ok(v.canVelocityJog().ok, '  and jogging is allowed during one anyway',
    v.canVelocityJog().why || 'allowed');
 ok(v.jogRunning.peek(), '  with the jog uninterrupted by it');
-ok(near(during.speeds.X, 10, 1e-6) && near(during.commanded.X, 200, 1e-6),
-   '  and 200 mm/s is silently clamped to the ceiling rather than refused',
+// The ceiling is 2 x acceleration x chunk, and the chunk is no longer a fixed
+// 20ms — it is derived from the speed the operator asked for, so this asserts
+// the rule rather than the number it used to produce. The number matters too:
+// at a fixed 20ms chunk this machine's ceiling was 10 mm/s, which is why the
+// speed control could not offer anything usable.
+const chunkInUse = during.chunkMs ?? 20;
+const ceilingInUse = 2 * 250 * (chunkInUse / 1000);
+ok(near(during.speeds.X, ceilingInUse, 1e-6) && near(during.commanded.X, 200, 1e-6),
+   `  and 200 mm/s is silently clamped to the ${ceilingInUse} mm/s ceiling for the ${chunkInUse}ms chunk, not refused`,
    `asked ${during.commanded.X}, running ${during.speeds.X}`);
 ok(during.positions.X > before.X + 2,
    '  and the axis really travelled', `${(during.positions.X - before.X).toFixed(2)}mm`);
@@ -343,6 +350,23 @@ ok(!v.canVelocityJog().ok, '  and the app refuses it too, without waiting to be 
 await raw('M0');
 await sleep(800);
 ok(v.canVelocityJog().ok, '  and allows it again once the program ends', v.canVelocityJog().why || 'allowed');
+
+// --- A connection that comes back ------------------------------------------
+
+// The pad has to work again afterwards. Losing the connection sets support back
+// to 'unknown' — the firmware did not change, the link did — but nothing used
+// to ask again, and anything other than 'yes' reads as "not yet", so the pad
+// stayed disabled for the rest of the session and the operator reloaded the
+// page. On this machine the blip is not hypothetical: something as ordinary as
+// the board pausing for longer than the poll's patience produces it.
+ok(v.canVelocityJog().ok, 'the pad works before the connection blips', v.canVelocityJog().why || 'allowed');
+await st.disconnect();
+await sleep(300);
+ok(!v.canVelocityJog().ok, '  and stops while there is no connection', v.canVelocityJog().why);
+try { await st.connect(URL_, 'rrf'); } catch (e) { console.log('reconnect threw:', e.message); }
+for (let i = 0; i < 40 && !v.canVelocityJog().ok; i++) await sleep(100);
+ok(v.canVelocityJog().ok, '  and comes back by itself when it returns — no Re-check, no reload',
+   v.canVelocityJog().why || 'allowed');
 
 console.log(fails.length ? `\n${fails.length} FAILED: ${fails.join(', ')}` : '\nall passed');
 process.exit(fails.length ? 1 : 0);

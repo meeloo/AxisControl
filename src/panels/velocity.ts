@@ -43,8 +43,11 @@ import {
   CHUNK_RANGE,
   DEFAULT_CHUNK_MS,
   RATE_RANGE,
+  achievableSpeed,
   applyVelocitySettings,
   axisSpeedCeiling,
+  chunkForSpeed,
+  stopDistance,
   canVelocityJog,
   fitToCeilings,
   jogHealth,
@@ -352,8 +355,13 @@ export class VelocityJogPanel extends PanelElement {
    * The operator's chosen speed is kept as it was rather than written down to
    * the ceiling, so raising the lookahead — or the axis M201 — gives it back.
    */
+  /** The chunk actually in use, which follows the speed asked for. */
+  private get chunk(): number {
+    return chunkForSpeed(this.settings.maxSpeed, this.axisLetters, this.settings.chunkMs);
+  }
+
   private reach(letters: string[]): number {
-    const cap = speedCeiling(letters, this.settings.chunkMs);
+    const cap = speedCeiling(letters, this.chunk);
     return isFinite(cap) ? Math.min(this.settings.maxSpeed, cap) : this.settings.maxSpeed;
   }
 
@@ -762,12 +770,14 @@ export class VelocityJogPanel extends PanelElement {
   // --- Cursors -------------------------------------------------------------
 
   private renderCursors(): TemplateResult {
-    const chunk = this.settings.chunkMs;
-    const ceiling = speedCeiling(['X', 'Y'], chunk);
-    // 100 mm/s when the controller has said nothing about limits — a number to
-    // put on a slider, not a claim about the machine, which is why the foot
-    // below says which of the two it is.
-    const top = Math.max(1, Math.floor(isFinite(ceiling) ? ceiling : 100));
+    const chunk = this.chunk;
+    // What the machine can be jogged at, not what it can be jogged at with the
+    // chunk it happens to be using. Those were the same number until the chunk
+    // learned to follow the speed, and taking the second one capped this
+    // control at 20 mm/s on a machine that traverses at 100 — a speed control
+    // that could not ask for the machine's speed.
+    const best = achievableSpeed(['X', 'Y']);
+    const top = Math.max(1, Math.floor(isFinite(best) ? best : 100));
     // What a full push will ACTUALLY do, which is not always what was chosen.
     // A preference of 25 saved when the lookahead was longer survives into a
     // session where the ceiling is 10 — and showing the 25 there puts a number
@@ -776,6 +786,7 @@ export class VelocityJogPanel extends PanelElement {
     // back; it is just not what gets displayed as the speed.
     const effective = Math.min(this.settings.maxSpeed, top);
     const held = this.settings.maxSpeed > top + 1e-6;
+    const coast = stopDistance(effective, ['X', 'Y'], chunk, jogStatus.get()?.queueDepth ?? 2);
 
     return html`
       <div class="jog-cursors">
@@ -795,13 +806,21 @@ export class VelocityJogPanel extends PanelElement {
               this.patch({ maxSpeed: Number((e.target as HTMLInputElement).value) })}
           />
           <span class="jog-cursor-foot">
-            <em class=${held ? 'bad' : ''}>
-              ${isFinite(ceiling) ? `XY ceiling ${ceiling.toFixed(1)} mm/s` : 'no limits reported'}
-            </em>
             <em>${(effective * 60).toFixed(0)} mm/min</em>
+            <em title="Each command commits this much motion, and the firmware only accepts a speed it could stop from inside one. It is raised to carry the speed you asked for.">
+              ${chunk}ms chunk
+            </em>
+            <!-- The number that matters at the machine. A release waits behind
+                 the motion already queued and then decelerates, and at speed
+                 that is a hand's length rather than the millimetre it is at a
+                 crawl. Nobody should have to work this out while holding the
+                 pad. -->
+            <em class=${coast > 25 ? 'bad' : ''} title="How far it travels after you let go: the queued motion first, then the deceleration.">
+              ~${coast < 10 ? coast.toFixed(1) : coast.toFixed(0)}mm to stop
+            </em>
             ${held
-              ? html`<em class="bad" title="Raise Lookahead, or the axis M201, to get it back."
-                    >held down from ${this.settings.maxSpeed.toFixed(1)}</em
+              ? html`<em class="bad" title="This axis cannot be jogged that fast even at the longest chunk. Raise its M201 acceleration or M203 maximum speed.">
+                    held down from ${this.settings.maxSpeed.toFixed(1)}</em
                   >`
               : nothing}
           </span>

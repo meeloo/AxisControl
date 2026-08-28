@@ -806,8 +806,13 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .vjog-val.blocked { color: var(--bad); }
 .vjog-units { font-size: 10px; color: var(--text-faint); margin-left: auto; }
 
+/* A floor under the pads.
+   Everything in this row is sized from the row's height, so in a short panel
+   the controls shrink together until they are unusable — measured at 8px wide
+   for a strip in a 900x800 window, which is a control nobody can grab. The row
+   keeps a usable height and the panel scrolls instead. */
 .vjog-pads { display: flex; gap: 12px; align-items: stretch; justify-content: center;
-  flex: 1 1 auto; min-height: 0; }
+  flex: 1 1 auto; min-height: 190px; }
 
 /* Square, and it has to genuinely be square rather than merely draw a circle in
    the middle of whatever shape it lands in. An SVG letterboxes its viewBox, so
@@ -818,10 +823,17 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .vjog-stick { flex: 0 1 auto; align-self: center; height: 100%; width: auto; max-width: 100%;
   aspect-ratio: 1; touch-action: none; cursor: grab; }
 .vjog-stick.live { cursor: grabbing; }
-.vjog-strip { height: 100%; width: auto; aspect-ratio: 48 / 224; touch-action: none;
-  cursor: ns-resize; }
+/* Width capped rather than left to follow the height.
+   The strip is 48:224, so a width derived from `height: 100%` grows without
+   bound as the panel gets taller: on a tall window two strips either ate the
+   row and squeezed the stick to a coin, or overflowed their own holders and
+   drew on top of each other. The cap ends both. Past it the SVG letterboxes
+   inside a taller box, which keeps the drawing the right shape — see the note
+   on .vjog-stick — rather than stretching it. */
+.vjog-strip { height: 100%; width: auto; aspect-ratio: 48 / 224; max-width: 72px;
+  touch-action: none; cursor: ns-resize; }
 .vjog-striph { display: flex; flex-direction: column; align-items: center; gap: 4px;
-  flex: 0 0 auto; height: 100%; min-height: 0; }
+  flex: 0 0 auto; height: 100%; min-height: 0; max-width: 72px; }
 .vjog-strip-name { font-weight: 700; font-size: 13px; color: var(--text-dim); flex: 0 0 auto; }
 .vjog-home { flex: 0 0 auto; min-height: 26px; height: 26px; padding: 0 8px; font-size: 14px;
   color: var(--text-dim); }

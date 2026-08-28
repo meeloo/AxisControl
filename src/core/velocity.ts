@@ -72,7 +72,12 @@ export const DEFAULT_WATCHDOG_MS = 250;
  * firmware, not in how fast a host can send, so the default is also the
  * minimum here and there is no way to ask for less.
  */
-export const CHUNK_RANGE = { min: DEFAULT_CHUNK_MS, max: 100 };
+// The firmware's own range for P. The old ceiling here was 100, which was not
+// a firmware limit but a guess, and it quietly halved the top speed available.
+export const CHUNK_RANGE = { min: DEFAULT_CHUNK_MS, max: 200 };
+
+/** The firmware's default queue depth (D), used when the board has not said. */
+export const DEFAULT_QUEUE_DEPTH = 2;
 
 /**
  * Command rate, in Hz.
@@ -169,6 +174,77 @@ export function axisSpeedCeiling(letter: string, chunkMs: number): number {
   if (axis.acceleration > 0) caps.push(2 * axis.acceleration * (chunkMs / 1000));
   if (axis.maxFeed > 0) caps.push(axis.maxFeed / 60);
   return caps.length ? Math.min(...caps) : Infinity;
+}
+
+/**
+ * The fastest this machine can be jogged at all, whatever the chunk.
+ *
+ * Not the same question as `axisSpeedCeiling`, which answers for the chunk in
+ * use. This is the best case: the longest chunk the firmware accepts, against
+ * the axis's own M203. It is what the speed control should offer, because
+ * capping the control at the ceiling for the *current* chunk is a control that
+ * cannot ask for the machine's real speed — which is what it did, offering
+ * 20 mm/s on a machine that traverses at 100.
+ */
+export function achievableSpeed(letters: string[]): number {
+  const caps = letters.map((l) => axisSpeedCeiling(l, CHUNK_RANGE.max)).filter((c) => isFinite(c));
+  return caps.length ? Math.min(...caps) : Infinity;
+}
+
+/**
+ * The shortest chunk that can carry this speed.
+ *
+ * The coupling nobody should have to work out by hand: a chunk may be the last
+ * one queued, so the firmware only accepts a speed it could stop from inside
+ * one, and that is `2 × acceleration × P`. Turned around, a speed needs a
+ * chunk of at least `speed / (2 × acceleration)`.
+ *
+ * That is not a tax for the sake of it. Stopping from 166 mm/s at 500 mm/s²
+ * takes a third of a second whatever P is; the chunk merely has to be long
+ * enough to admit it. Which is also why this never goes below the floor the
+ * operator set: a short chunk is the right default and the only cost of a long
+ * one is felt at speeds that were impossible without it.
+ */
+export function chunkForSpeed(speed: number, letters: string[], floorMs = DEFAULT_CHUNK_MS): number {
+  const accels = letters
+    .map((l) => machine.get().axes.find((a) => a.letter === l)?.acceleration ?? 0)
+    .filter((a) => a > 0);
+  if (!accels.length || !(speed > 0)) return floorMs;
+  const needed = Math.ceil((1000 * speed) / (2 * Math.min(...accels)));
+  return Math.min(CHUNK_RANGE.max, Math.max(floorMs, CHUNK_RANGE.min, needed));
+}
+
+/**
+ * A watchdog that outlives the motion already queued.
+ *
+ * `R` stops the machine when no command has arrived for that long, and the
+ * queue holds `D × P` of motion. If R were the shorter of the two, a jog at a
+ * long chunk would trip its own watchdog while the operator was still pushing.
+ * The default 250ms covers the default 2 × 20ms with room to spare; a longer
+ * chunk has to carry the watchdog up with it.
+ */
+export function watchdogFor(chunkMs: number, depth = DEFAULT_QUEUE_DEPTH): number {
+  return Math.max(DEFAULT_WATCHDOG_MS, depth * chunkMs + 150);
+}
+
+/**
+ * How far the machine travels after the thumb comes off, in mm.
+ *
+ * Two parts, and the first is the one that surprises people: the queue is a
+ * FIFO, so a stop waits behind `D × P` of motion that is already committed
+ * before it is even seen. Then the machine decelerates normally, `v² / 2a`.
+ *
+ * At 20 mm/s this is about a millimetre and not worth saying. At 150 it is the
+ * length of your hand, and an operator who has not been told is one who finds
+ * out by watching it happen.
+ */
+export function stopDistance(speed: number, letters: string[], chunkMs: number, depth = DEFAULT_QUEUE_DEPTH): number {
+  const accels = letters
+    .map((l) => machine.get().axes.find((a) => a.letter === l)?.acceleration ?? 0)
+    .filter((a) => a > 0);
+  const lag = speed * ((depth * chunkMs) / 1000);
+  const brake = accels.length ? (speed * speed) / (2 * Math.min(...accels)) : 0;
+  return lag + brake;
 }
 
 /** The lowest ceiling among `letters` — what a combined move is really limited to. */
@@ -449,9 +525,20 @@ function send(): void {
     stopJog('Lost the connection');
     return;
   }
-  // Only sent when the operator moved it off the firmware's own default, so the
+  // The chunk is derived from the speed the operator asked for, not from the
+  // instantaneous vector: it has to be stable while a thumb is on the pad, and
+  // the requested maximum is the only number here that does not move. The
+  // watchdog goes up with it, or a long chunk trips its own.
+  //
+  // Only sent when either differs from the firmware's own default, so the
   // streamed command stays as short as it can be. See velocityJog in the driver.
-  const opts = settings.chunkMs === DEFAULT_CHUNK_MS ? undefined : { chunkMs: settings.chunkMs };
+  const letters = Object.keys(vector);
+  const chunk = chunkForSpeed(settings.maxSpeed, letters.length ? letters : ['X', 'Y'], settings.chunkMs);
+  const depth = jogStatus.peek()?.queueDepth ?? DEFAULT_QUEUE_DEPTH;
+  const opts =
+    chunk === DEFAULT_CHUNK_MS
+      ? undefined
+      : { chunkMs: chunk, watchdogMs: watchdogFor(chunk, depth) };
   const request = driver
     .velocityJog(vector, opts)
     .then((buff) => {
@@ -594,9 +681,32 @@ if (typeof window !== 'undefined') {
     if (document.hidden) stopJog('Tab was hidden');
   });
 
+  // Whether the last run of the effect below saw a live connection, so a
+  // reconnect can be told from a re-render. Module scope rather than a signal:
+  // reading it inside the effect would make the effect depend on it and re-run
+  // when it changes, which is a loop.
+  let wasLive = false;
+
   effect(() => {
     const live = connected.get();
     const status = machine.get().status;
+
+    // Ask again on a new connection.
+    //
+    // Losing the connection sets support back to 'unknown' — correctly, since
+    // the firmware did not change, the link did. But nothing asked again, and
+    // `canVelocityJog` reads anything other than 'yes' as "not yet", so the pad
+    // stayed disabled saying "Checking the firmware…" for the rest of the
+    // session. The board only has to stop answering for a moment — which is
+    // what a firmware fault during a jog looks like from here — and the panel
+    // was dead until someone pressed Re-check or reloaded the page. Reloading
+    // is what people actually did.
+    //
+    // Deferred out of the effect body because probeSupport writes the signals
+    // this effect reads.
+    if (live && !wasLive) setTimeout(() => void probeSupport(), 0);
+    wasLive = live;
+
     if (!live) {
       // Not 'no': the firmware did not change, the connection did. Marking it
       // unsupported here would leave the pad hidden after a reconnect until the
