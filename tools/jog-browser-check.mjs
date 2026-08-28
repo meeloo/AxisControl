@@ -65,8 +65,11 @@ const measure = () =>
   p.evaluate(() => {
     const strips = [...document.querySelectorAll('.vjog-striph')].map((el) => {
       const svg = el.querySelector('svg').getBoundingClientRect();
+      // The drawn face, which is the part an operator can see and aim at.
+      const face = el.querySelector('.vjog-face')?.getBoundingClientRect();
       return { name: el.querySelector('.vjog-strip-name').textContent.trim(),
-               x: svg.x, right: svg.x + svg.width, w: svg.width, h: svg.height };
+               x: svg.x, right: svg.x + svg.width, w: svg.width, h: svg.height,
+               faceH: face ? face.height : 0, faceW: face ? face.width : 0 };
     });
     const s = document.querySelector('svg.vjog-stick')?.getBoundingClientRect();
     const row = document.querySelector('.vjog-pads')?.getBoundingClientRect();
@@ -98,6 +101,14 @@ for (const [w, h] of [[900, 800], [1280, 1000], [1600, 1400], [2000, 1300]]) {
      m.strips.map((s) => `${s.name} ${s.w.toFixed(0)}px`).join(', '));
   ok(m.row && m.strips.every((s) => s.right <= m.row.right + 0.5),
      `${where}: nothing spills out of the row`);
+
+  // Every pixel of the SVG is a pointer target, so a box much taller than the
+  // strip it draws is a control that answers to a touch nowhere near it — at
+  // full deflection, because the handler clamps. On a tall panel the box was
+  // 1839px for a 261px drawing before this was pinned.
+  ok(m.strips.every((s) => s.faceH > 0 && s.h <= s.faceH * 1.35),
+     `${where}: a strip's hit area is the strip, not the column it sits in`,
+     m.strips.map((s) => `${s.name} box ${s.h.toFixed(0)} vs face ${s.faceH.toFixed(0)}`).join(', '));
 }
 
 await browser.close();

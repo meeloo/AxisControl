@@ -823,17 +823,28 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .vjog-stick { flex: 0 1 auto; align-self: center; height: 100%; width: auto; max-width: 100%;
   aspect-ratio: 1; touch-action: none; cursor: grab; }
 .vjog-stick.live { cursor: grabbing; }
-/* Width capped rather than left to follow the height.
-   The strip is 48:224, so a width derived from `height: 100%` grows without
-   bound as the panel gets taller: on a tall window two strips either ate the
-   row and squeezed the stick to a coin, or overflowed their own holders and
-   drew on top of each other. The cap ends both. Past it the SVG letterboxes
-   inside a taller box, which keeps the drawing the right shape — see the note
-   on .vjog-stick — rather than stretching it. */
-.vjog-strip { height: 100%; width: auto; aspect-ratio: 48 / 224; max-width: 72px;
-  touch-action: none; cursor: ns-resize; }
+/* The strip's width is stated, not derived.
+   It used to come from `height: 100%` plus `aspect-ratio: 48/224`, which asks
+   the engine to size a replaced element from its own intrinsic ratio — and
+   that is the corner of layout where engines disagree. In Chromium capping the
+   width fixed it; on Safari the drawing still came out wider than its holder
+   and two strips drew on top of each other, which is a bug reported from a
+   machine and invisible to every test here, because every test here is
+   Chromium.
+   So: the holder is a fixed width, the SVG fills it, and the SVG's own
+   preserveAspectRatio centres the 48:224 drawing inside whatever box it gets —
+   which is the one part of this that every engine agrees on. See the note on
+   .vjog-stick about letterboxing.
+   The max-height is 56 x 224/48, the height at which the drawing exactly fills
+   a 56px-wide box. Without it a tall panel gives the SVG a box far taller than
+   the strip it draws, and every pixel of that box is still a pointer target —
+   so a touch a hand's width above the visible control would command full speed
+   on that axis. `margin: auto 0` then centres the box in the column it no
+   longer fills. */
+.vjog-strip { flex: 1 1 auto; width: 100%; min-height: 0; max-height: 261px;
+  margin: auto 0; touch-action: none; cursor: ns-resize; }
 .vjog-striph { display: flex; flex-direction: column; align-items: center; gap: 4px;
-  flex: 0 0 auto; height: 100%; min-height: 0; max-width: 72px; }
+  flex: 0 0 auto; width: 56px; height: 100%; min-height: 0; }
 .vjog-strip-name { font-weight: 700; font-size: 13px; color: var(--text-dim); flex: 0 0 auto; }
 .vjog-home { flex: 0 0 auto; min-height: 26px; height: 26px; padding: 0 8px; font-size: 14px;
   color: var(--text-dim); }
