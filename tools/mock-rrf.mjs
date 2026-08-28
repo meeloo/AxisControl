@@ -305,6 +305,23 @@ function removeFromListing(rawFull) {
  * "something an install actually put there" — see the note at the static
  * handler.
  */
+/**
+ * Live HTTP sessions, keyed by the session key handed out, valued by the last
+ * time that key was seen. RepRapFirmware's own limit is small — the point of
+ * modelling it at all is that "no free sessions" is a state a client can talk
+ * itself into and then misread as a dead board.
+ */
+const sessions = new Map();
+const MAX_SESSIONS = 8;
+const SESSION_TIMEOUT_MS = 8000;
+
+function expireSessions() {
+  const now = Date.now();
+  for (const [key, seen] of sessions) {
+    if (now - seen > SESSION_TIMEOUT_MS) sessions.delete(key);
+  }
+}
+
 const uploaded = new Set();
 
 const FILE_CONTENT = {
@@ -989,6 +1006,12 @@ const hung = [];
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
+
+  // Any request on a session keeps it alive, the way the board's own idle
+  // timeout works. Without this an active client's session would expire out
+  // from under it while it was plainly still there.
+  const activeKey = Number(req.headers['x-session-key'] ?? NaN);
+  if (Number.isFinite(activeKey) && sessions.has(activeKey)) sessions.set(activeKey, Date.now());
   const path = url.pathname;
 
   // RRF has no OPTIONS handler, so a preflighted request gets nothing usable and
@@ -1009,12 +1032,44 @@ const server = createServer(async (req, res) => {
   }
 
   switch (path) {
-    case '/rr_connect':
+    case '/rr_connect': {
+      // A session table with a limit, because the board has one.
+      //
+      // This mock used to hand out a session for every rr_connect and free
+      // nothing, so a client that reconnected without disconnecting — or one
+      // whose page was reloaded, which is the same thing seen from here — could
+      // never run out. On a real board it can, quickly: the table is small, and
+      // an abandoned session is held until it times out. What that looks like
+      // to an operator is a controller that has stopped answering, which is a
+      // long way from what it is.
+      //
+      // Modelled: the limit, err:2 when it is reached, release on
+      // rr_disconnect, and expiry after the same idle timeout the board
+      // reports. NOT modelled: per-IP implicit sessions, which is what a
+      // cross-origin client gets when it cannot send the key header back.
+      expireSessions();
+      if (sessions.size >= MAX_SESSIONS) {
+        return sendJson(res, { err: 2 });
+      }
       sessionKey++;
-      return sendJson(res, { err: 0, sessionTimeout: 8000, boardType: 'duet3mb6hc', sessionKey, apiLevel: 1 });
+      sessions.set(sessionKey, Date.now());
+      return sendJson(res, { err: 0, sessionTimeout: SESSION_TIMEOUT_MS, boardType: 'duet3mb6hc', sessionKey, apiLevel: 1 });
+    }
 
-    case '/rr_disconnect':
+    case '/rr_disconnect': {
+      const key = Number(req.headers['x-session-key'] ?? url.searchParams.get('sessionKey') ?? NaN);
+      if (Number.isFinite(key) && sessions.has(key)) sessions.delete(key);
+      // A disconnect with no key still frees something: the firmware ends the
+      // session the request arrived on, and here the oldest is the best guess.
+      else if (sessions.size) sessions.delete([...sessions.keys()][0]);
       return sendJson(res, { err: 0 });
+    }
+
+    // Not a firmware route. How many sessions the board is holding, so a test
+    // can assert that a client gives them back.
+    case '/__sessions':
+      expireSessions();
+      return sendJson(res, { open: sessions.size, max: MAX_SESSIONS });
 
     case '/rr_model': {
       const key = url.searchParams.get('key') ?? '';

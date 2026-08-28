@@ -34,6 +34,7 @@
     "firmware-check": "node tools/firmware-check.mjs",
     "firmware-browser-check": "node tools/firmware-browser-check.mjs",
     "jog-browser-check": "node tools/jog-browser-check.mjs",
+    "session-check": "node tools/session-check.mjs",
     "plugin-storage-check": "node tools/plugin-storage-check.mjs",
     "plugin-bridge-check": "node tools/plugin-bridge-check.mjs",
     "probe-check": "node tools/probe-check.mjs",

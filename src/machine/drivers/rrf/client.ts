@@ -254,6 +254,42 @@ export class RrfClient {
     }
   }
 
+  /**
+   * Give the session back while the page is going away.
+   *
+   * The board keeps a small table of HTTP sessions and holds an abandoned one
+   * until it times out. A reload does not close a session — the tab is gone
+   * before anything it awaits can finish — so a run of reloads, which is what
+   * anybody does when the interface stops responding, can walk the board up to
+   * its limit. It then answers rr_connect with err:2, and the app that was
+   * being reloaded to fix it now cannot connect at all: the same symptom, made
+   * worse by the remedy.
+   *
+   * `keepalive` is the whole point: it lets the request outlive the document.
+   * Nothing is awaited and nothing is reported, because there is no longer
+   * anywhere to report it to — this is a courtesy to the *next* page load, and
+   * if it fails the session simply times out as it did before.
+   */
+  releaseSession(): void {
+    if (this.sessionKey == null) return;
+    try {
+      void fetch(this.url('rr_disconnect'), {
+        method: 'GET',
+        headers: this.headers(),
+        keepalive: true,
+        // No credentials and no cache: this is fire-and-forget and must not be
+        // served from, or written to, anything.
+        cache: 'no-store',
+      }).catch(() => {
+        // Unload is not a place with error handling.
+      });
+    } catch {
+      // Some engines refuse keepalive on a GET. The session then times out on
+      // the board as it always did, which is the old behaviour and not worse.
+    }
+    this.sessionKey = null;
+  }
+
   // --- Object model ------------------------------------------------------
 
   /**

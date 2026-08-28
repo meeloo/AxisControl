@@ -169,12 +169,27 @@ export class RrfDriver implements MachineDriver {
 
   // --- Lifecycle ---------------------------------------------------------
 
+  /**
+   * Hand the session back when the page goes away.
+   *
+   * Registered for the life of a connection. `pagehide` rather than
+   * `beforeunload`: it is the one that fires on mobile Safari and on a tab
+   * being discarded, and this needs to work exactly when nobody is watching.
+   * See RrfClient.releaseSession for why an abandoned session matters.
+   */
+  private readonly onPageHide = (): void => {
+    this.client?.releaseSession();
+  };
+
   async connect(config: ConnectionConfig): Promise<void> {
     await this.disconnect();
     this.config = config;
     this.stopped = false;
     this.client = new RrfClient(config.url);
     this.client.signal = config.signal ?? null;
+    if (typeof window !== 'undefined') {
+      window.addEventListener('pagehide', this.onPageHide);
+    }
 
     this.patchState({ status: 'connecting' });
     const info = await this.client.connect(config.password ?? '');
@@ -221,6 +236,9 @@ export class RrfDriver implements MachineDriver {
 
   async disconnect(): Promise<void> {
     this.stopped = true;
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('pagehide', this.onPageHide);
+    }
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;

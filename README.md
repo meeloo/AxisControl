@@ -532,6 +532,7 @@ npm run install-check   # installing over DWC, and keeping a way back to it
 npm run firmware-check  # what a board image is, and every reason to refuse one
 npm run firmware-browser-check  # choosing a firmware file, in a browser
 npm run jog-browser-check       # the jog pad's layout at four window sizes
+npm run session-check           # the board's session table, and giving sessions back
 npm run probe-check     # probe state, against Duet's own schema and the mock
 npm run om-check        # what we believe the object model contains, vs Duet's own
 npm run prompt-check    # the M291 dialog, in a browser (needs playwright; skips without)
