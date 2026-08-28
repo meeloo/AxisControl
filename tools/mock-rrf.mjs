@@ -224,6 +224,26 @@ const FILES = {
 };
 
 /** Split "/sys/atcConfig.g" into its directory and name. */
+/**
+ * One name for one file, whichever way the caller spells it.
+ *
+ * RepRapFirmware reports its own directories with a volume prefix —
+ * `directories.firmware` is `0:/firmware/` — and accepts paths with or without
+ * it: `0:/firmware/x`, `/firmware/x` and `0:/firmware//x` are the same file on
+ * the card. This mock keyed a plain object by the string it was given, so they
+ * were three different files. An app that writes where the board told it to and
+ * then lists where the board told it to is consistent and passed; a test that
+ * spelled it the other way saw an empty directory and a missing upload, and the
+ * bug it appeared to have found was the fixture's.
+ */
+function normalisePath(raw) {
+  let path = String(raw ?? '').replace(/^\d+:/, '');
+  path = path.replace(/\/{2,}/g, '/');
+  if (!path.startsWith('/')) path = `/${path}`;
+  if (path.length > 1) path = path.replace(/\/+$/, '');
+  return path;
+}
+
 function splitPath(full) {
   const cut = full.lastIndexOf('/');
   return { dir: cut <= 0 ? '/' : full.slice(0, cut), name: full.slice(cut + 1) };
@@ -240,7 +260,8 @@ function splitPath(full) {
  * back — which is exactly how plugins are discovered at startup — saw an empty
  * card and concluded, reasonably and wrongly, that its own write had failed.
  */
-function ensureDirectory(dir) {
+function ensureDirectory(rawDir) {
+  const dir = normalisePath(rawDir);
   if (!dir || dir === '/') {
     FILES['/'] ??= [];
     return;
@@ -254,8 +275,8 @@ function ensureDirectory(dir) {
   }
 }
 
-function addToListing(full, size) {
-  const { dir, name } = splitPath(full);
+function addToListing(rawFull, size) {
+  const { dir, name } = splitPath(normalisePath(rawFull));
   ensureDirectory(dir);
   const list = (FILES[dir] ??= []);
   const date = new Date().toISOString().slice(0, 19);
@@ -268,8 +289,8 @@ function addToListing(full, size) {
   }
 }
 
-function removeFromListing(full) {
-  const { dir, name } = splitPath(full);
+function removeFromListing(rawFull) {
+  const { dir, name } = splitPath(normalisePath(rawFull));
   const list = FILES[dir];
   if (!list) return;
   const at = list.findIndex((e) => e.name === name);
@@ -1041,9 +1062,9 @@ const server = createServer(async (req, res) => {
 
     case '/rr_filelist': {
       const dir = url.searchParams.get('dir') ?? '/';
-      // Trailing slash stripped, except from the root itself — "/" normalised
-      // to "" looked up nothing, so the card root listed as "does not exist".
-      const key = dir.length > 1 ? dir.replace(/\/$/, '') : dir;
+      // Normalised, so `0:/firmware/`, `/firmware` and `/firmware/` are one
+      // directory here as they are on the card.
+      const key = normalisePath(dir);
       const files = FILES[key] ?? null;
       if (!files) return sendJson(res, { dir, first: 0, files: [], next: 0, err: 2 });
       return sendJson(res, { dir, first: 0, files, next: 0, err: 0 });
@@ -1088,7 +1109,7 @@ const server = createServer(async (req, res) => {
     }
 
     case '/rr_download': {
-      const name = url.searchParams.get('name') ?? '';
+      const name = normalisePath(url.searchParams.get('name') ?? '');
       const content = FILE_CONTENT[name];
       if (content === undefined) {
         cors(res);
@@ -1106,7 +1127,7 @@ const server = createServer(async (req, res) => {
     }
 
     case '/rr_upload': {
-      const name = url.searchParams.get('name') ?? '';
+      const name = normalisePath(url.searchParams.get('name') ?? '');
       const chunks = [];
       for await (const c of req) chunks.push(c);
       // Kept as a Buffer, not decoded to a string: the app installer writes
@@ -1129,7 +1150,7 @@ const server = createServer(async (req, res) => {
     }
 
     case '/rr_delete': {
-      const name = url.searchParams.get('name') ?? '';
+      const name = normalisePath(url.searchParams.get('name') ?? '');
       delete FILE_CONTENT[name];
       removeFromListing(name);
       seqs.volumes++;
@@ -1140,7 +1161,7 @@ const server = createServer(async (req, res) => {
       // Actually create it. Answering err:0 and doing nothing meant a client
       // could make a directory, list it, and be told it does not exist.
       const dir = url.searchParams.get('dir') ?? '';
-      if (dir) ensureDirectory(dir.length > 1 ? dir.replace(/\/$/, '') : dir);
+      if (dir) ensureDirectory(dir);
       seqs.volumes++;
       return sendJson(res, { err: 0 });
     }

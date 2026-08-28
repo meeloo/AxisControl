@@ -31,6 +31,8 @@
     "dustshoe-check": "node tools/dustshoe-check.mjs",
     "gamepad-check": "node tools/gamepad-check.mjs",
     "install-check": "node tools/install-check.mjs",
+    "firmware-check": "node tools/firmware-check.mjs",
+    "firmware-browser-check": "node tools/firmware-browser-check.mjs",
     "plugin-storage-check": "node tools/plugin-storage-check.mjs",
     "plugin-bridge-check": "node tools/plugin-bridge-check.mjs",
     "probe-check": "node tools/probe-check.mjs",

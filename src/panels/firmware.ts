@@ -10,6 +10,11 @@
 //     that does not is refused rather than substituted for.
 //   - Downloading and uploading are separate from flashing. The files can be
 //     put on the card and the M997 left for later.
+//   - A file of your own is offered too, because a fork has no release to point
+//     at — this machine runs one for M700 and M604. Nothing upstream vouches
+//     for those bytes, so they are read and described before they are written,
+//     and the name check that says which board a file belongs to is enforced
+//     with its override in plain sight rather than assumed away.
 //
 // The procedure itself is Duet Web Control's — see machine/firmware.ts.
 
@@ -19,11 +24,15 @@ import { activeDriver, appendLog, connected, machine } from '../core/store.js';
 import type { GhRelease } from '../core/github.js';
 import {
   FIRMWARE_REPO,
+  inspectImage,
+  matchesBoardFileStrictly,
   isDowngrade,
   isNewerFirmware,
   listFirmware,
+  planLocalUpdate,
   planUpdate,
   type FirmwarePlan,
+  type ImageCheck,
 } from '../machine/firmware.js';
 
 /** Statuses in which the SD card must not be written and M997 must not run. */
@@ -42,7 +51,23 @@ export class FirmwarePanel extends PanelElement {
   private error: string | null = null;
   private note: string | null = null;
   /** Downloaded and uploaded, waiting for the operator to say go. */
-  private staged: { release: GhRelease; plan: FirmwarePlan } | null = null;
+  /**
+   * What is on the card and not yet flashed.
+   *
+   * `expectVersion` is what the board should report afterwards, which is the
+   * release tag when there is one and nothing at all for a file somebody built:
+   * a local image announces no version, and claiming to know one would make a
+   * successful flash look like a failed one.
+   */
+  private staged: { label: string; plan: FirmwarePlan; expectVersion: string | null } | null = null;
+
+  /** A file the operator picked, once it has been read and looked at. */
+  private local:
+    | { name: string; bytes: Uint8Array; check: ImageCheck | null; problem: string | null }
+    | null = null;
+
+  /** Ticked to proceed with a file that is not named what the board asked for. */
+  private acceptMismatch = false;
   /**
    * The tag an M997 was sent for, until the board comes back reporting it.
    *
@@ -132,16 +157,7 @@ export class FirmwarePanel extends PanelElement {
       // particular: Duet3D ship it rarely, so the one from the last update is
       // usually the one that will do the work, and a release without it is not
       // a release that cannot be installed.
-      const present = new Set<string>();
-      const dir = this.main?.directory;
-      if (dir) {
-        try {
-          for (const entry of await driver.listFiles(dir)) present.add(entry.name);
-        } catch {
-          // No such directory yet, most likely. Then nothing is present, which
-          // is the safe reading.
-        }
-      }
+      const present = await this.presentFiles();
 
       const plan = await planUpdate(release, this.boards, {
         present,
@@ -151,17 +167,95 @@ export class FirmwarePanel extends PanelElement {
         },
       });
 
-      let done = 0;
-      for (const [path, bytes] of plan.files) {
-        this.progress = { what: `writing ${path}`, loaded: done, total: plan.files.size };
-        this.requestUpdate();
-        await driver.writeFile(path, bytes);
-        done++;
-      }
+      await this.writePlan(plan);
 
-      this.staged = { release, plan };
+      this.staged = { label: release.tag, plan, expectVersion: release.tag };
       this.note = `${plan.found.join(', ')} written to ${this.main?.directory}. Nothing has been flashed yet.`;
       appendLog({ level: 'info', text: `Firmware ${release.tag} staged: ${plan.found.join(', ')}`, time: new Date() });
+    });
+  }
+
+  /** Put a plan's files on the card. Shared by both ways of getting one. */
+  private async writePlan(plan: FirmwarePlan): Promise<void> {
+    const driver = activeDriver();
+    if (!driver) throw new Error('Not connected');
+    let done = 0;
+    for (const [path, bytes] of plan.files) {
+      this.progress = { what: `writing ${path}`, loaded: done, total: plan.files.size };
+      this.requestUpdate();
+      await driver.writeFile(path, bytes);
+      done++;
+    }
+  }
+
+  /** Whatever is already in the firmware directory — the programmer, mostly. */
+  private async presentFiles(): Promise<Set<string>> {
+    const present = new Set<string>();
+    const driver = activeDriver();
+    const dir = this.main?.directory;
+    if (!driver || !dir) return present;
+    try {
+      for (const entry of await driver.listFiles(dir)) present.add(entry.name);
+    } catch {
+      // No such directory yet, most likely. Then nothing is present, which is
+      // the safe reading.
+    }
+    return present;
+  }
+
+  /**
+   * Read the chosen file and look at it, without writing anything.
+   *
+   * Deliberately two steps. Reading tells the operator what they actually
+   * picked — a UF2 of so many blocks, a zip, a .bin nothing can vouch for —
+   * before any of it goes near the card, and a file that fails inspection is
+   * reported here rather than after it has been written.
+   */
+  private onFile(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    this.acceptMismatch = false;
+    if (!file) {
+      this.local = null;
+      this.requestUpdate();
+      return;
+    }
+    void this.run(`Reading ${file.name}`, async () => {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      try {
+        this.local = { name: file.name, bytes, check: inspectImage(file.name, bytes), problem: null };
+      } catch (err) {
+        // Not thrown onward: a file that fails inspection is a thing to report
+        // in place, beside the picker, not an error banner about the panel.
+        this.local = { name: file.name, bytes, check: null, problem: (err as Error).message };
+      }
+    });
+  }
+
+  /** Plan and stage the operator's own file. */
+  private stageLocal(): void {
+    const local = this.local;
+    if (!local) return;
+    void this.run(`Preparing ${local.name}`, async () => {
+      if (this.machineBusy) {
+        throw new Error(
+          `The machine is ${machine.peek().status}. Firmware files are not written to the card mid-job.`,
+        );
+      }
+      const plan = await planLocalUpdate({ name: local.name, bytes: local.bytes }, this.boards, {
+        present: await this.presentFiles(),
+        acceptMismatchedName: this.acceptMismatch,
+      });
+      await this.writePlan(plan);
+      this.staged = { label: local.name, plan, expectVersion: null };
+      this.local = null;
+      this.acceptMismatch = false;
+      this.note = `${plan.found.join(', ')} written to ${this.main?.directory}. Nothing has been flashed yet.`;
+      appendLog({
+        level: 'info',
+        text: `Firmware staged from a local file: ${plan.found.join(', ')}`,
+        time: new Date(),
+      });
     });
   }
 
@@ -172,7 +266,7 @@ export class FirmwarePanel extends PanelElement {
     const board = this.main;
     if (
       !confirm(
-        `Flash ${staged.release.tag} onto ${board?.boardName ?? 'the controller'}?\n\n` +
+        `Flash ${staged.label} onto ${board?.boardName ?? 'the controller'}?\n\n` +
           `${staged.plan.commands.join(', then ')}\n\n` +
           'The board rewrites its own flash and reboots. This page will lose its connection for a minute or so. ' +
           'Do not cut the power while it is doing this.',
@@ -181,7 +275,7 @@ export class FirmwarePanel extends PanelElement {
       return;
     }
 
-    void this.run(`Flashing ${staged.release.tag}`, async () => {
+    void this.run(`Flashing ${staged.label}`, async () => {
       const driver = activeDriver();
       if (!driver) throw new Error('Not connected');
       if (this.machineBusy) throw new Error(`The machine is ${machine.peek().status}.`);
@@ -206,7 +300,7 @@ export class FirmwarePanel extends PanelElement {
       }
 
       this.staged = null;
-      this.awaiting = staged.release.tag;
+      this.awaiting = staged.expectVersion;
       this.note =
         'The board is rewriting its flash and will reboot. Reconnect in a minute — if the page does not come back on its own, reload it.';
       appendLog({ level: 'info', text: 'Firmware update started', time: new Date() });
@@ -283,6 +377,107 @@ export class FirmwarePanel extends PanelElement {
     `;
   }
 
+  /**
+   * Flashing something the operator built or downloaded themselves.
+   *
+   * The reason it exists is this machine: it runs a fork of RepRapFirmware for
+   * M700 and M604, and a fork has no release to point a list at. The reason it
+   * is arranged like this is that nothing upstream has vouched for the bytes —
+   * so the file is read and described before it is written, and the one check
+   * that can actually be made about which board a file belongs to, its name, is
+   * enforced with the override in plain sight rather than assumed away.
+   */
+  private renderLocal(): TemplateResult {
+    const local = this.local;
+    const main = this.main;
+    const mismatch =
+      local && local.check && main?.firmwareFile && local.check.kind !== 'zip'
+        ? !matchesBoardFileStrictly(main.firmwareFile, local.name)
+        : false;
+
+    return html`
+      <div class="fw-local">
+        <h3>From a file</h3>
+        <p class="hint">
+          A board image you built or downloaded yourself — <code>.uf2</code>, <code>.bin</code>, or
+          the combined firmware <code>.zip</code>. It is saved to
+          ${main?.directory ?? 'the firmware directory'} under
+          <code>${main?.firmwareFile ?? 'the name the board asks for'}</code>, which is the name the
+          board opens. Only this board is flashed: one file is one board, and the expansion boards
+          on the bus are left alone.
+        </p>
+
+        <label class="fw-file">
+          <input
+            type="file"
+            accept=".uf2,.bin,.zip,application/octet-stream,application/zip"
+            ?disabled=${!connected.get() || !!this.busy || this.machineBusy || !!main?.sbc}
+            @change=${(e: Event) => this.onFile(e)}
+          />
+        </label>
+
+        ${local
+          ? html`
+              <div class="fw-local-file ${local.problem ? 'bad' : ''}">
+                <strong>${local.name}</strong>
+                <span>${local.problem ?? local.check?.summary ?? ''}</span>
+              </div>
+            `
+          : nothing}
+
+        ${mismatch && local && !local.problem
+          ? html`
+              <div class="warn-banner">
+                <strong>This is not the file ${main?.boardName} asks for.</strong>
+                <div>
+                  It loads <code>${main?.firmwareFile}</code>, and you have chosen
+                  <code>${local.name}</code>. A name with a version in it is fine; a different name
+                  is the only warning you get that this is another board's image, or the
+                  <code>_SBC</code> build of this one — which comes up unable to answer over the
+                  network. Nothing else in the file says which board it belongs to.
+                </div>
+                <label class="check">
+                  <input
+                    type="checkbox"
+                    .checked=${this.acceptMismatch}
+                    @change=${(e: Event) => {
+                      this.acceptMismatch = (e.target as HTMLInputElement).checked;
+                      this.requestUpdate();
+                    }}
+                  />
+                  I have checked this is the right image for ${main?.boardName}
+                </label>
+              </div>
+            `
+          : nothing}
+
+        <div class="pack-actions">
+          <button
+            class="primary"
+            ?disabled=${!local ||
+            !!local.problem ||
+            !!this.busy ||
+            !connected.get() ||
+            this.machineBusy ||
+            !!main?.sbc ||
+            (mismatch && !this.acceptMismatch)}
+            @click=${() => this.stageLocal()}
+          >
+            Put it on the card
+          </button>
+          ${local
+            ? html`<button
+                class="tiny"
+                @click=${() => ((this.local = null), (this.acceptMismatch = false), this.requestUpdate())}
+              >
+                Forget it
+              </button>`
+            : nothing}
+        </div>
+      </div>
+    `;
+  }
+
   protected override render(): TemplateResult {
     const main = this.main;
     const staged = this.staged;
@@ -342,7 +537,7 @@ export class FirmwarePanel extends PanelElement {
 
         ${staged
           ? html`<div class="warn-banner fw-armed">
-              <strong>${staged.release.tag} is on the card, not yet flashed.</strong>
+              <strong>${staged.label} is on the card, not yet flashed.</strong>
               <div>
                 ${staged.plan.commands.join(', then ')} — the board rewrites its own flash and
                 reboots, and this page loses its connection while it does. Do not cut the power.
@@ -363,6 +558,8 @@ export class FirmwarePanel extends PanelElement {
           : nothing}
 
         ${this.renderReleases()}
+
+        ${this.renderLocal()}
 
         <div class="pack-actions">
           <button ?disabled=${this.checking} @click=${() => void this.check()}>

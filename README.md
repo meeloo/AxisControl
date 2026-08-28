@@ -529,6 +529,8 @@ npm run velocity-check  # velocity jogging: the stop, the watchdog, the clamps
 npm run dustshoe-check  # who moves the dust shoe, and what each macro emits
 npm run gamepad-check   # stick axis conventions, deadzone, and the deadman
 npm run install-check   # installing over DWC, and keeping a way back to it
+npm run firmware-check  # what a board image is, and every reason to refuse one
+npm run firmware-browser-check  # choosing a firmware file, in a browser
 npm run probe-check     # probe state, against Duet's own schema and the mock
 npm run om-check        # what we believe the object model contains, vs Duet's own
 npm run prompt-check    # the M291 dialog, in a browser (needs playwright; skips without)

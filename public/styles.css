@@ -2546,3 +2546,20 @@ cnc-plugin-panel { display: block; height: 100%; }
 .plugin-blank p { margin: 0 0 8px; }
 .plugin-blank-fault { color: var(--warn); }
 .plugin-blank-id { font-family: var(--mono); font-size: 11px; color: var(--text-faint); word-break: break-all; }
+
+/* Firmware from a file the operator chose. Set apart from the release list
+   because it is the path with nothing upstream vouching for the bytes. */
+.fw-local { border-top: 1px solid var(--border); margin-top: 14px; padding-top: 12px; }
+.fw-local h3 { margin: 0 0 4px; font-size: 13px; }
+.fw-file { display: block; margin: 8px 0; }
+.fw-file input { width: 100%; font-size: 12px; }
+.fw-local-file {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 8px 10px; margin: 8px 0;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg-raised);
+  font-size: 12px;
+}
+.fw-local-file span { color: var(--text-dim); font-family: var(--mono); }
+.fw-local-file.bad { border-color: var(--bad); }
+.fw-local-file.bad span { color: var(--bad); }
