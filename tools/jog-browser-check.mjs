@@ -73,7 +73,7 @@ const measure = () =>
     });
     const s = document.querySelector('svg.vjog-stick')?.getBoundingClientRect();
     const row = document.querySelector('.vjog-pads')?.getBoundingClientRect();
-    return { strips, stick: s ? { x: s.x, right: s.x + s.width, w: s.width } : null,
+    return { strips, stick: s ? { x: s.x, right: s.x + s.width, w: s.width, h: s.height } : null,
              row: row ? { x: row.x, right: row.x + row.width, w: row.width } : null };
   });
 
@@ -96,7 +96,12 @@ for (const [w, h] of [[900, 800], [1280, 1000], [1600, 1400], [2000, 1300]]) {
   // The stick is the control this panel is for. A strip whose width follows the
   // panel's height can starve it without overlapping anything, which is how
   // this looked at 1600x1400 before the cap: strips 198px wide, stick 88.
-  ok(m.stick.w >= 120, `${where}: the stick keeps a usable size`, `${m.stick.w.toFixed(0)}px`);
+  ok(m.stick.w >= 96, `${where}: the stick keeps a usable size`, `${m.stick.w.toFixed(0)}px`);
+  // Square in pixels, not by aspect-ratio. Every pixel of the SVG is a pointer
+  // target, so a box taller than the circle it draws is a full-deflection
+  // command waiting for a stray thumb.
+  ok(Math.abs(m.stick.w - m.stick.h) <= 1, `${where}: and is square, so its hit area is the pad`,
+     `${m.stick.w.toFixed(0)}x${m.stick.h.toFixed(0)}`);
   ok(m.strips.every((s) => s.w >= 24 && s.w <= 80), `${where}: strips stay in a sane width`,
      m.strips.map((s) => `${s.name} ${s.w.toFixed(0)}px`).join(', '));
   ok(m.row && m.strips.every((s) => s.right <= m.row.right + 0.5),
@@ -109,6 +114,29 @@ for (const [w, h] of [[900, 800], [1280, 1000], [1600, 1400], [2000, 1300]]) {
   ok(m.strips.every((s) => s.faceH > 0 && s.h <= s.faceH * 1.35),
      `${where}: a strip's hit area is the strip, not the column it sits in`,
      m.strips.map((s) => `${s.name} box ${s.h.toFixed(0)} vs face ${s.faceH.toFixed(0)}`).join(', '));
+}
+
+// --- A narrow panel ---------------------------------------------------------
+//
+// The failure that reached an iPad: the strips could not shrink, so every pixel
+// the row was short came out of the stick, and because the row centres its
+// content the overflow was clipped on the left — where the stick is. The panel
+// showed two strips and no pad. Squeezing the row directly is the only way to
+// get there without reproducing somebody's saved dock layout.
+await p.setViewportSize({ width: 1000, height: 900 });
+await p.waitForTimeout(500);
+for (const width of [240, 170, 130, 110]) {
+  await p.addStyleTag({ content: `.vjog-pads { max-width: ${width}px !important; }` });
+  await p.waitForTimeout(400);
+  const m = await measure();
+  ok(m.stick !== null && m.stick.w >= 96,
+     `a ${width}px row still has a pad`, m.stick ? `${m.stick.w.toFixed(0)}px` : 'ABSENT');
+  ok(m.stick !== null && Math.abs(m.stick.w - m.stick.h) <= 1,
+     `  and it is still square`, m.stick ? `${m.stick.w.toFixed(0)}x${m.stick.h.toFixed(0)}` : '');
+  ok(m.row !== null && m.stick !== null && m.stick.x >= m.row.x - 0.5,
+     `  and none of it is clipped off the left edge`,
+     m.stick && m.row ? `pad at x+${(m.stick.x - m.row.x).toFixed(0)}` : '');
+  ok(m.strips.length === 2, `  with both strips still present`, String(m.strips.length));
 }
 
 await browser.close();

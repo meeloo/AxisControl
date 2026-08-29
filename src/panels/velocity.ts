@@ -213,6 +213,40 @@ export class VelocityJogPanel extends PanelElement {
     void probeSupport();
     this.syncPadWatch();
 
+    // Keep the pad square, in pixels, rather than asking CSS to work it out.
+    //
+    // `aspect-ratio: 1` makes a square only while nothing else constrains the
+    // width; in a narrow panel `max-width` wins and the box becomes tall and
+    // thin, with the circle drawn small in the middle of it. Every pixel of an
+    // SVG is a pointer target, so the rest of that box is a full-deflection
+    // command waiting for a stray thumb. And `aspect-ratio` does not exist at
+    // all on the Safari this app still supports — an iOS 12 iPad is exactly the
+    // machine a jog pad wants to run on.
+    //
+    // ResizeObserver is polyfilled for that iPad by core/compat.ts, so this is
+    // the one measurement that works everywhere: take the smaller side of the
+    // box the layout gave us, and make the pad that square.
+    const square = () => {
+      const holder = this.querySelector('.vjog-stickh') as HTMLElement | null;
+      const pad = holder?.querySelector('svg.vjog-stick') as SVGElement | null;
+      if (!holder || !pad) return;
+      const side = Math.floor(Math.min(holder.clientWidth, holder.clientHeight));
+      if (side <= 0) return;
+      pad.style.width = `${side}px`;
+      pad.style.height = `${side}px`;
+    };
+    const ro = new ResizeObserver(() => square());
+    this.resquare = () => {
+      const holder = this.querySelector('.vjog-stickh');
+      // Re-observed after every render: the holder is a fresh element whenever
+      // the axis list changes, and an observer on a detached node observes
+      // nothing. Observing the same node twice is a no-op.
+      if (holder) ro.observe(holder);
+      square();
+    };
+    this.resquare();
+    this.onDispose(() => ro.disconnect());
+
     // display:none gives an element no boxes at all, so it never intersects.
     // That is what makes this the right instrument for "is my page showing":
     // it fires on the transition rather than being asked, and it also catches
@@ -1023,6 +1057,13 @@ export class VelocityJogPanel extends PanelElement {
 
   // --- Render --------------------------------------------------------------
 
+  /** Set once the pad exists; re-runs the squaring after every render. */
+  private resquare: (() => void) | null = null;
+
+  protected override updated(): void {
+    this.resquare?.();
+  }
+
   protected override render(): TemplateResult {
     if (!connected.get()) return empty('Not connected');
     if (!capabilities.get().velocityJog) {
@@ -1046,7 +1087,9 @@ export class VelocityJogPanel extends PanelElement {
         ${this.renderReadout()}
 
         <div class="vjog-pads">
-          ${letters.has('X') && letters.has('Y') ? this.renderStick() : nothing}
+          ${letters.has('X') && letters.has('Y')
+            ? html`<div class="vjog-stickh">${this.renderStick()}</div>`
+            : nothing}
           ${this.stripAxes.map((l) => this.renderStrip(l))}
         </div>
 

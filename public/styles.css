@@ -811,8 +811,8 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
    the controls shrink together until they are unusable — measured at 8px wide
    for a strip in a 900x800 window, which is a control nobody can grab. The row
    keeps a usable height and the panel scrolls instead. */
-.vjog-pads { display: flex; gap: 12px; align-items: stretch; justify-content: center;
-  flex: 1 1 auto; min-height: 190px; }
+.vjog-pads { display: flex; flex-wrap: wrap; gap: 12px; align-items: stretch;
+  justify-content: center; align-content: center; flex: 1 1 auto; min-height: 190px; }
 
 /* Square, and it has to genuinely be square rather than merely draw a circle in
    the middle of whatever shape it lands in. An SVG letterboxes its viewBox, so
@@ -820,8 +820,19 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
    which looks almost right and is the difference between "the top of the pad"
    and "full speed". (The maths agrees with the drawing either way; see
    deflection() in the panel. This is so the drawing fills the panel.) */
-.vjog-stick { flex: 0 1 auto; align-self: center; height: 100%; width: auto; max-width: 100%;
-  aspect-ratio: 1; touch-action: none; cursor: grab; }
+/* The stick is the control this panel is for, so it is the last thing to give
+   up room rather than the first. It used to be `flex: 0 1 auto` beside strips
+   that could not shrink at all, which meant every pixel the row was short came
+   out of the stick: measured at 34px wide in a 170px row, 14px at 150, and at
+   130px it was zero and overflowing — and since the row centres its content,
+   the overflow was clipped on the left, where the stick is. What reached the
+   machine was a panel showing two strips and no pad, which is what an iPad
+   running the dock proportions from a desktop actually looks like.
+   The holder claims the room; the pad inside it is sized square in pixels by
+   the panel — see the note there for why this is not `aspect-ratio`. */
+.vjog-stickh { flex: 1 1 0; min-width: 96px; max-width: 100%; align-self: stretch;
+  display: flex; align-items: center; justify-content: center; min-height: 0; }
+.vjog-stick { touch-action: none; cursor: grab; }
 .vjog-stick.live { cursor: grabbing; }
 /* The strip's width is stated, not derived.
    It used to come from `height: 100%` plus `aspect-ratio: 48/224`, which asks
@@ -843,8 +854,11 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
    longer fills. */
 .vjog-strip { flex: 1 1 auto; width: 100%; min-height: 0; max-height: 261px;
   margin: auto 0; touch-action: none; cursor: ns-resize; }
+/* Secondary, so these yield first — down to a floor that is still a thumb, and
+   no further. Below that the row wraps them under the stick rather than
+   squeezing either into nothing. */
 .vjog-striph { display: flex; flex-direction: column; align-items: center; gap: 4px;
-  flex: 0 0 auto; width: 56px; height: 100%; min-height: 0; }
+  flex: 0 1 auto; width: 56px; min-width: 36px; height: 100%; min-height: 0; }
 .vjog-strip-name { font-weight: 700; font-size: 13px; color: var(--text-dim); flex: 0 0 auto; }
 .vjog-home { flex: 0 0 auto; min-height: 26px; height: 26px; padding: 0 8px; font-size: 14px;
   color: var(--text-dim); }
