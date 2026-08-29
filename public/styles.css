@@ -830,8 +830,10 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
    running the dock proportions from a desktop actually looks like.
    The holder claims the room; the pad inside it is sized square in pixels by
    the panel — see the note there for why this is not `aspect-ratio`. */
-.vjog-stickh { flex: 1 1 0; min-width: 96px; max-width: 100%; align-self: stretch;
-  display: flex; align-items: center; justify-content: center; min-height: 0; }
+/* Placement only. Every size in this row is computed by the panel — see
+   layoutPads there for the rule and for why it is not expressed here. */
+.vjog-stickh { flex: 0 1 auto; align-self: stretch; display: flex; align-items: center;
+  justify-content: center; min-width: 0; min-height: 0; }
 .vjog-stick { touch-action: none; cursor: grab; }
 .vjog-stick.live { cursor: grabbing; }
 /* The strip's width is stated, not derived.
@@ -852,13 +854,15 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
    so a touch a hand's width above the visible control would command full speed
    on that axis. `margin: auto 0` then centres the box in the column it no
    longer fills. */
-.vjog-strip { flex: 1 1 auto; width: 100%; min-height: 0; max-height: 261px;
-  margin: auto 0; touch-action: none; cursor: ns-resize; }
+.vjog-strip { flex: 0 0 auto; margin: auto 0; touch-action: none; cursor: ns-resize; }
 /* Secondary, so these yield first — down to a floor that is still a thumb, and
    no further. Below that the row wraps them under the stick rather than
    squeezing either into nothing. */
+/* Sized by its contents, not stretched to the row: a column taller than the
+   label, slider and button it holds is dead space that the layout would then
+   have to measure around. Centred beside the pad instead. */
 .vjog-striph { display: flex; flex-direction: column; align-items: center; gap: 4px;
-  flex: 0 1 auto; width: 56px; min-width: 36px; height: 100%; min-height: 0; }
+  flex: 0 0 auto; align-self: center; min-height: 0; }
 .vjog-strip-name { font-weight: 700; font-size: 13px; color: var(--text-dim); flex: 0 0 auto; }
 .vjog-home { flex: 0 0 auto; min-height: 26px; height: 26px; padding: 0 8px; font-size: 14px;
   color: var(--text-dim); }

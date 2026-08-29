@@ -88,7 +88,35 @@ const STRIP_H = 100;
  * disagree puts the knob somewhere the finger is not.
  */
 const STICK_VIEW = { w: 224, h: 224, travel: PAD_R };
+/** The row's flex gap, in px — must match .vjog-pads in the stylesheet. */
+const PAD_GAP = 12;
+/** Smaller than this and the pad is not a control anybody can aim at. */
+const MIN_PAD_PX = 96;
+/** A strip stays a strip: wide enough for a thumb, never a second pad. */
+const MIN_STRIP_PX = 32;
+const MAX_STRIP_PX = 110;
+/** And tall enough to have somewhere to travel, however short the row is. */
+const MIN_STRIP_H_PX = 60;
+/** The label above a strip and the home button below it, near enough. */
+const STRIP_CHROME_PX = 60;
+
 const STRIP_VIEW = { w: 48, h: 224, travel: STRIP_H };
+
+/**
+ * A strip column's height beyond its slider: the axis letter above it, and the
+ * home button and limit line below. Measured rather than assumed, so a change
+ * to any of them does not quietly leave the pad and the strips different
+ * heights. Null before the first paint, when there is nothing to measure.
+ */
+function measureChrome(holders: HTMLElement[]): number | null {
+  for (const holder of holders) {
+    const svg = holder.querySelector('svg.vjog-strip') as SVGElement | null;
+    if (!svg || !holder.offsetHeight) continue;
+    const chrome = holder.offsetHeight - svg.getBoundingClientRect().height;
+    if (chrome > 0 && chrome < holder.offsetHeight) return Math.round(chrome);
+  }
+  return null;
+}
 
 /**
  * How close to a soft limit counts as "at it", mm.
@@ -213,36 +241,98 @@ export class VelocityJogPanel extends PanelElement {
     void probeSupport();
     this.syncPadWatch();
 
-    // Keep the pad square, in pixels, rather than asking CSS to work it out.
+    // Lay the pads out in pixels, in one place.
     //
-    // `aspect-ratio: 1` makes a square only while nothing else constrains the
-    // width; in a narrow panel `max-width` wins and the box becomes tall and
-    // thin, with the circle drawn small in the middle of it. Every pixel of an
-    // SVG is a pointer target, so the rest of that box is a full-deflection
-    // command waiting for a stray thumb. And `aspect-ratio` does not exist at
-    // all on the Safari this app still supports — an iOS 12 iPad is exactly the
-    // machine a jog pad wants to run on.
+    // The rule is small enough to state: three controls in a row, all the same
+    // height, the pad square and each strip 48:224 — and no control wider than
+    // its holder or taller than the drawing inside it, because every pixel of
+    // an SVG is a pointer target and dead space at the rim is a full-deflection
+    // command waiting for a stray thumb.
     //
-    // ResizeObserver is polyfilled for that iPad by core/compat.ts, so this is
-    // the one measurement that works everywhere: take the smaller side of the
-    // box the layout gave us, and make the pad that square.
-    const square = () => {
-      const holder = this.querySelector('.vjog-stickh') as HTMLElement | null;
-      const pad = holder?.querySelector('svg.vjog-stick') as SVGElement | null;
-      if (!holder || !pad) return;
-      const side = Math.floor(Math.min(holder.clientWidth, holder.clientHeight));
-      if (side <= 0) return;
-      pad.style.width = `${side}px`;
-      pad.style.height = `${side}px`;
+    // Stating it in CSS is what kept going wrong. `aspect-ratio` does not exist
+    // on the Safari this app supports, `max-width` silently beats it where it
+    // does, and a width derived from a height in a flex row is exactly the
+    // corner engines disagree about. Three attempts each fixed one window size
+    // and broke another. Arithmetic does not have window sizes.
+    //
+    // Order matters and there is no second pass: the strips are a flex column,
+    // so setting a strip's WIDTH cannot change the height the column already
+    // gave it. Width from height, then the pad from what is left over.
+    const layoutPads = () => {
+      const row = this.querySelector('.vjog-pads') as HTMLElement | null;
+      const stick = this.querySelector('svg.vjog-stick') as SVGElement | null;
+      const holders = [...this.querySelectorAll('.vjog-striph')] as HTMLElement[];
+      if (!row || !stick || !row.clientHeight) return;
+
+      // 1. One height for all three controls: the pad's side, and each strip's
+      //    column including the label above it and the home button below. Two
+      //    bounds meet here — the row's height, and its width once every strip
+      //    has taken its share of it. A strip's share is proportional to that
+      //    same height, so the width bound is one equation rather than a guess:
+      //
+      //      H + n(H - chrome)k + n·gap <= width,   k = 48/224
+      //
+      //    solved for H. Widening the panel grows all three together; making it
+      //    shorter shrinks all three together.
+      const n = holders.length;
+      const k = STRIP_VIEW.w / STRIP_VIEW.h;
+      const gaps = n * PAD_GAP;
+      // Chrome is whatever the column is beyond its slider, and it does not
+      // depend on the slider's height — so it can be measured now, at whatever
+      // size the strip happens to be, and used for the size we are about to
+      // give it. The constant is only for the first paint, before there is a
+      // column to ask.
+      const chrome = measureChrome(holders) ?? STRIP_CHROME_PX;
+      const byWidth = (row.clientWidth - gaps + n * chrome * k) / (1 + n * k);
+      const height = Math.max(MIN_PAD_PX, Math.min(row.clientHeight, byWidth));
+
+      // 2. The strip's drawing is what is left of that height once its column's
+      //    chrome is paid for, and its width follows from the drawing's own
+      //    proportions — so the box is the picture and nothing answers to a
+      //    touch outside it. The clamps are for the extremes: a wall-sized
+      //    panel must not turn a slider into a second pad, and a cramped one
+      //    must still leave it somewhere to travel.
+      let stripH = Math.max(MIN_STRIP_H_PX, Math.round(height) - chrome);
+      let stripW = Math.round(stripH * k);
+      if (stripW > MAX_STRIP_PX) {
+        stripW = MAX_STRIP_PX;
+        stripH = Math.round(stripW / k);
+      } else if (stripW < MIN_STRIP_PX) {
+        stripW = MIN_STRIP_PX;
+        stripH = Math.min(
+          Math.round(stripW / k),
+          Math.max(MIN_STRIP_H_PX, row.clientHeight - chrome),
+        );
+      }
+      for (const holder of holders) {
+        const svg = holder.querySelector('svg.vjog-strip') as SVGElement | null;
+        if (!svg) continue;
+        svg.style.width = `${stripW}px`;
+        svg.style.height = `${stripH}px`;
+      }
+
+      // 3. The pad takes what the strips left, which is `height` again whenever
+      //    the arithmetic above was not clamped. Measured rather than assumed,
+      //    because a clamped strip is wider than the equation asked for and the
+      //    pad is the one that has to give the room back.
+      let taken = 0;
+      for (const holder of holders) taken += holder.offsetWidth;
+      const side = Math.max(
+        MIN_PAD_PX,
+        Math.min(row.clientHeight, height, row.clientWidth - taken - gaps),
+      );
+      stick.style.width = `${Math.round(side)}px`;
+      stick.style.height = `${Math.round(side)}px`;
     };
-    const ro = new ResizeObserver(() => square());
+
+    const ro = new ResizeObserver(() => layoutPads());
     this.resquare = () => {
-      const holder = this.querySelector('.vjog-stickh');
-      // Re-observed after every render: the holder is a fresh element whenever
-      // the axis list changes, and an observer on a detached node observes
-      // nothing. Observing the same node twice is a no-op.
-      if (holder) ro.observe(holder);
-      square();
+      const row = this.querySelector('.vjog-pads');
+      // Re-observed after every render: the row is a fresh element whenever the
+      // axis list changes, and an observer on a detached node observes nothing.
+      // Observing the same node twice is a no-op.
+      if (row) ro.observe(row);
+      layoutPads();
     };
     this.resquare();
     this.onDispose(() => ro.disconnect());

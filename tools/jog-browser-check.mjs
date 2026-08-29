@@ -67,8 +67,12 @@ const measure = () =>
       const svg = el.querySelector('svg').getBoundingClientRect();
       // The drawn face, which is the part an operator can see and aim at.
       const face = el.querySelector('.vjog-face')?.getBoundingClientRect();
+      // And the whole column: the label, the slider and the home button. That
+      // is the control, and it is what has to match the pad's height.
+      const col = el.getBoundingClientRect();
       return { name: el.querySelector('.vjog-strip-name').textContent.trim(),
                x: svg.x, right: svg.x + svg.width, w: svg.width, h: svg.height,
+               colH: col.height, colTop: col.y,
                faceH: face ? face.height : 0, faceW: face ? face.width : 0 };
     });
     const s = document.querySelector('svg.vjog-stick')?.getBoundingClientRect();
@@ -77,9 +81,19 @@ const measure = () =>
              row: row ? { x: row.x, right: row.x + row.width, w: row.width } : null };
   });
 
-for (const [w, h] of [[900, 800], [1280, 1000], [1600, 1400], [2000, 1300]]) {
+// A phone, the iPad mini this was reported broken on, a laptop, and desk
+// monitors. The two small ones are here because the panel that looked right on
+// a 27-inch screen is the one that showed an iPad two strips and no pad.
+for (const [w, h] of [[390, 844], [1024, 768], [900, 800], [1280, 1000], [1600, 1400], [2000, 1300]]) {
   await p.setViewportSize({ width: w, height: h });
   await p.waitForTimeout(700);
+  // Below 700px the app drops dockview for a one-panel-at-a-time stack, so on
+  // a phone the Jog panel exists but something else is on screen. Pick it.
+  const stackTab = p.locator('.stack-tab', { hasText: /^Jog$/ });
+  if (await stackTab.count()) {
+    await stackTab.first().click();
+    await p.waitForTimeout(600);
+  }
   const m = await measure();
   const where = `${w}x${h}`;
 
@@ -102,8 +116,18 @@ for (const [w, h] of [[900, 800], [1280, 1000], [1600, 1400], [2000, 1300]]) {
   // command waiting for a stray thumb.
   ok(Math.abs(m.stick.w - m.stick.h) <= 1, `${where}: and is square, so its hit area is the pad`,
      `${m.stick.w.toFixed(0)}x${m.stick.h.toFixed(0)}`);
-  ok(m.strips.every((s) => s.w >= 24 && s.w <= 80), `${where}: strips stay in a sane width`,
+  // A strip is a slider. It is allowed to grow with the panel, but its
+  // proportions are the drawing's, so beside a pad it stays a sliver — a strip
+  // approaching the pad's width is a strip that has stopped being one.
+  ok(m.strips.every((s) => s.w >= 24 && s.w <= 120 && s.w <= m.stick.w * 0.4),
+     `${where}: strips stay a slider's width`,
      m.strips.map((s) => `${s.name} ${s.w.toFixed(0)}px`).join(', '));
+  // The rule the whole layout exists to hold: three controls in a row, all the
+  // same height. Not overlapping was never enough — a 475px pad beside 336px
+  // strips does not overlap either, and it is what the last attempt shipped.
+  ok(m.strips.every((s) => Math.abs(s.colH - m.stick.h) <= m.stick.h * 0.06 + 2),
+     `${where}: pad and strips are the same height`,
+     `pad ${m.stick.h.toFixed(0)}, ` + m.strips.map((s) => `${s.name} ${s.colH.toFixed(0)}`).join(', '));
   ok(m.row && m.strips.every((s) => s.right <= m.row.right + 0.5),
      `${where}: nothing spills out of the row`);
 
